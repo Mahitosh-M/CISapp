@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+build/
+
+# Local environment files
+.env
+.env.local
+.env.development.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Firebase local emulator/cache files
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
