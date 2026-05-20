@@ -26,8 +26,8 @@ const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
     return (
       <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0B1F3A', color: '#FFFFFF', padding: 24 }}>
         <div style={{ background: '#FFFFFF', color: '#0B1F3A', borderRadius: 16, padding: 24, maxWidth: 460 }}>
-          <h2 style={{ marginTop: 0 }}>Admin Access Required</h2>
-          <p>This page is protected because it can change critical business rules or reports.</p>
+          <h2 style={{ marginTop: 0 }}>Access Restricted</h2>
+          <p>This page is protected for a different role.</p>
         </div>
       </div>
     );

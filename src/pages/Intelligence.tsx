@@ -11,6 +11,7 @@ import {
   buildMonthlyRankings
 } from '../utils/customerAnalytics';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import { normalizeScoreWeights } from '../utils/settings';
 import type { CustomerScore } from '../types';
 
@@ -21,15 +22,13 @@ const Intelligence = () => {
   const monthlyRankings = useMemo(() => buildMonthlyRankings(customers, invoices, payments, new Date(), settings), [customers, invoices, payments, settings]);
   const scoreWeights = normalizeScoreWeights(settings);
 
-  const topCustomers = customerScores.slice(0, 5);
+  const topCustomers = customerScores;
   const riskCustomers = customerScores
-    .filter((customer) => customer.riskLevel === 'High' || customer.overdueStatus === 'Overdue' || customer.paymentDisciplineScore < 65)
-    .slice(0, 5);
-  const profitableCustomers = [...customerScores].sort((a, b) => b.totalProfit - a.totalProfit).slice(0, 5);
+    .filter((customer) => customer.riskLevel === 'High' || customer.overdueStatus === 'Overdue' || customer.paymentDisciplineScore < 65);
+  const profitableCustomers = [...customerScores].sort((a, b) => b.totalProfit - a.totalProfit);
   const disciplinedCustomers = [...customerScores]
     .filter((customer) => customer.invoiceCount > 0)
-    .sort((a, b) => b.paymentDisciplineScore - a.paymentDisciplineScore)
-    .slice(0, 5);
+    .sort((a, b) => b.paymentDisciplineScore - a.paymentDisciplineScore);
 
   const metricGridStyle: CSSProperties = {
     display: 'grid',
@@ -144,47 +143,59 @@ const Intelligence = () => {
       <div style={panelGridStyle}>
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 8 }}>Top Customers</div>
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
           {topCustomers.length === 0 ? (
             <div style={{ color: '#BFC8D9' }}>Add Firestore invoices to generate customer rankings.</div>
           ) : (
-            topCustomers.map((customer) =>
-              renderCustomerRow(
-                customer,
-                `#${customer.rank}`,
-                `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${customer.customerMonthlyOrders.toFixed(1)} / ${customer.monthlyOrderTarget}`
-              )
-            )
+            <div style={latestFiveScrollStyle}>
+              {topCustomers.map((customer) =>
+                renderCustomerRow(
+                  customer,
+                  `#${customer.rank}`,
+                  `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${customer.customerMonthlyOrders.toFixed(1)} / ${customer.monthlyOrderTarget}`
+                )
+              )}
+            </div>
           )}
         </div>
 
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 8 }}>Risk Customers</div>
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
           {riskCustomers.length === 0 ? (
             <div style={{ color: '#BFC8D9' }}>No risk customers in the current rolling window.</div>
           ) : (
-            riskCustomers.map((customer) =>
-              renderCustomerRow(
-                customer,
-                formatMoney(customer.outstanding),
-                `${customer.riskLevel} risk | ${customer.overdueStatus} | Pay score ${customer.paymentDisciplineScore}`,
-                '#F2994A'
-              )
-            )
+            <div style={latestFiveScrollStyle}>
+              {riskCustomers.map((customer) =>
+                renderCustomerRow(
+                  customer,
+                  formatMoney(customer.outstanding),
+                  `${customer.riskLevel} risk | ${customer.overdueStatus} | Pay score ${customer.paymentDisciplineScore}`,
+                  '#F2994A'
+                )
+              )}
+            </div>
           )}
         </div>
 
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 8 }}>Most Profitable</div>
-          {profitableCustomers.map((customer) =>
-            renderCustomerRow(customer, formatMoney(customer.totalProfit), `Profit from ${customer.invoiceCount} invoice(s)`)
-          )}
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+          <div style={latestFiveScrollStyle}>
+            {profitableCustomers.map((customer) =>
+              renderCustomerRow(customer, formatMoney(customer.totalProfit), `Profit from ${customer.invoiceCount} invoice(s)`)
+            )}
+          </div>
         </div>
 
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 8 }}>Best Payment Discipline</div>
-          {disciplinedCustomers.map((customer) =>
-            renderCustomerRow(customer, `${customer.paymentDisciplineScore}`, `${formatMoney(customer.totalPayments)} collected`, '#56CCF2')
-          )}
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+          <div style={latestFiveScrollStyle}>
+            {disciplinedCustomers.map((customer) =>
+              renderCustomerRow(customer, `${customer.paymentDisciplineScore}`, `${formatMoney(customer.totalPayments)} collected`, '#56CCF2')
+            )}
+          </div>
         </div>
       </div>
 
@@ -192,10 +203,13 @@ const Intelligence = () => {
         title="Score Breakdown"
         description="Each card shows the weighted score used for ranking, tiering, and gift budget decisions."
       />
-      <div style={scoreCardGridStyle}>
-        {customerScores.map((customer) => (
-          <CustomerScoreCard key={customer.customerId} customer={customer} />
-        ))}
+      <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+      <div style={{ ...latestFiveScrollStyle, maxHeight: 520 }}>
+        <div style={scoreCardGridStyle}>
+          {customerScores.map((customer) => (
+            <CustomerScoreCard key={customer.customerId} customer={customer} />
+          ))}
+        </div>
       </div>
 
       <SectionHeader
@@ -216,20 +230,22 @@ const Intelligence = () => {
             {month.rankings.length === 0 ? (
               <div style={{ color: '#BFC8D9' }}>No invoice activity for this ranking period.</div>
             ) : (
-              month.rankings.map((ranking) => (
-                <div key={`${month.monthKey}-${ranking.customerId}`} style={rowStyle}>
-                  <div>
-                    <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
-                    <div style={mutedTextStyle}>
-                      {formatMoney(ranking.totalSales)} sales | Gift {formatMoney(ranking.giftBudget)}
+              <div style={latestFiveScrollStyle}>
+                {month.rankings.map((ranking) => (
+                  <div key={`${month.monthKey}-${ranking.customerId}`} style={rowStyle}>
+                    <div>
+                      <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
+                      <div style={mutedTextStyle}>
+                        {formatMoney(ranking.totalSales)} sales | Gift {formatMoney(ranking.giftBudget)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ color: '#D4AF37', fontWeight: 800 }}>#{ranking.rank}</div>
+                      <div style={{ color: '#BFC8D9', fontSize: 13 }}>Score {ranking.intelligenceScore}</div>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ color: '#D4AF37', fontWeight: 800 }}>#{ranking.rank}</div>
-                    <div style={{ color: '#BFC8D9', fontSize: 13 }}>Score {ranking.intelligenceScore}</div>
-                  </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         ))}

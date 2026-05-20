@@ -9,6 +9,7 @@ import type { CustomerTier, GiftHistory } from '../types';
 import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { calculateDynamicDueDate } from '../utils/settings';
 
@@ -250,6 +251,7 @@ const Reports = () => {
     .filter((row) => row.previousOutstanding > 0 || row.newOutstanding > 0 || row.totalOutstanding > 0);
 
   const outstandingRows = outstandingRowsData.map((row) => ({
+    SortDate: row.customer.updatedAt || row.customer.createdAt,
     Customer: row.customer.name,
     Tier: row.customer.tier,
     Area: row.customer.area || '-',
@@ -319,7 +321,7 @@ const Reports = () => {
     gifts: ['Date', 'Customer', 'Tier', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested Budget', 'Gift Amount', 'Gifted By', 'Notes']
   };
 
-  const activeRows = rowsByReport[reportType];
+  const activeRows = sortNewestFirst(rowsByReport[reportType], ['Date', 'SortDate', 'Due', 'Period']);
   const activeHeaders = headersByReport[reportType];
   const activeTitle = reportOptions.find((option) => option.value === reportType)?.label ?? 'Report';
 
@@ -538,7 +540,8 @@ const Reports = () => {
 
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 12 }}>{activeTitle}</div>
-        <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
           <table style={tableStyle}>
             <thead>
               <tr>

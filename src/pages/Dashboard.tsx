@@ -23,6 +23,7 @@ import { useErpData } from '../hooks/useErpData';
 import { buildCustomerScores, buildIntelligenceSummary } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 
@@ -63,9 +64,13 @@ const Dashboard = () => {
 
   const customerScores = useMemo(() => buildCustomerScores(customers, invoices, payments, new Date(), settings), [customers, invoices, payments, settings]);
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
-  const overdueAlerts = useMemo(() => buildOverdueInvoiceAlerts(customers, invoices, payments, settings), [customers, invoices, payments, settings]);
+  const overdueAlerts = useMemo(
+    () => sortNewestFirst(buildOverdueInvoiceAlerts(customers, invoices, payments, settings), ['effectiveDueDate', 'dueDate', 'invoiceDate']),
+    [customers, invoices, payments, settings]
+  );
   const overdueAmount = overdueAlerts.reduce((sum, alert) => sum + alert.overdueAmount, 0);
-  const topCustomers = customerScores.slice(0, 5);
+  const topCustomers = customerScores;
+  const topCustomersForCharts = customerScores.slice(0, 5);
   const outstandingRows = useMemo(() => {
     return [...customerScores]
       .filter((customer) => customer.outstanding > 0)
@@ -96,11 +101,11 @@ const Dashboard = () => {
     }));
   }, [customerScores]);
   const giftBudgetChart = useMemo(() => {
-    return topCustomers.map((customer) => ({ customer: customer.customerName, giftBudget: customer.giftBudget }));
-  }, [topCustomers]);
+    return topCustomersForCharts.map((customer) => ({ customer: customer.customerName, giftBudget: customer.giftBudget }));
+  }, [topCustomersForCharts]);
   const riskCustomers = customerScores
     .filter((customer) => customer.riskLevel === 'High' || customer.overdueStatus === 'Overdue' || customer.outstanding > 0)
-    .slice(0, 5);
+    .sort((a, b) => b.outstanding - a.outstanding);
 
   const gridStyle: CSSProperties = {
     display: 'grid',
@@ -303,65 +308,74 @@ const Dashboard = () => {
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 6 }}>Overdue Invoice Alerts</div>
           <div style={{ color: '#BFC8D9', marginBottom: 12 }}>Dynamic credit days and buffer settings are applied here.</div>
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
 
           {overdueAlerts.length === 0 ? (
             <div style={{ color: '#BFC8D9' }}>No overdue invoices right now.</div>
           ) : (
-            overdueAlerts.slice(0, 5).map((alert) => (
-              <div key={alert.invoiceId} style={rowStyle}>
-                <div>
-                  <div style={{ fontWeight: 800 }}>{alert.invoiceNumber} - {alert.customerName}</div>
-                  <div style={mutedTextStyle}>Due {alert.effectiveDueDate} | {alert.overdueDays} day(s) overdue</div>
+            <div style={latestFiveScrollStyle}>
+              {overdueAlerts.map((alert) => (
+                <div key={alert.invoiceId} style={rowStyle}>
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{alert.invoiceNumber} - {alert.customerName}</div>
+                    <div style={mutedTextStyle}>Due {alert.effectiveDueDate} | {alert.overdueDays} day(s) overdue</div>
+                  </div>
+                  <div style={{ color: '#EB5757', fontWeight: 900 }}>{formatMoney(alert.overdueAmount)}</div>
                 </div>
-                <div style={{ color: '#EB5757', fontWeight: 900 }}>{formatMoney(alert.overdueAmount)}</div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
 
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 6 }}>Top Customers</div>
           <div style={{ color: '#BFC8D9', marginBottom: 12 }}>Rolling 2-month ranking from Firestore invoices and payments.</div>
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
 
           {topCustomers.length === 0 ? (
             <div style={{ color: '#BFC8D9' }}>Add customers and invoices to see rankings.</div>
           ) : (
-            topCustomers.map((customer) => (
-              <div key={customer.customerId} style={rowStyle}>
-                <div>
-                  <div style={{ fontWeight: 800 }}>{customer.customerName}</div>
-                  <div style={mutedTextStyle}>
-                    {formatMoney(customer.totalSales)} sales | {formatMoney(customer.totalProfit)} profit
+            <div style={latestFiveScrollStyle}>
+              {topCustomers.map((customer) => (
+                <div key={customer.customerId} style={rowStyle}>
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{customer.customerName}</div>
+                    <div style={mutedTextStyle}>
+                      {formatMoney(customer.totalSales)} sales | {formatMoney(customer.totalProfit)} profit
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: '#D4AF37', fontWeight: 800 }}>#{customer.rank}</div>
+                    <TierBadge tier={customer.tier} />
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ color: '#D4AF37', fontWeight: 800 }}>#{customer.rank}</div>
-                  <TierBadge tier={customer.tier} />
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
 
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 6 }}>Overdue / Risk Customers</div>
           <div style={{ color: '#BFC8D9', marginBottom: 12 }}>Payment discipline and outstanding alerts.</div>
+          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
 
           {riskCustomers.length === 0 ? (
             <div style={{ color: '#BFC8D9' }}>No customer is currently flagged for review.</div>
           ) : (
-            riskCustomers.map((customer) => (
-              <div key={customer.customerId} style={rowStyle}>
-                <div>
-                  <div style={{ fontWeight: 800 }}>{customer.customerName}</div>
-                  <div style={mutedTextStyle}>{customer.recommendedAction}</div>
+            <div style={latestFiveScrollStyle}>
+              {riskCustomers.map((customer) => (
+                <div key={customer.customerId} style={rowStyle}>
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{customer.customerName}</div>
+                    <div style={mutedTextStyle}>{customer.recommendedAction}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: '#F2994A', fontWeight: 800 }}>{formatMoney(customer.outstanding)}</div>
+                    <div style={mutedTextStyle}>{customer.overdueStatus}</div>
+                  </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ color: '#F2994A', fontWeight: 800 }}>{formatMoney(customer.outstanding)}</div>
-                  <div style={mutedTextStyle}>{customer.overdueStatus}</div>
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       </div>

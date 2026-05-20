@@ -4,6 +4,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   setPersistence,
   signInWithEmailAndPassword,
   signOut
@@ -53,8 +54,15 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
   }
 
   // First login becomes Admin so a fresh Firebase project can bootstrap itself without server code.
+  // After bootstrap, users must be created by Admin. This prevents deleted Firebase Auth
+  // accounts from recreating app access after their Firestore user profile is removed.
   const existingProfiles = await getUserProfiles();
-  const role: UserRole = existingProfiles.length === 0 ? 'Admin' : 'Staff';
+
+  if (existingProfiles.length > 0) {
+    throw new Error('No ERP user profile found for this login. Please contact Admin.');
+  }
+
+  const role: UserRole = 'Admin';
 
   await createUserProfile({
     uid: user.uid,
@@ -94,4 +102,40 @@ export const createStaffAuthAccount = async (email: string, password: string, na
   } finally {
     await deleteApp(secondaryApp);
   }
+};
+
+export const createCustomerAuthAccount = async (
+  email: string,
+  password: string,
+  customerId: string,
+  customerName: string
+) => {
+  // A secondary Firebase app prevents customer login creation from replacing the current Admin session.
+  const secondaryApp = initializeApp(firebaseConfig, `customer-admin-${Date.now()}`);
+
+  try {
+    const secondaryAuth = getAuth(secondaryApp);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+
+    await createUserProfile({
+      uid: credential.user.uid,
+      email,
+      name: customerName,
+      role: 'customer',
+      customerId,
+      customerName,
+      active: true
+    });
+
+    await signOut(secondaryAuth);
+    return credential.user.uid;
+  } finally {
+    await deleteApp(secondaryApp);
+  }
+};
+
+export const sendUserPasswordResetEmail = async (email: string) => {
+  // Firebase Auth never exposes existing passwords. Admin can safely help a user
+  // regain access by sending the official Firebase reset email instead.
+  return sendPasswordResetEmail(auth, email);
 };

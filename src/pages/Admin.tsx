@@ -5,13 +5,12 @@ import SectionHeader from '../components/SectionHeader';
 import StatCard from '../components/StatCard';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
-import { createStaffAuthAccount } from '../services/authService';
+import { createCustomerAuthAccount, createStaffAuthAccount, sendUserPasswordResetEmail } from '../services/authService';
 import {
-  getActivityLogs,
+  deleteUserProfileRecord,
   getAlerts,
   getGiftHistory,
   getUserProfiles,
-  logActivity,
   updateAlertStatus,
   updateCustomerRecord,
   updateGiftHistoryRecord,
@@ -19,24 +18,29 @@ import {
   upsertAlerts
 } from '../services/firestoreService';
 import { useErpData } from '../hooks/useErpData';
-import type { ActivityLog, Alert, GiftHistory, UserProfile, UserRole } from '../types';
+import type { Alert, GiftHistory, UserProfile, UserRole } from '../types';
 import { buildOperationalAlerts } from '../utils/alertUtils';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getPaymentTermsLabel } from '../utils/settings';
 
 const Admin = () => {
   const { customers, invoices, payments, settings, loading, error, refreshData } = useErpData();
   const { userProfile } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [staffName, setStaffName] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [staffRole, setStaffRole] = useState<UserRole>('Staff');
+  const [customerLoginId, setCustomerLoginId] = useState('');
+  const [customerLoginEmail, setCustomerLoginEmail] = useState('');
+  const [customerLoginPassword, setCustomerLoginPassword] = useState('');
+  const [showCustomerLoginPassword, setShowCustomerLoginPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [adminError, setAdminError] = useState('');
@@ -50,14 +54,12 @@ const Admin = () => {
   const loadAdminData = async () => {
     try {
       setAdminError('');
-      const [userRows, logRows, alertRows, giftRows] = await Promise.all([
+      const [userRows, alertRows, giftRows] = await Promise.all([
         getUserProfiles(),
-        getActivityLogs(),
         getAlerts(),
         getGiftHistory()
       ]);
       setUsers(userRows);
-      setActivityLogs(logRows);
       setAlerts(alertRows);
       setGiftHistory(giftRows);
     } catch (err) {
@@ -74,12 +76,24 @@ const Admin = () => {
   const pendingGifts = giftHistory.filter((gift) => gift.status !== 'Given');
   const tierOverrides = customers.filter((customer) => customer.tierOverride);
   const negativeProfitInvoices = invoices.filter((invoice) => invoice.totalProfit < 0);
+  const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
+  const sortedAlerts = useMemo(
+    () => sortNewestFirst(
+      // Resolved alerts remain in Firestore for history, but the active Admin list
+      // should only show alerts that still need attention.
+      alerts.filter((alert) => alert.status !== 'Resolved'),
+      ['updatedAt', 'createdAt', 'date']
+    ),
+    [alerts]
+  );
+  const sortedPendingGifts = useMemo(() => sortNewestFirst(pendingGifts, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [pendingGifts]);
+  const sortedTierOverrides = useMemo(() => sortNewestFirst(tierOverrides, ['updatedAt', 'createdAt']), [tierOverrides]);
 
   const handleSyncAlerts = async () => {
     try {
       setSaving(true);
 
-      // Auto-tier sync respects Admin overrides and logs every real tier movement.
+      // Auto-tier sync respects Admin overrides while activity log writes remain disabled.
       const scoresByCustomerId = new Map(buildCustomerScores(customers, invoices, payments, new Date(), settings).map((score) => [score.customerId, score]));
       await Promise.all(
         customers.map(async (customer) => {
@@ -104,7 +118,6 @@ const Admin = () => {
             },
             auditUser
           );
-          await logActivity('tier changed', 'customer', customer.id, auditUser, { tier: customer.tier }, { tier: score.tier, reason: score.movementReason || `Score ${score.intelligenceScore}` });
         })
       );
 
@@ -148,8 +161,7 @@ const Admin = () => {
 
     try {
       setSaving(true);
-      const uid = await createStaffAuthAccount(staffEmail, staffPassword, staffName, staffRole);
-      await logActivity('user created', 'user', uid, auditUser, undefined, { email: staffEmail, name: staffName, role: staffRole });
+      await createStaffAuthAccount(staffEmail, staffPassword, staffName, staffRole);
       setStaffName('');
       setStaffEmail('');
       setStaffPassword('');
@@ -163,9 +175,77 @@ const Admin = () => {
     }
   };
 
+  const handleCreateCustomerLogin = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const linkedCustomer = customers.find((customer) => customer.id === customerLoginId);
+
+    if (!linkedCustomer || !customerLoginEmail || !customerLoginPassword) {
+      setAdminError('Customer, email, and password are required for customer login.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await createCustomerAuthAccount(customerLoginEmail, customerLoginPassword, linkedCustomer.id, linkedCustomer.name);
+      setCustomerLoginId('');
+      setCustomerLoginEmail('');
+      setCustomerLoginPassword('');
+      setMessage('Customer login created and linked.');
+      await loadAdminData();
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Unable to create customer login.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleUserRoleChange = async (user: UserProfile, role: UserRole) => {
     await updateUserProfileRecord(user.id, { role }, auditUser);
     await loadAdminData();
+  };
+
+  const handleSendPasswordReset = async (user: UserProfile) => {
+    if (!user.email) {
+      setAdminError('This user does not have an email address.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setAdminError('');
+      await sendUserPasswordResetEmail(user.email);
+      setMessage(`Password reset email sent to ${user.email}. Existing passwords cannot be shown for security.`);
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Unable to send password reset email.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteUserAccess = async (user: UserProfile) => {
+    if (user.uid === userProfile?.uid || user.email === userProfile?.email) {
+      setAdminError('You cannot delete your own active admin login.');
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete ERP access for ${user.email}? This removes the app user profile. The Firebase Auth account itself must be removed from Firebase Console or a future Admin SDK function.`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setAdminError('');
+      await deleteUserProfileRecord(user.id, auditUser);
+      setMessage(`ERP access deleted for ${user.email}. Firebase Auth password records are not exposed by the client app.`);
+      await loadAdminData();
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Unable to delete user access.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleGiftStatus = async (gift: GiftHistory, status: GiftHistory['status']) => {
@@ -255,14 +335,17 @@ const Admin = () => {
   };
 
   const renderTable = (headers: string[], body: JSX.Element) => (
-    <div style={{ overflowX: 'auto' }}>
+    <>
+      <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+      <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
       <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
         <thead>
           <tr>{headers.map((header) => <th key={header} style={headerCellStyle}>{header}</th>)}</tr>
         </thead>
         <tbody>{body}</tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 
   if (loading) {
@@ -271,7 +354,7 @@ const Admin = () => {
 
   return (
     <div>
-      <SectionHeader title="Admin" description="Manage staff, alerts, gift approvals, tier overrides, activity logs, and system health." />
+      <SectionHeader title="Admin" description="Manage staff, alerts, gift approvals, tier overrides, and system health." />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {adminError ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{adminError}</div> : null}
@@ -306,7 +389,14 @@ const Admin = () => {
         <div style={gridStyle}>
           <label style={{ fontWeight: 800 }}>Name<input style={inputStyle} value={staffName} onChange={(event) => setStaffName(event.target.value)} /></label>
           <label style={{ fontWeight: 800 }}>Email<input style={inputStyle} type="email" value={staffEmail} onChange={(event) => setStaffEmail(event.target.value)} /></label>
-          <label style={{ fontWeight: 800 }}>Password<input style={inputStyle} type="password" value={staffPassword} onChange={(event) => setStaffPassword(event.target.value)} /></label>
+          <label style={{ fontWeight: 800 }}>
+            Password
+            <input style={inputStyle} type={showStaffPassword ? 'text' : 'password'} value={staffPassword} onChange={(event) => setStaffPassword(event.target.value)} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#67738E', fontSize: 12, marginTop: 8 }}>
+              <input type="checkbox" checked={showStaffPassword} onChange={(event) => setShowStaffPassword(event.target.checked)} />
+              Show password while creating
+            </span>
+          </label>
           <label style={{ fontWeight: 800 }}>
             Role
             <select style={inputStyle} value={staffRole} onChange={(event) => setStaffRole(event.target.value as UserRole)}>
@@ -318,12 +408,39 @@ const Admin = () => {
         <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginTop: 16 }}>Create User</button>
       </form>
 
+      <form style={cardStyle} onSubmit={handleCreateCustomerLogin}>
+        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Create Customer Login</div>
+        <div style={{ color: '#67738E', marginBottom: 12 }}>Admin creates customer credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
+        <div style={gridStyle}>
+          <label style={{ fontWeight: 800 }}>
+            Link Customer
+            <select style={inputStyle} value={customerLoginId} onChange={(event) => setCustomerLoginId(event.target.value)}>
+              <option value="">Select customer</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>{customer.name} - {customer.mobile}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ fontWeight: 800 }}>Login Email<input style={inputStyle} type="email" value={customerLoginEmail} onChange={(event) => setCustomerLoginEmail(event.target.value)} /></label>
+          <label style={{ fontWeight: 800 }}>
+            Password
+            <input style={inputStyle} type={showCustomerLoginPassword ? 'text' : 'password'} value={customerLoginPassword} onChange={(event) => setCustomerLoginPassword(event.target.value)} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#67738E', fontSize: 12, marginTop: 8 }}>
+              <input type="checkbox" checked={showCustomerLoginPassword} onChange={(event) => setShowCustomerLoginPassword(event.target.checked)} />
+              Show password while creating
+            </span>
+          </label>
+        </div>
+        <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 16 }}>Create Customer Login</button>
+      </form>
+
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Existing Users</div>
+        <div style={{ color: '#67738E', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
         {renderTable(
-          ['Name', 'Email', 'Role', 'Active'],
+          ['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'],
           <>
-            {users.map((user) => (
+            {sortedUsers.map((user) => (
               <tr key={user.id}>
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>
@@ -331,9 +448,19 @@ const Admin = () => {
                   <select style={inputStyle} value={user.role} onChange={(event) => handleUserRoleChange(user, event.target.value as UserRole)}>
                     <option value="Staff">Staff</option>
                     <option value="Admin">Admin</option>
+                    <option value="customer">Customer</option>
                   </select>
                 </td>
+                <td style={cellStyle}>{user.customerName || '-'}</td>
                 <td style={cellStyle}>{user.active ? 'Yes' : 'No'}</td>
+                <td style={cellStyle}>
+                  <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleSendPasswordReset(user)}>
+                    Reset Password
+                  </button>
+                  <button type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>
+                    Delete User
+                  </button>
+                </td>
               </tr>
             ))}
           </>
@@ -345,10 +472,10 @@ const Admin = () => {
         {renderTable(
           ['Customer', 'Type', 'Severity', 'Message', 'Status', 'Action'],
           <>
-            {alerts.length === 0 ? (
-              <tr><td style={cellStyle} colSpan={6}>No saved alerts yet. Click Sync Alerts.</td></tr>
+            {sortedAlerts.length === 0 ? (
+              <tr><td style={cellStyle} colSpan={6}>No active alerts to review.</td></tr>
             ) : (
-              alerts.slice(0, 30).map((alert) => (
+              sortedAlerts.map((alert) => (
                 <tr key={alert.id}>
                   <td style={cellStyle}>{alert.customerName}</td>
                   <td style={cellStyle}>{alert.alertType.replace(/_/g, ' ')}</td>
@@ -371,10 +498,10 @@ const Admin = () => {
         {renderTable(
           ['Customer', 'Tier', 'Status', 'Period', 'Budget', 'Item', 'Action'],
           <>
-            {pendingGifts.length === 0 ? (
+            {sortedPendingGifts.length === 0 ? (
               <tr><td style={cellStyle} colSpan={7}>No pending gift approvals.</td></tr>
             ) : (
-              pendingGifts.map((gift) => (
+              sortedPendingGifts.map((gift) => (
                 <tr key={gift.id}>
                   <td style={cellStyle}>{gift.customerName}</td>
                   <td style={cellStyle}><TierBadge tier={gift.tierAtGiftTime} /></td>
@@ -397,10 +524,10 @@ const Admin = () => {
         {renderTable(
           ['Customer', 'Area', 'Tier', 'Payment Terms', 'Action'],
           <>
-            {tierOverrides.length === 0 ? (
+            {sortedTierOverrides.length === 0 ? (
               <tr><td style={cellStyle} colSpan={5}>No manual tier overrides active.</td></tr>
             ) : (
-              tierOverrides.map((customer) => (
+              sortedTierOverrides.map((customer) => (
                 <tr key={customer.id}>
                   <td style={cellStyle}>{customer.name}</td>
                   <td style={cellStyle}>{customer.area}</td>
@@ -414,26 +541,6 @@ const Admin = () => {
         )}
       </div>
 
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Activity Logs</div>
-        {renderTable(
-          ['Date', 'Action', 'User', 'Target'],
-          <>
-            {activityLogs.length === 0 ? (
-              <tr><td style={cellStyle} colSpan={4}>No activity logs yet.</td></tr>
-            ) : (
-              activityLogs.slice(0, 40).map((log) => (
-                <tr key={log.id}>
-                  <td style={cellStyle}>{log.createdAt.slice(0, 19).replace('T', ' ')}</td>
-                  <td style={cellStyle}>{log.action}</td>
-                  <td style={cellStyle}>{log.userEmail}<div style={{ color: '#67738E', fontSize: 12 }}>{log.role}</div></td>
-                  <td style={cellStyle}>{log.targetType}: {log.targetId}</td>
-                </tr>
-              ))
-            )}
-          </>
-        )}
-      </div>
     </div>
   );
 };

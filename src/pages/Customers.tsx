@@ -16,6 +16,7 @@ import {
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
 
@@ -84,10 +85,13 @@ const Customers = () => {
   const filteredCustomers = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
-    if (!term) return customers;
+    if (!term) return sortNewestFirst(customers, ['updatedAt', 'createdAt']);
 
-    return customers.filter((customer) =>
-      [customer.name, customer.mobile, customer.area].some((value) => value.toLowerCase().includes(term))
+    return sortNewestFirst(
+      customers.filter((customer) =>
+        [customer.name, customer.mobile, customer.area].some((value) => value.toLowerCase().includes(term))
+      ),
+      ['updatedAt', 'createdAt']
     );
   }, [customers, searchText]);
 
@@ -426,7 +430,8 @@ const Customers = () => {
             ) : null}
           </div>
 
-          <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
+          <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+          <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
             <table style={tableStyle}>
               <thead>
                 <tr>

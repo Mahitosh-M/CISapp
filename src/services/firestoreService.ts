@@ -14,7 +14,6 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import type {
-  ActivityLog,
   Alert,
   AlertStatus,
   Customer,
@@ -27,6 +26,7 @@ import type {
   GiftHistoryFormData,
   Invoice,
   InvoiceFormData,
+  Offer,
   Payment,
   PaymentFormData,
   UserProfile,
@@ -48,8 +48,8 @@ const APP_SETTINGS_DOC_ID = 'appSettings';
 const GIFT_HISTORY = 'giftHistory';
 const GIFT_ITEMS = 'giftItems';
 const USERS = 'users';
-const ACTIVITY_LOGS = 'activityLogs';
 const ALERTS = 'alerts';
+const OFFERS = 'offers';
 
 export interface AuditUser {
   userId?: string;
@@ -64,31 +64,6 @@ const getTodayDateString = () => nowIso().slice(0, 10);
 const numberOrZero = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const buildAuditPayload = (auditUser?: AuditUser) => ({
-  userId: auditUser?.userId || 'system',
-  userEmail: auditUser?.userEmail || 'system',
-  role: auditUser?.role || 'Admin'
-});
-
-export const logActivity = async (
-  action: string,
-  targetType: string,
-  targetId: string,
-  auditUser?: AuditUser,
-  oldValue?: unknown,
-  newValue?: unknown
-) => {
-  return addDoc(collection(db, ACTIVITY_LOGS), {
-    action,
-    ...buildAuditPayload(auditUser),
-    targetType,
-    targetId,
-    oldValue: oldValue ?? null,
-    newValue: newValue ?? null,
-    createdAt: nowIso()
-  });
 };
 
 export const getPaymentTermsForTier = (tier: CustomerTier) => {
@@ -187,6 +162,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     giftPeriodOptions: data.giftPeriodOptions as AppSettings['giftPeriodOptions'],
     staffPermissions: data.staffPermissions as AppSettings['staffPermissions'],
     targetSettings: data.targetSettings as AppSettings['targetSettings'],
+    showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
   });
 };
@@ -238,25 +214,13 @@ const mapGiftItemDoc = (id: string, data: Record<string, unknown>): GiftItem => 
 });
 
 const sanitizeGiftItemPayload = (giftItem: GiftItemFormData): GiftItemFormData => ({
-  ...giftItem,
   giftItemName: giftItem.giftItemName.trim(),
+  // Simplified gift item settings now use only targetValue as the budget threshold.
+  // Legacy targetType/minBudget/maxBudget/eligibleTier fields may still exist on old docs,
+  // but new saves intentionally leave those untouched/unused.
   targetValue: Math.max(0, numberOrZero(giftItem.targetValue)),
-  minBudget: Math.max(0, numberOrZero(giftItem.minBudget)),
-  maxBudget: Math.max(0, numberOrZero(giftItem.maxBudget)),
-  notes: giftItem.notes.trim()
-});
-
-const mapActivityLogDoc = (id: string, data: Record<string, unknown>): ActivityLog => ({
-  id,
-  action: String(data.action || ''),
-  userId: String(data.userId || 'system'),
-  userEmail: String(data.userEmail || 'system'),
-  role: data.role === 'Staff' ? 'Staff' : 'Admin',
-  targetType: String(data.targetType || ''),
-  targetId: String(data.targetId || ''),
-  oldValue: data.oldValue,
-  newValue: data.newValue,
-  createdAt: String(data.createdAt || '')
+  notes: giftItem.notes.trim(),
+  isActive: giftItem.isActive
 });
 
 const mapAlertDoc = (id: string, data: Record<string, unknown>): Alert => ({
@@ -276,12 +240,26 @@ const mapAlertDoc = (id: string, data: Record<string, unknown>): Alert => ({
   updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
 });
 
+const mapOfferDoc = (id: string, data: Record<string, unknown>): Offer => ({
+  id,
+  title: String(data.title || ''),
+  imageUrl: String(data.imageUrl || ''),
+  startDate: String(data.startDate || ''),
+  endDate: String(data.endDate || ''),
+  isActive: data.isActive === true,
+  createdAt: String(data.createdAt || ''),
+  createdBy: String(data.createdBy || ''),
+  updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
+});
+
 export const mapUserProfileDoc = (id: string, data: Record<string, unknown>): UserProfile => ({
   id,
   uid: String(data.uid || ''),
   email: String(data.email || ''),
-  name: String(data.name || ''),
-  role: data.role === 'Admin' ? 'Admin' : 'Staff',
+  name: String(data.name || data.customerName || data.email || ''),
+  role: data.role === 'Admin' ? 'Admin' : data.role === 'customer' ? 'customer' : 'Staff',
+  customerId: data.customerId ? String(data.customerId) : undefined,
+  customerName: data.customerName ? String(data.customerName) : undefined,
   active: data.active !== false,
   createdAt: String(data.createdAt || ''),
   updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
@@ -291,6 +269,26 @@ export const getCustomers = async () => {
   const customersQuery = query(collection(db, CUSTOMERS), orderBy('name', 'asc'));
   const snapshot = await getDocs(customersQuery);
   return snapshot.docs.map((customerDoc) => mapCustomerDoc(customerDoc.id, customerDoc.data()));
+};
+
+export const getCustomerById = async (customerId: string) => {
+  if (!customerId) return undefined;
+  const customerSnapshot = await getDoc(doc(db, CUSTOMERS, customerId));
+  return customerSnapshot.exists() ? mapCustomerDoc(customerSnapshot.id, customerSnapshot.data()) : undefined;
+};
+
+export const getCustomersByName = async (customerName: string) => {
+  if (!customerName) return [];
+  // Customer portal links should prefer customerId, but this fallback supports older documents
+  // that may have stored either `name` or `customerName`.
+  const matches = new Map<string, Customer>();
+  const nameSnapshot = await getDocs(query(collection(db, CUSTOMERS), where('name', '==', customerName)));
+  nameSnapshot.docs.forEach((customerDoc) => matches.set(customerDoc.id, mapCustomerDoc(customerDoc.id, customerDoc.data())));
+
+  const customerNameSnapshot = await getDocs(query(collection(db, CUSTOMERS), where('customerName', '==', customerName)));
+  customerNameSnapshot.docs.forEach((customerDoc) => matches.set(customerDoc.id, mapCustomerDoc(customerDoc.id, customerDoc.data())));
+
+  return Array.from(matches.values());
 };
 
 export const createCustomer = async (customer: CustomerFormData, auditUser?: AuditUser) => {
@@ -305,7 +303,6 @@ export const createCustomer = async (customer: CustomerFormData, auditUser?: Aud
     updatedAt: nowIso()
   });
 
-  await logActivity('customer added', 'customer', docRef.id, auditUser, undefined, customerPayload);
   return docRef;
 };
 
@@ -320,12 +317,10 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
     updatedAt: nowIso()
   });
 
-  await logActivity('customer edited', 'customer', customerId, auditUser, undefined, customerPayload);
 };
 
 export const deleteCustomerRecord = async (customerId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, CUSTOMERS, customerId));
-  await logActivity('customer deleted', 'customer', customerId, auditUser);
 };
 
 export const getInvoices = async () => {
@@ -340,6 +335,24 @@ export const getInvoicesByCustomerId = async (customerId: string) => {
   return snapshot.docs
     .map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()))
     .sort((a, b) => b.date.localeCompare(a.date));
+};
+
+export const getInvoicesForCustomerViewer = async (customerId?: string, customerName?: string) => {
+  const invoiceMap = new Map<string, Invoice>();
+
+  if (customerId) {
+    const byIdQuery = query(collection(db, INVOICES), where('customerId', '==', customerId));
+    const byIdSnapshot = await getDocs(byIdQuery);
+    byIdSnapshot.docs.forEach((invoiceDoc) => invoiceMap.set(invoiceDoc.id, mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data())));
+  }
+
+  if (customerName) {
+    const byNameQuery = query(collection(db, INVOICES), where('customerName', '==', customerName));
+    const byNameSnapshot = await getDocs(byNameQuery);
+    byNameSnapshot.docs.forEach((invoiceDoc) => invoiceMap.set(invoiceDoc.id, mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data())));
+  }
+
+  return [...invoiceMap.values()].sort((a, b) => b.date.localeCompare(a.date));
 };
 
 const getFinancialYearRange = (date = new Date()) => {
@@ -383,7 +396,6 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     updatedAt: nowIso()
   });
 
-  await logActivity('invoice added', 'invoice', docRef.id, auditUser, undefined, { ...invoice, invoiceNumber });
   return docRef;
 };
 
@@ -393,12 +405,10 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
     updatedAt: nowIso()
   });
 
-  await logActivity('invoice edited', 'invoice', invoiceId, auditUser, undefined, invoice);
 };
 
 export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, INVOICES, invoiceId));
-  await logActivity('invoice deleted', 'invoice', invoiceId, auditUser);
 };
 
 export const getPayments = async () => {
@@ -413,6 +423,24 @@ export const getPaymentsByInvoiceId = async (invoiceId: string) => {
   return snapshot.docs
     .map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
     .sort((a, b) => b.date.localeCompare(a.date));
+};
+
+export const getPaymentsForCustomerViewer = async (customerId?: string, customerName?: string) => {
+  const paymentMap = new Map<string, Payment>();
+
+  if (customerId) {
+    const byIdQuery = query(collection(db, PAYMENTS), where('customerId', '==', customerId));
+    const byIdSnapshot = await getDocs(byIdQuery);
+    byIdSnapshot.docs.forEach((paymentDoc) => paymentMap.set(paymentDoc.id, mapPaymentDoc(paymentDoc.id, paymentDoc.data())));
+  }
+
+  if (customerName) {
+    const byNameQuery = query(collection(db, PAYMENTS), where('customerName', '==', customerName));
+    const byNameSnapshot = await getDocs(byNameQuery);
+    byNameSnapshot.docs.forEach((paymentDoc) => paymentMap.set(paymentDoc.id, mapPaymentDoc(paymentDoc.id, paymentDoc.data())));
+  }
+
+  return [...paymentMap.values()].sort((a, b) => b.date.localeCompare(a.date));
 };
 
 const sanitizePaymentPayload = (payment: PaymentFormData): PaymentFormData => ({
@@ -469,14 +497,12 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     });
   });
 
-  await logActivity('payment added', 'payment', paymentRef.id, auditUser, undefined, allocatedPayment);
   return paymentRef;
 };
 
 export const updatePaymentRecord = async (paymentId: string, payment: PaymentFormData, auditUser?: AuditUser) => {
   const paymentRef = doc(db, PAYMENTS, paymentId);
   const timestamp = nowIso();
-  let oldPaymentValue: unknown;
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
 
   await runTransaction(db, async (transaction) => {
@@ -498,7 +524,6 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
           : 0;
     const allocation = buildAllocatedPaymentPayload(payment, newCustomerOldBalanceBeforePayment);
 
-    oldPaymentValue = existingPayment;
     allocatedPayment = allocation.payload;
 
     if (oldCustomerRef && oldCustomerSnapshot?.exists() && oldCustomerId !== payment.customerId && (existingPayment?.amountUsedForOldBalance ?? 0) > 0) {
@@ -521,7 +546,6 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
     });
   });
 
-  await logActivity('payment edited', 'payment', paymentId, auditUser, oldPaymentValue, allocatedPayment);
 };
 
 export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUser) => {
@@ -554,7 +578,6 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
     transaction.delete(paymentRef);
   });
 
-  await logActivity('payment deleted', 'payment', paymentId, auditUser, deletedPayment);
 };
 
 export const getAppSettings = async () => {
@@ -598,7 +621,6 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
       updatedAt: nowIso()
     });
 
-    await logActivity('settings changed', 'settings', docRef.id, auditUser, undefined, appSettings);
     return docRef;
   }
 
@@ -607,7 +629,6 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
     updatedAt: nowIso()
   });
 
-  await logActivity('settings changed', 'settings', settings.id, auditUser, undefined, appSettings);
 };
 
 export const getGiftHistory = async () => {
@@ -631,7 +652,6 @@ export const createGiftHistoryRecord = async (gift: GiftHistoryFormData, auditUs
     updatedAt: nowIso()
   });
 
-  await logActivity(gift.status === 'Given' ? 'gift marked as given' : 'gift approved', 'giftHistory', docRef.id, auditUser, undefined, gift);
   return docRef;
 };
 
@@ -641,12 +661,10 @@ export const updateGiftHistoryRecord = async (giftId: string, gift: Partial<Gift
     updatedAt: nowIso()
   });
 
-  await logActivity(gift.status === 'Given' ? 'gift marked as given' : 'gift approved', 'giftHistory', giftId, auditUser, undefined, gift);
 };
 
 export const deleteGiftHistoryRecord = async (giftId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, GIFT_HISTORY, giftId));
-  await logActivity('gift deleted', 'giftHistory', giftId, auditUser);
 };
 
 export const getGiftItems = async () => {
@@ -663,7 +681,6 @@ export const createGiftItem = async (giftItem: GiftItemFormData, auditUser?: Aud
     updatedAt: nowIso()
   });
 
-  await logActivity('gift item added', 'giftItem', docRef.id, auditUser, undefined, payload);
   return docRef;
 };
 
@@ -675,12 +692,10 @@ export const updateGiftItemRecord = async (giftItemId: string, giftItem: GiftIte
     updatedAt: nowIso()
   });
 
-  await logActivity('gift item edited', 'giftItem', giftItemId, auditUser, undefined, payload);
 };
 
 export const deleteGiftItemRecord = async (giftItemId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, GIFT_ITEMS, giftItemId));
-  await logActivity('gift item deleted', 'giftItem', giftItemId, auditUser);
 };
 
 export const getUserProfiles = async () => {
@@ -717,18 +732,10 @@ export const updateUserProfileRecord = async (profileId: string, profile: Partia
     updatedAt: nowIso()
   });
 
-  await logActivity('user profile edited', 'user', profileId, auditUser, undefined, profile);
 };
 
 export const deleteUserProfileRecord = async (profileId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, USERS, profileId));
-  await logActivity('user profile deleted', 'user', profileId, auditUser);
-};
-
-export const getActivityLogs = async () => {
-  const logsQuery = query(collection(db, ACTIVITY_LOGS), orderBy('createdAt', 'desc'));
-  const snapshot = await getDocs(logsQuery);
-  return snapshot.docs.map((logDoc) => mapActivityLogDoc(logDoc.id, logDoc.data()));
 };
 
 export const getAlerts = async () => {
@@ -759,7 +766,6 @@ export const upsertAlerts = async (alerts: Omit<Alert, 'id' | 'createdAt' | 'upd
         updatedAt: nowIso()
       });
 
-      await logActivity('alert created', 'alert', docRef.id, auditUser, undefined, alert);
     })
   );
 };
@@ -770,5 +776,18 @@ export const updateAlertStatus = async (alertId: string, status: AlertStatus, au
     updatedAt: nowIso()
   });
 
-  await logActivity('alert status changed', 'alert', alertId, auditUser, undefined, { status });
+};
+
+export const getOffers = async () => {
+  const offersQuery = query(collection(db, OFFERS), orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(offersQuery);
+  return snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
+};
+
+export const getActiveOffers = async () => {
+  const today = getTodayDateString();
+  const offers = await getOffers();
+
+  // Future improvement: Admin can upload offer posters to Firebase Storage and save imageUrl here.
+  return offers.filter((offer) => offer.isActive && (!offer.startDate || offer.startDate <= today) && (!offer.endDate || offer.endDate >= today));
 };

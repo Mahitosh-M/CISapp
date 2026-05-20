@@ -39,6 +39,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Business rule: Firestore users collection controls app roles.
         const profile = await loadOrCreateUserProfile(currentUser);
         setUserProfile(profile.active ? profile : null);
+      } catch (err) {
+        // If Admin deleted the Firestore user profile, Firebase Auth may still accept
+        // the email/password. Clearing the app session prevents that deleted login
+        // from reaching ERP pages until Admin creates a new profile.
+        setUserProfile(null);
+        if (currentUser) {
+          await logoutUser();
+        }
+        console.error(err);
       } finally {
         setLoading(false);
       }
