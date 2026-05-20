@@ -1,6 +1,7 @@
 import ScoreBar from './ScoreBar';
 import TierBadge from './TierBadge';
 import type { CustomerScore } from '../types';
+import { formatMoney } from '../utils/formatters';
 
 interface CustomerScoreCardProps {
   customer: CustomerScore;
@@ -50,6 +51,19 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
     marginTop: 10
   };
 
+  const targetGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 10,
+    marginBottom: 14
+  };
+
+  const targetBoxStyle = {
+    background: '#102F57',
+    borderRadius: 12,
+    padding: 10
+  };
+
   return (
     <div style={cardStyle}>
       <div style={headerStyle}>
@@ -66,8 +80,21 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
           <div style={metaStyle}>Rank #{customer.rank}</div>
         </div>
         <div style={{ textAlign: 'right' as const }}>
-          <div style={{ color: '#E8EDF5', fontWeight: 700 }}>Rs. {customer.totalProfit.toLocaleString()}</div>
+          <div style={{ color: '#E8EDF5', fontWeight: 700 }}>{formatMoney(customer.totalProfit)}</div>
           <div style={metaStyle}>Profit</div>
+        </div>
+      </div>
+
+      <div style={targetGridStyle}>
+        <div style={targetBoxStyle}>
+          <div style={{ color: '#D4AF37', fontWeight: 800 }}>Sales Target</div>
+          <div style={{ fontWeight: 800 }}>{formatMoney(customer.customerMonthlySales)} / {formatMoney(customer.monthlySalesTarget)}</div>
+          <div style={metaStyle}>{customer.salesTargetAchievement}% achievement</div>
+        </div>
+        <div style={targetBoxStyle}>
+          <div style={{ color: '#D4AF37', fontWeight: 800 }}>Order Target</div>
+          <div style={{ fontWeight: 800 }}>{customer.customerMonthlyOrders.toFixed(1)} / {customer.monthlyOrderTarget}</div>
+          <div style={metaStyle}>{customer.orderTargetAchievement}% achievement</div>
         </div>
       </div>
 
@@ -76,11 +103,18 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
           key={item.key}
           label={`${item.label} (${Math.round(item.weight * 100)}%)`}
           value={item.score}
-          helperText={`${item.weightedScore.toFixed(1)} weighted points`}
+          helperText={
+            item.targetValue !== undefined && item.actualValue !== undefined
+              ? `${item.achievementPercent}% target achievement | ${item.weightedScore.toFixed(1)} weighted points`
+              : `${item.weightedScore.toFixed(1)} weighted points`
+          }
         />
       ))}
 
       <div style={movementStyle}>{customer.movement}: {customer.movementReason}</div>
+      {customer.insights.length > 0 ? (
+        <div style={{ ...metaStyle, color: '#E8EDF5' }}>{customer.insights.slice(0, 3).join(' | ')}</div>
+      ) : null}
       <div style={metaStyle}>{customer.recommendedAction}</div>
     </div>
   );

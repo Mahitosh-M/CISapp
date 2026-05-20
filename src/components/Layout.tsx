@@ -1,7 +1,15 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppSettings } from '../hooks/useAppSettings';
 
-const navItems = [
+interface NavItem {
+  to: string;
+  label: string;
+  adminOnly?: boolean;
+  staffPermission?: 'canViewReports';
+}
+
+const navItems: NavItem[] = [
   { to: '/', label: 'Dashboard' },
   { to: '/customers', label: 'Customers' },
   { to: '/invoices', label: 'Invoices' },
@@ -9,13 +17,22 @@ const navItems = [
   { to: '/intelligence', label: 'Intelligence' },
   { to: '/analytics', label: 'Analytics', adminOnly: true },
   { to: '/gifts', label: 'Gifts', adminOnly: true },
-  { to: '/reports', label: 'Reports', adminOnly: true },
+  { to: '/suggested-gifts', label: 'Suggested Gifts' },
+  { to: '/reports', label: 'Reports', staffPermission: 'canViewReports' },
+  { to: '/admin', label: 'Admin', adminOnly: true },
   { to: '/settings', label: 'Settings', adminOnly: true }
 ];
 
 const Layout = () => {
   const { userProfile, logout } = useAuth();
-  const visibleNavItems = navItems.filter((item) => !item.adminOnly || userProfile?.role === 'Admin');
+  const { settings } = useAppSettings();
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.adminOnly) return userProfile?.role === 'Admin';
+    if (item.staffPermission === 'canViewReports') {
+      return userProfile?.role === 'Admin' || settings.staffPermissions.canViewReports;
+    }
+    return true;
+  });
 
   const sidebarStyle = {
     width: 260,

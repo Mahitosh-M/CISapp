@@ -1,5 +1,9 @@
-import type { AppSettings, CustomerTier } from '../types';
+import type { AppSettings, CustomerTier, TargetTierKey, TierTargetSetting } from '../types';
 import { addDaysToDateString } from './dateUtils';
+
+export type ScoringWeightKey = keyof AppSettings['scoringWeights'];
+
+export const SCORING_WEIGHT_KEYS: ScoringWeightKey[] = ['profit', 'paymentDiscipline', 'frequency', 'sales', 'loyalty'];
 
 export const DEFAULT_SETTINGS: AppSettings = {
   key: 'erpSettings',
@@ -24,12 +28,46 @@ export const DEFAULT_SETTINGS: AppSettings = {
     frequency: 20,
     sales: 15,
     loyalty: 5
+  },
+  highOutstandingThreshold: 100000,
+  invoicePrefix: 'INV',
+  financialYearReset: true,
+  defaultReportPeriod: 'current_month',
+  giftPeriodOptions: ['3_months', '6_months', '1_year', 'custom'],
+  staffPermissions: {
+    canViewReports: false,
+    canViewDashboard: true
+  },
+  targetSettings: {
+    tier1: {
+      monthlySalesTarget: 50000,
+      monthlyOrderTarget: 4
+    },
+    tier2: {
+      monthlySalesTarget: 40000,
+      monthlyOrderTarget: 3
+    },
+    tier3: {
+      monthlySalesTarget: 20000,
+      monthlyOrderTarget: 2
+    }
   }
+};
+
+const roundToTwoDecimals = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const numberOrZero = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSettings => ({
   ...DEFAULT_SETTINGS,
   ...settings,
+  highOutstandingThreshold: settings?.highOutstandingThreshold ?? DEFAULT_SETTINGS.highOutstandingThreshold,
+  invoicePrefix: settings?.invoicePrefix || DEFAULT_SETTINGS.invoicePrefix,
+  financialYearReset: settings?.financialYearReset ?? DEFAULT_SETTINGS.financialYearReset,
+  defaultReportPeriod: settings?.defaultReportPeriod ?? DEFAULT_SETTINGS.defaultReportPeriod,
   giftPercentages: {
     ...DEFAULT_SETTINGS.giftPercentages,
     ...settings?.giftPercentages
@@ -45,8 +83,135 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   scoringWeights: {
     ...DEFAULT_SETTINGS.scoringWeights,
     ...settings?.scoringWeights
+  },
+  giftPeriodOptions: settings?.giftPeriodOptions ?? DEFAULT_SETTINGS.giftPeriodOptions,
+  staffPermissions: {
+    ...DEFAULT_SETTINGS.staffPermissions,
+    ...settings?.staffPermissions
+  },
+  targetSettings: {
+    tier1: {
+      ...DEFAULT_SETTINGS.targetSettings.tier1,
+      ...settings?.targetSettings?.tier1
+    },
+    tier2: {
+      ...DEFAULT_SETTINGS.targetSettings.tier2,
+      ...settings?.targetSettings?.tier2
+    },
+    tier3: {
+      ...DEFAULT_SETTINGS.targetSettings.tier3,
+      ...settings?.targetSettings?.tier3
+    }
   }
 });
+
+export const getTargetTierKey = (tier?: CustomerTier): TargetTierKey => {
+  if (tier === 'Tier 1') return 'tier1';
+  if (tier === 'Tier 2') return 'tier2';
+  return 'tier3';
+};
+
+export const getTierTargetSettings = (tier: CustomerTier | undefined, settings?: AppSettings): TierTargetSetting => {
+  const activeSettings = mergeWithDefaultSettings(settings);
+
+  // Future target rules should be edited in Settings and kept under targetSettings.
+  return activeSettings.targetSettings[getTargetTierKey(tier)];
+};
+
+export const getScoringWeightTotal = (settings?: Partial<AppSettings>) => {
+  const activeSettings = mergeWithDefaultSettings(settings);
+  const total = SCORING_WEIGHT_KEYS.reduce((sum, key) => sum + numberOrZero(activeSettings.scoringWeights[key]), 0);
+
+  return roundToTwoDecimals(total);
+};
+
+export const isScoringWeightTotalValid = (total: number) => Math.abs(total - 100) < 0.001;
+
+export const validateScoringWeights = (settings?: Partial<AppSettings>) => {
+  const activeSettings = mergeWithDefaultSettings(settings);
+  const errors: string[] = [];
+  const scoringWeightTotal = getScoringWeightTotal(activeSettings);
+
+  SCORING_WEIGHT_KEYS.forEach((key) => {
+    const weight = Number(activeSettings.scoringWeights[key]);
+
+    if (!Number.isFinite(weight)) {
+      errors.push('Every scoring weight must be a valid number.');
+    } else if (weight < 0) {
+      errors.push('Scoring weights cannot be negative.');
+    }
+  });
+
+  if (!isScoringWeightTotalValid(scoringWeightTotal)) {
+    errors.push(`Scoring weights must total exactly 100%. Current total is ${scoringWeightTotal}%.`);
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors: [...new Set(errors)],
+    scoringWeightTotal
+  };
+};
+
+export const validateAppSettings = (settings?: Partial<AppSettings>) => {
+  const activeSettings = mergeWithDefaultSettings(settings);
+  const scoringValidation = validateScoringWeights(activeSettings);
+  const errors = [...scoringValidation.errors];
+
+  (Object.entries(activeSettings.giftPercentages) as [CustomerTier, number][]).forEach(([tier, percentage]) => {
+    if (!Number.isFinite(Number(percentage))) {
+      errors.push(`${tier} gift percentage must be a valid number.`);
+    } else if (Number(percentage) < 0) {
+      errors.push(`${tier} gift percentage cannot be negative.`);
+    }
+  });
+
+  (Object.entries(activeSettings.creditDays) as [CustomerTier, number][]).forEach(([tier, days]) => {
+    if (!Number.isFinite(Number(days))) {
+      errors.push(`${tier} credit days must be a valid number.`);
+    } else if (Number(days) < 0) {
+      errors.push(`${tier} credit days cannot be negative.`);
+    }
+  });
+
+  (Object.entries(activeSettings.paymentBuffers) as [CustomerTier, number][]).forEach(([tier, days]) => {
+    if (!Number.isFinite(Number(days))) {
+      errors.push(`${tier} buffer days must be a valid number.`);
+    } else if (Number(days) < 0) {
+      errors.push(`${tier} buffer days cannot be negative.`);
+    }
+  });
+
+  if (!Number.isFinite(Number(activeSettings.highOutstandingThreshold)) || Number(activeSettings.highOutstandingThreshold) < 0) {
+    errors.push('High outstanding threshold cannot be negative.');
+  }
+
+  if (!activeSettings.invoicePrefix.trim()) {
+    errors.push('Invoice prefix is required.');
+  }
+
+  (Object.entries(activeSettings.targetSettings) as [TargetTierKey, TierTargetSetting][]).forEach(([tierKey, target]) => {
+    const readableTier = tierKey === 'tier1' ? 'Tier 1' : tierKey === 'tier2' ? 'Tier 2' : 'Tier 3';
+
+    if (!Number.isFinite(Number(target.monthlySalesTarget))) {
+      errors.push(`${readableTier} monthly sales target must be a valid number.`);
+    } else if (Number(target.monthlySalesTarget) < 0) {
+      errors.push(`${readableTier} monthly sales target cannot be negative.`);
+    }
+
+    if (!Number.isFinite(Number(target.monthlyOrderTarget))) {
+      errors.push(`${readableTier} monthly order target must be a valid number.`);
+    } else if (Number(target.monthlyOrderTarget) < 0) {
+      errors.push(`${readableTier} monthly order target cannot be negative.`);
+    }
+  });
+
+  return {
+    isValid: errors.length === 0,
+    errors: [...new Set(errors)],
+    scoringWeightTotal: scoringValidation.scoringWeightTotal
+  };
+};
 
 export const getGiftPercentageForTier = (tier: CustomerTier, settings?: AppSettings) => {
   const activeSettings = mergeWithDefaultSettings(settings);
@@ -84,12 +249,15 @@ export const getPaymentTermsLabel = (tier: CustomerTier, settings?: AppSettings)
 
 export const normalizeScoreWeights = (settings?: AppSettings) => {
   const activeSettings = mergeWithDefaultSettings(settings);
+  const scoringValidation = validateScoringWeights(activeSettings);
+  const scoringWeights = scoringValidation.isValid ? activeSettings.scoringWeights : DEFAULT_SETTINGS.scoringWeights;
 
+  // Existing Firestore settings may already contain a bad total. Falling back here keeps customer scores capped.
   return {
-    profit: activeSettings.scoringWeights.profit / 100,
-    paymentDiscipline: activeSettings.scoringWeights.paymentDiscipline / 100,
-    frequency: activeSettings.scoringWeights.frequency / 100,
-    sales: activeSettings.scoringWeights.sales / 100,
-    loyalty: activeSettings.scoringWeights.loyalty / 100
+    profit: scoringWeights.profit / 100,
+    paymentDiscipline: scoringWeights.paymentDiscipline / 100,
+    frequency: scoringWeights.frequency / 100,
+    sales: scoringWeights.sales / 100,
+    loyalty: scoringWeights.loyalty / 100
   };
 };

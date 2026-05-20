@@ -12,12 +12,14 @@ import type {
   ScoreBreakdownItem,
   TierCreditPolicy
 } from '../types';
+import { getInvoicePaymentEffect } from './paymentUtils';
 import {
   calculateDynamicDueDate,
   getCreditDaysForTierFromSettings,
   getGiftPercentageForTier,
   getPaymentBufferForTier,
   getPaymentTermsLabel,
+  getTierTargetSettings,
   normalizeScoreWeights
 } from './settings';
 
@@ -32,9 +34,13 @@ interface ScoreInput {
   totalSales: number;
   totalProfit: number;
   totalPayments: number;
+  previousOutstandingAmount: number;
+  newOutstanding: number;
   outstanding: number;
   invoiceCount: number;
   averageOrderValue: number;
+  customerMonthlySales: number;
+  customerMonthlyOrders: number;
 }
 
 // Phase 1 scoring weights. Keep these as constants so later reports use the same rules.
@@ -88,6 +94,8 @@ const daysBetween = (start: Date, end: Date) => Math.round((startOfDay(end).getT
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+export const capScore = (value: number) => clamp(Math.round(Number.isFinite(value) ? value : 0), 0, 100);
+
 const roundMoney = (value: number) => Math.round(value);
 
 const isDateInsideWindow = (dateString: string, window: DateWindow) => {
@@ -126,7 +134,7 @@ const getPaymentsForInvoice = (invoiceId: string, payments: Payment[], asOfDate:
 };
 
 const getPaidAmountForInvoice = (invoiceId: string, payments: Payment[], asOfDate: Date) => {
-  return getPaymentsForInvoice(invoiceId, payments, asOfDate).reduce((sum, payment) => sum + payment.amount, 0);
+  return getPaymentsForInvoice(invoiceId, payments, asOfDate).reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
 };
 
 const getInvoicePaidDate = (invoice: Invoice, payments: Payment[], asOfDate: Date) => {
@@ -134,7 +142,7 @@ const getInvoicePaidDate = (invoice: Invoice, payments: Payment[], asOfDate: Dat
   let paidTotal = 0;
 
   for (const payment of invoicePayments) {
-    paidTotal += payment.amount;
+    paidTotal += getInvoicePaymentEffect(payment);
 
     if (paidTotal >= invoice.totalSales) {
       return parseDate(payment.date);
@@ -159,6 +167,36 @@ const getMonthsInWindow = (window: DateWindow) => {
   const start = new Date(window.start.getFullYear(), window.start.getMonth(), 1);
   const end = new Date(window.end.getFullYear(), window.end.getMonth(), 1);
   return (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth() + 1;
+};
+
+export const calculateSalesPerformanceScore = (customerMonthlySales: number, monthlySalesTarget: number, fallbackScore: number) => {
+  if (monthlySalesTarget <= 0) {
+    // Admin may temporarily set a zero target. Falling back preserves existing ranking behavior and avoids division by zero.
+    return capScore(fallbackScore);
+  }
+
+  // Sales achievement is capped so a customer cannot score 140/100 by greatly exceeding the monthly target.
+  return capScore((customerMonthlySales / monthlySalesTarget) * 100);
+};
+
+export const calculateOrderPerformanceScore = (
+  customerMonthlyOrderCount: number,
+  monthlyOrderTarget: number,
+  averageOrderValue: number,
+  monthlySalesTarget: number,
+  fallbackScore: number
+) => {
+  if (monthlyOrderTarget <= 0) {
+    // Zero target is treated as "use previous frequency logic" until Admin sets a meaningful target.
+    return capScore(fallbackScore);
+  }
+
+  const baseScore = (customerMonthlyOrderCount / monthlyOrderTarget) * 100;
+  const averageOrderStrength = monthlySalesTarget > 0 ? (averageOrderValue / monthlySalesTarget) * 100 : 0;
+  const volumeProtection = customerMonthlyOrderCount < monthlyOrderTarget && averageOrderStrength >= 50 ? Math.min(25, averageOrderStrength * 0.25) : 0;
+
+  // Large-value rare buyers receive a moderate boost, but the final order score is still capped at 100.
+  return capScore(baseScore + volumeProtection);
 };
 
 const rateFrequencyScore = (invoiceCount: number, averageOrderValue: number, highestAverageOrderValue: number, window: DateWindow) => {
@@ -225,8 +263,8 @@ const assignTier = (intelligenceScore: number, paymentDisciplineScore: number): 
   return 'Tier 3';
 };
 
-const getRiskLevel = (tier: CustomerTier, paymentDisciplineScore: number, outstanding: number, totalSales: number): RiskLevel => {
-  const outstandingRatio = totalSales > 0 ? outstanding / totalSales : 0;
+const getRiskLevel = (tier: CustomerTier, paymentDisciplineScore: number, outstanding: number, outstandingBase: number): RiskLevel => {
+  const outstandingRatio = outstandingBase > 0 ? outstanding / outstandingBase : 0;
 
   if (tier === 'Tier 3' || paymentDisciplineScore < 55 || outstandingRatio > 0.5) {
     return 'High';
@@ -305,6 +343,12 @@ const buildScoreBreakdown = (
   frequencyScore: number,
   salesScore: number,
   loyaltyScore: number,
+  monthlySalesTarget: number,
+  customerMonthlySales: number,
+  salesTargetAchievement: number,
+  monthlyOrderTarget: number,
+  customerMonthlyOrders: number,
+  orderTargetAchievement: number,
   settings?: AppSettings
 ): ScoreBreakdownItem[] => [
   // Settings store values as human-friendly percentages. The engine normalizes them to 0-1 weights.
@@ -330,15 +374,21 @@ const buildScoreBreakdown = (
     score: frequencyScore,
     weight: normalizeScoreWeights(settings).frequency,
     weightedScore: frequencyScore * normalizeScoreWeights(settings).frequency,
-    description: '20% weight against the weekly order target.'
+    description: '20% weight against the tier monthly order target.',
+    targetValue: monthlyOrderTarget,
+    actualValue: customerMonthlyOrders,
+    achievementPercent: orderTargetAchievement
   },
   {
     key: 'sales',
-    label: 'Sales Volume',
+    label: 'Sales Performance',
     score: salesScore,
     weight: normalizeScoreWeights(settings).sales,
     weightedScore: salesScore * normalizeScoreWeights(settings).sales,
-    description: '15% weight for rolling sales value.'
+    description: '15% weight against the tier monthly sales target.',
+    targetValue: monthlySalesTarget,
+    actualValue: customerMonthlySales,
+    achievementPercent: salesTargetAchievement
   },
   {
     key: 'loyalty',
@@ -360,8 +410,13 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
 
     const totalSales = customerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
     const totalProfit = customerInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
-    const totalPayments = customerPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    const totalPayments = customerPayments.reduce((sum, payment) => sum + payment.amount + payment.cashDiscount, 0);
+    const invoicePaymentEffect = customerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+    // previousOutstandingAmount is the customer's old opening balance before this ERP existed.
+    const previousOutstandingAmount = customer.previousOutstandingAmount ?? 0;
+    const newOutstanding = totalSales - invoicePaymentEffect;
     const invoiceCount = customerInvoices.length;
+    const monthsInScoringWindow = Math.max(1, getMonthsInWindow(window));
 
     return {
       customer,
@@ -369,9 +424,15 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
       totalSales,
       totalProfit,
       totalPayments,
-      outstanding: totalSales - totalPayments,
+      previousOutstandingAmount,
+      newOutstanding,
+      // Total outstanding includes old balance + new invoice sales - new payments.
+      // Future improvement: allow payments to be allocated specifically to previous outstanding.
+      outstanding: previousOutstandingAmount + newOutstanding,
       invoiceCount,
-      averageOrderValue: invoiceCount > 0 ? roundMoney(totalSales / invoiceCount) : 0
+      averageOrderValue: invoiceCount > 0 ? roundMoney(totalSales / invoiceCount) : 0,
+      customerMonthlySales: roundMoney(totalSales / monthsInScoringWindow),
+      customerMonthlyOrders: invoiceCount / monthsInScoringWindow
     };
   });
 
@@ -381,27 +442,41 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
 
   const unrankedScores = scoreInputs.map((entry) => {
     const weights = normalizeScoreWeights(settings);
-    const salesScore = entry.totalSales > 0 ? clamp(Math.round((entry.totalSales / highestSales) * 100), 10, 100) : 0;
+    const targetSettings = getTierTargetSettings(entry.customer.tier, settings);
+    const fallbackSalesScore = entry.totalSales > 0 ? clamp(Math.round((entry.totalSales / highestSales) * 100), 10, 100) : 0;
+    const fallbackFrequencyScore = rateFrequencyScore(entry.invoiceCount, entry.averageOrderValue, highestAverageOrderValue, window);
+    const salesScore = calculateSalesPerformanceScore(entry.customerMonthlySales, targetSettings.monthlySalesTarget, fallbackSalesScore);
     const profitScore = entry.totalProfit > 0 ? clamp(Math.round((entry.totalProfit / highestProfit) * 100), 10, 100) : 0;
-    const frequencyScore = rateFrequencyScore(entry.invoiceCount, entry.averageOrderValue, highestAverageOrderValue, window);
+    const frequencyScore = calculateOrderPerformanceScore(
+      entry.customerMonthlyOrders,
+      targetSettings.monthlyOrderTarget,
+      entry.averageOrderValue,
+      targetSettings.monthlySalesTarget,
+      fallbackFrequencyScore
+    );
     const paymentDisciplineScore = ratePaymentDiscipline(entry.customerInvoices, payments, window.end, entry.customer.tier, settings);
     const loyaltyScore = rateLoyaltyConsistency(entry.customerInvoices, window);
+    const salesTargetAchievement = targetSettings.monthlySalesTarget > 0 ? capScore((entry.customerMonthlySales / targetSettings.monthlySalesTarget) * 100) : 0;
+    const orderTargetAchievement = targetSettings.monthlyOrderTarget > 0 ? capScore((entry.customerMonthlyOrders / targetSettings.monthlyOrderTarget) * 100) : 0;
+    const outstandingBase = Math.max(entry.totalSales + entry.previousOutstandingAmount, entry.outstanding, 1);
+    const outstandingPenalty = entry.outstanding > 0 ? Math.min(15, (entry.outstanding / outstandingBase) * 15) : 0;
 
-    const intelligenceScore = Math.round(
+    const intelligenceScore = capScore(
       profitScore * weights.profit +
         paymentDisciplineScore * weights.paymentDiscipline +
         frequencyScore * weights.frequency +
         salesScore * weights.sales +
-        loyaltyScore * weights.loyalty
+        loyaltyScore * weights.loyalty -
+        outstandingPenalty
     );
 
-    const tier = assignTier(intelligenceScore, paymentDisciplineScore);
+    const tier = entry.customer.tierOverride ? entry.customer.tier : assignTier(intelligenceScore, paymentDisciplineScore);
     const creditPolicy = {
       creditDays: getCreditDaysForTierFromSettings(tier, settings),
       bufferDays: getPaymentBufferForTier(tier, settings),
       label: getPaymentTermsLabel(tier, settings)
     };
-    const riskLevel = getRiskLevel(tier, paymentDisciplineScore, entry.outstanding, entry.totalSales);
+    const riskLevel = getRiskLevel(tier, paymentDisciplineScore, entry.outstanding, outstandingBase);
 
     return {
       customerId: entry.customer.id,
@@ -419,20 +494,49 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
       outstanding: entry.outstanding,
       invoiceCount: entry.invoiceCount,
       averageOrderValue: entry.averageOrderValue,
+      monthlySalesTarget: targetSettings.monthlySalesTarget,
+      customerMonthlySales: entry.customerMonthlySales,
+      salesTargetAchievement,
+      monthlyOrderTarget: targetSettings.monthlyOrderTarget,
+      customerMonthlyOrders: entry.customerMonthlyOrders,
+      orderTargetAchievement,
+      insights: [
+        salesTargetAchievement >= 100 ? 'Sales target achieved' : 'Below monthly sales target',
+        orderTargetAchievement >= 100 ? 'Order frequency target achieved' : 'Order frequency below target',
+        entry.customerMonthlyOrders < targetSettings.monthlyOrderTarget && entry.averageOrderValue >= targetSettings.monthlySalesTarget * 0.5
+          ? 'Strong large-value buyer despite low frequency'
+          : '',
+        paymentDisciplineScore < 65 ? 'Payment discipline affecting score' : '',
+        outstandingPenalty > 0 ? 'High outstanding reducing score' : '',
+        profitScore === 0 && entry.totalProfit < 0 ? 'Negative profit reducing score heavily' : ''
+      ].filter(Boolean),
       frequencyScore,
       paymentDisciplineScore,
       salesScore,
       profitScore,
       loyaltyScore,
       intelligenceScore,
-      giftBudget: roundMoney(entry.totalSales * (getGiftPercentageForTier(tier, settings) / 100)),
+      giftBudget: roundMoney(Math.max(0, entry.totalProfit) * (getGiftPercentageForTier(tier, settings) / 100)),
       rank: 0,
       movement: 'Stable' as CustomerMovement,
       movementReason: '',
       riskLevel,
       recommendedAction: getRecommendedAction(riskLevel, tier, entry.outstanding),
       overdueStatus: getOverdueStatus(entry.customerInvoices, payments, window.end, entry.customer.tier, settings),
-      scoreBreakdown: buildScoreBreakdown(profitScore, paymentDisciplineScore, frequencyScore, salesScore, loyaltyScore, settings)
+      scoreBreakdown: buildScoreBreakdown(
+        profitScore,
+        paymentDisciplineScore,
+        frequencyScore,
+        salesScore,
+        loyaltyScore,
+        targetSettings.monthlySalesTarget,
+        entry.customerMonthlySales,
+        salesTargetAchievement,
+        targetSettings.monthlyOrderTarget,
+        entry.customerMonthlyOrders,
+        orderTargetAchievement,
+        settings
+      )
     };
   });
 

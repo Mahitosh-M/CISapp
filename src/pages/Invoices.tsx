@@ -17,6 +17,7 @@ import {
 import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS, calculateDynamicDueDate } from '../utils/settings';
 
 const buildEmptyInvoiceForm = (): InvoiceFormData => ({
@@ -43,6 +44,13 @@ const getInvoiceStatus = (dueDate: string, totalSales: number, paidAmount: numbe
   return { label: 'Unpaid', color: '#2D9CDB' };
 };
 
+const escapeHtml = (value: string | number) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
 const Invoices = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -58,7 +66,12 @@ const Invoices = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const { canDeleteRecords } = useAuth();
+  const { canDeleteRecords, canEditRecords, userProfile } = useAuth();
+  const auditUser = {
+    userId: userProfile?.uid,
+    userEmail: userProfile?.email,
+    role: userProfile?.role
+  };
 
   const loadData = async () => {
     try {
@@ -92,7 +105,7 @@ const Invoices = () => {
   const getPaidAmount = (invoiceId: string) => {
     return payments
       .filter((payment) => payment.invoiceId === invoiceId)
-      .reduce((sum, payment) => sum + payment.amount, 0);
+      .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
   };
 
   const invoiceRows = useMemo(() => {
@@ -178,6 +191,11 @@ const Invoices = () => {
     setEditingInvoiceId('');
   };
 
+  const canEditInvoice = (invoice: Invoice) => {
+    if (canEditRecords) return true;
+    return (invoice.createdAt || '').slice(0, 10) === getTodayDateString();
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
@@ -191,10 +209,10 @@ const Invoices = () => {
       setError('');
 
       if (editingInvoiceId) {
-        await updateInvoiceRecord(editingInvoiceId, formData);
+        await updateInvoiceRecord(editingInvoiceId, formData, auditUser);
         setMessage('Invoice updated successfully.');
       } else {
-        await createInvoice(formData);
+        await createInvoice(formData, auditUser);
         setMessage('Invoice created successfully.');
       }
 
@@ -208,6 +226,11 @@ const Invoices = () => {
   };
 
   const handleEdit = (invoice: Invoice) => {
+    if (!canEditInvoice(invoice)) {
+      setError('Staff can only edit invoices created today. Ask an Admin to edit old invoices.');
+      return;
+    }
+
     setEditingInvoiceId(invoice.id);
     setFormData({
       customerId: invoice.customerId,
@@ -240,7 +263,7 @@ const Invoices = () => {
 
       if (!confirmed) return;
 
-      await deleteInvoiceRecord(invoice.id);
+      await deleteInvoiceRecord(invoice.id, auditUser);
       setMessage('Invoice deleted successfully.');
       await loadData();
     } catch (err) {
@@ -255,11 +278,11 @@ const Invoices = () => {
 
     if (!printWindow) return;
 
-    // The print view uses stored invoice values so it can be exported by the browser as PDF.
+    // The print view is customer-facing, so internal cost, transport, and profit values are hidden.
     printWindow.document.write(`
       <html>
         <head>
-          <title>${invoice.invoiceNumber}</title>
+          <title>${escapeHtml(invoice.invoiceNumber)}</title>
           <style>
             body { font-family: Arial, sans-serif; color: #0B1F3A; padding: 32px; }
             .header { display: flex; justify-content: space-between; border-bottom: 3px solid #D4AF37; padding-bottom: 18px; margin-bottom: 24px; }
@@ -277,22 +300,19 @@ const Invoices = () => {
               <div>Customer Intelligence ERP</div>
             </div>
             <div>
-              <strong>${invoice.invoiceNumber}</strong><br />
-              Date: ${invoice.date}<br />
-              Due: ${invoice.dueDate}
+              <strong>${escapeHtml(invoice.invoiceNumber)}</strong><br />
+              Date: ${escapeHtml(invoice.date)}<br />
+              Due: ${escapeHtml(invoice.dueDate)}
             </div>
           </div>
-          <div><strong>Customer:</strong> ${invoice.customerName}</div>
+          <div><strong>Customer:</strong> ${escapeHtml(invoice.customerName)}</div>
           <table>
             <tr><th>Description</th><th>Amount</th></tr>
             <tr><td>Sales Amount</td><td>${formatMoney(invoice.totalSales)}</td></tr>
-            <tr><td>Cost Amount</td><td>${formatMoney(invoice.costAmount)}</td></tr>
-            <tr><td>Transport Amount</td><td>${formatMoney(invoice.transportAmount)}</td></tr>
-            <tr><td>Estimated Profit</td><td>${formatMoney(invoice.totalProfit)}</td></tr>
             <tr><td>Paid</td><td>${formatMoney(paidAmount)}</td></tr>
             <tr><td class="total">Outstanding</td><td class="total">${formatMoney(outstanding)}</td></tr>
           </table>
-          <p>${invoice.notes || ''}</p>
+          <p>${escapeHtml(invoice.notes || '')}</p>
         </body>
       </html>
     `);
@@ -505,9 +525,11 @@ const Invoices = () => {
                     </td>
                     <td style={{ ...cellStyle, color: invoice.status.color, fontWeight: 800 }}>{invoice.status.label}</td>
                     <td style={cellStyle}>
-                      <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
-                        Edit
-                      </button>
+                      {canEditInvoice(invoice) ? (
+                        <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
+                          Edit
+                        </button>
+                      ) : null}
                       <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }} onClick={() => handlePrint(invoice)}>
                         Print
                       </button>

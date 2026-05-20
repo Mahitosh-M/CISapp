@@ -8,9 +8,11 @@ import Payments from './pages/Payments';
 import Intelligence from './pages/Intelligence';
 import Analytics from './pages/Analytics';
 import Gifts from './pages/Gifts';
+import SuggestedGifts from './pages/SuggestedGifts';
 import Login from './pages/Login';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import Admin from './pages/Admin';
 import NotFound from './pages/NotFound';
 
 const App = () => {
@@ -25,7 +27,9 @@ const App = () => {
         <Route path="intelligence" element={<Intelligence />} />
         <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin']}><Analytics /></ProtectedRoute>} />
         <Route path="gifts" element={<ProtectedRoute allowedRoles={['Admin']}><Gifts /></ProtectedRoute>} />
-        <Route path="reports" element={<ProtectedRoute allowedRoles={['Admin']}><Reports /></ProtectedRoute>} />
+        <Route path="suggested-gifts" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><SuggestedGifts /></ProtectedRoute>} />
+        <Route path="reports" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Reports /></ProtectedRoute>} />
+        <Route path="admin" element={<ProtectedRoute allowedRoles={['Admin']}><Admin /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute allowedRoles={['Admin']}><Settings /></ProtectedRoute>} />
         <Route path="*" element={<NotFound />} />
       </Route>
