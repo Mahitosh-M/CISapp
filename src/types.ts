@@ -8,7 +8,34 @@ export type PaymentMode = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Card' |
 
 export type UserRole = 'Admin' | 'Staff';
 
-export type GiftPeriod = '3_months' | '6_months' | '1_year';
+export type GiftPeriod = '3_months' | '6_months' | '1_year' | 'custom';
+
+export type GiftStatus = 'Pending Approval' | 'Approved' | 'Given';
+
+export type GiftItemTargetType = 'profit' | 'sales' | 'score';
+
+export type GiftEligibleTier = CustomerTier | 'All';
+
+export type AlertStatus = 'Open' | 'Reviewed' | 'Resolved';
+
+export type AlertSeverity = 'Low' | 'Medium' | 'High';
+
+export type AlertType =
+  | 'overdue_payment'
+  | 'high_outstanding'
+  | 'negative_profit'
+  | 'inactive_customer'
+  | 'gift_pending'
+  | 'tier_downgrade_risk'
+  | 'automatic_tier_change'
+  | 'tier3_credit_warning';
+
+export type TargetTierKey = 'tier1' | 'tier2' | 'tier3';
+
+export interface TierTargetSetting {
+  monthlySalesTarget: number;
+  monthlyOrderTarget: number;
+}
 
 export interface Customer {
   id: string;
@@ -16,8 +43,11 @@ export interface Customer {
   mobile: string;
   area: string;
   tier: CustomerTier;
+  tierOverride?: boolean;
+  previousOutstandingAmount: number;
   paymentTerms: string;
   notes: string;
+  status?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -47,7 +77,14 @@ export interface Payment {
   customerId: string;
   customerName: string;
   date: string;
+  // amount is the real money received from the customer.
   amount: number;
+  // Only this part of amount reduces the selected invoice after old balance is cleared first.
+  amountAppliedToInvoice: number;
+  amountUsedForOldBalance: number;
+  oldBalanceBeforePayment: number;
+  oldBalanceAfterPayment: number;
+  cashDiscount: number;
   mode: PaymentMode;
   notes: string;
   createdAt: string;
@@ -78,7 +115,42 @@ export interface AppSettings {
     sales: number;
     loyalty: number;
   };
+  highOutstandingThreshold: number;
+  invoicePrefix: string;
+  financialYearReset: boolean;
+  defaultReportPeriod: 'current_month' | 'last_month' | 'previous_30_days';
+  giftPeriodOptions: GiftPeriod[];
+  staffPermissions: {
+    canViewReports: boolean;
+    canViewDashboard: boolean;
+  };
+  targetSettings: Record<TargetTierKey, TierTargetSetting>;
   updatedAt?: string;
+}
+
+export interface GiftItem {
+  id: string;
+  giftItemName: string;
+  targetType: GiftItemTargetType;
+  targetValue: number;
+  minBudget: number;
+  maxBudget: number;
+  eligibleTier: GiftEligibleTier;
+  notes: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface GiftItemFormData {
+  giftItemName: string;
+  targetType: GiftItemTargetType;
+  targetValue: number;
+  minBudget: number;
+  maxBudget: number;
+  eligibleTier: GiftEligibleTier;
+  notes: string;
+  isActive: boolean;
 }
 
 export interface GiftHistory {
@@ -86,14 +158,25 @@ export interface GiftHistory {
   customerId: string;
   customerName: string;
   tier: CustomerTier;
+  tierAtGiftTime: CustomerTier;
   periodType: GiftPeriod;
   periodStart: string;
   periodEnd: string;
   salesAmount: number;
+  profitConsidered: number;
   giftPercentage: number;
   giftAmount: number;
+  suggestedGiftBudget: number;
+  actualGiftAmount: number;
+  giftItem: string;
+  selectedGiftItemName?: string;
+  suggestedGiftOptions?: string[];
+  giftBudget?: number;
   giftedDate: string;
+  giftGivenDate: string;
   giftedBy: string;
+  approvedBy: string;
+  status: GiftStatus;
   notes: string;
   createdAt: string;
   updatedAt?: string;
@@ -103,14 +186,25 @@ export interface GiftHistoryFormData {
   customerId: string;
   customerName: string;
   tier: CustomerTier;
+  tierAtGiftTime: CustomerTier;
   periodType: GiftPeriod;
   periodStart: string;
   periodEnd: string;
   salesAmount: number;
+  profitConsidered: number;
   giftPercentage: number;
   giftAmount: number;
+  suggestedGiftBudget: number;
+  actualGiftAmount: number;
+  giftItem: string;
+  selectedGiftItemName?: string;
+  suggestedGiftOptions?: string[];
+  giftBudget?: number;
   giftedDate: string;
+  giftGivenDate: string;
   giftedBy: string;
+  approvedBy: string;
+  status: GiftStatus;
   notes: string;
 }
 
@@ -137,6 +231,9 @@ export interface CustomerFormData {
   tier: CustomerTier;
   paymentTerms: string;
   notes: string;
+  previousOutstandingAmount: number;
+  tierOverride?: boolean;
+  status?: string;
 }
 
 export interface InvoiceFormData {
@@ -160,6 +257,7 @@ export interface PaymentFormData {
   invoiceNumber: string;
   date: string;
   amount: number;
+  cashDiscount: number;
   mode: PaymentMode;
   notes: string;
 }
@@ -171,6 +269,9 @@ export interface ScoreBreakdownItem {
   weight: number;
   weightedScore: number;
   description: string;
+  targetValue?: number;
+  actualValue?: number;
+  achievementPercent?: number;
 }
 
 export interface TierCreditPolicy {
@@ -197,6 +298,13 @@ export interface CustomerScore {
   outstanding: number;
   invoiceCount: number;
   averageOrderValue: number;
+  monthlySalesTarget: number;
+  customerMonthlySales: number;
+  salesTargetAchievement: number;
+  monthlyOrderTarget: number;
+  customerMonthlyOrders: number;
+  orderTargetAchievement: number;
+  insights: string[];
   frequencyScore: number;
   paymentDisciplineScore: number;
   salesScore: number;
@@ -214,6 +322,36 @@ export interface CustomerScore {
   recommendedAction: string;
   overdueStatus: string;
   scoreBreakdown: ScoreBreakdownItem[];
+}
+
+export interface ActivityLog {
+  id: string;
+  action: string;
+  userId: string;
+  userEmail: string;
+  role: UserRole;
+  targetType: string;
+  targetId: string;
+  oldValue?: unknown;
+  newValue?: unknown;
+  createdAt: string;
+}
+
+export interface Alert {
+  id: string;
+  uniqueKey: string;
+  customerId: string;
+  customerName: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  alertType: AlertType;
+  severity: AlertSeverity;
+  date: string;
+  status: AlertStatus;
+  actionRequired: string;
+  message: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface MonthlyRankingRow {

@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
+import { useAuth } from '../contexts/AuthContext';
 import StatCard from '../components/StatCard';
 import { useErpData } from '../hooks/useErpData';
 import { getGiftHistory } from '../services/firestoreService';
 import type { CustomerTier, GiftHistory } from '../types';
 import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
-import { getLastMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
+import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { calculateDynamicDueDate } from '../utils/settings';
 
 type ReportType = 'sales' | 'profit' | 'payments' | 'outstanding' | 'ranking' | 'tier' | 'gifts';
@@ -21,6 +23,7 @@ interface ReportFilters {
   month: string;
   year: string;
   tier: string;
+  area: string;
 }
 
 const reportOptions: { value: ReportType; label: string }[] = [
@@ -99,16 +102,18 @@ const getOutstandingStatus = (dueDate: string, outstanding: number) => {
 
 const Reports = () => {
   const { customers, invoices, payments, settings, loading, error } = useErpData();
+  const { userProfile } = useAuth();
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [giftError, setGiftError] = useState('');
-  const defaultRange = useMemo(() => getLastMonthRange(), []);
+  const defaultRange = useMemo(() => getCurrentMonthRange(), []);
   const defaultFilters: ReportFilters = {
     fromDate: defaultRange.fromDate,
     toDate: defaultRange.toDate,
     customerId: 'all',
     month: 'all',
     year: 'all',
-    tier: 'all'
+    tier: 'all',
+    area: 'all'
   };
 
   const [reportType, setReportType] = useState<ReportType>('sales');
@@ -137,8 +142,9 @@ const Reports = () => {
     const matchesMonth = activeFilters.month === 'all' || getMonthValue(dateString) === activeFilters.month;
     const matchesYear = activeFilters.year === 'all' || getYearValue(dateString) === activeFilters.year;
     const matchesTier = activeFilters.tier === 'all' || customer?.tier === activeFilters.tier;
+    const matchesArea = activeFilters.area === 'all' || customer?.area === activeFilters.area;
 
-    return matchesDate && matchesCustomer && matchesMonth && matchesYear && matchesTier;
+    return matchesDate && matchesCustomer && matchesMonth && matchesYear && matchesTier && matchesArea;
   };
 
   const filteredInvoices = useMemo(() => {
@@ -150,19 +156,30 @@ const Reports = () => {
   }, [activeFilters, payments, customerById]);
 
   const filteredGiftHistory = useMemo(() => {
-    return giftHistory.filter((gift) => matchesCommonFilters(gift.giftedDate, gift.customerId));
+    return giftHistory.filter((gift) => matchesCommonFilters(gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10), gift.customerId));
   }, [activeFilters, giftHistory, customerById]);
 
   const getPaidAmountForInvoice = (invoiceId: string) => {
     // Outstanding always uses every payment linked to the invoice, not only visible payment-report rows.
-    return payments.filter((payment) => payment.invoiceId === invoiceId).reduce((sum, payment) => sum + payment.amount, 0);
+    return payments.filter((payment) => payment.invoiceId === invoiceId).reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
   };
+
+  const filteredOutstandingCustomers = useMemo(() => {
+    return customers.filter((customer) => {
+      const matchesCustomer = activeFilters.customerId === 'all' || customer.id === activeFilters.customerId;
+      const matchesTier = activeFilters.tier === 'all' || customer.tier === activeFilters.tier;
+      const matchesArea = activeFilters.area === 'all' || customer.area === activeFilters.area;
+
+      return matchesCustomer && matchesTier && matchesArea;
+    });
+  }, [activeFilters, customers]);
 
   const filteredScores = useMemo(() => {
     return buildCustomerScoresForDateRange(customers, invoices, payments, activeFilters.fromDate, activeFilters.toDate, settings)
       .filter((score) => activeFilters.customerId === 'all' || score.customerId === activeFilters.customerId)
       .filter((score) => activeFilters.tier === 'all' || score.tier === activeFilters.tier)
-      .filter((score) => score.totalSales > 0 || score.totalPayments > 0);
+      .filter((score) => activeFilters.area === 'all' || score.customerArea === activeFilters.area)
+      .filter((score) => score.totalSales > 0 || score.totalPayments > 0 || score.outstanding !== 0);
   }, [activeFilters, customers, invoices, payments, settings]);
 
   const salesRows = filteredInvoices.map((invoice) => {
@@ -193,27 +210,56 @@ const Reports = () => {
     Customer: payment.customerName,
     Invoice: payment.invoiceNumber,
     Amount: formatMoney(payment.amount),
+    'Cash Discount': formatMoney(payment.cashDiscount),
     Mode: payment.mode,
     Notes: payment.notes || '-'
   }));
 
-  const outstandingRows = filteredInvoices
-    .map((invoice) => {
-      const paid = getPaidAmountForInvoice(invoice.id);
-      const outstanding = invoice.totalSales - paid;
-      const effectiveDueDate = calculateDynamicDueDate(invoice.date, customerById.get(invoice.customerId)?.tier ?? 'Tier 3', settings);
+  const outstandingRowsData = filteredOutstandingCustomers
+    .map((customer) => {
+      const customerInvoices = filteredInvoices.filter((invoice) => invoice.customerId === customer.id);
+      const invoiceIds = new Set(customerInvoices.map((invoice) => invoice.id));
+      const newSales = customerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+      const linkedPayments = payments
+        .filter((payment) => invoiceIds.has(payment.invoiceId))
+        .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+      const unallocatedPeriodPayments = filteredPayments
+        .filter((payment) => payment.customerId === customer.id && !payment.invoiceId)
+        .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+      const newPayments = linkedPayments + unallocatedPeriodPayments;
+      // Previous outstanding is the opening balance from before this ERP; reports add it to new invoice outstanding.
+      const previousOutstanding = customer.previousOutstandingAmount ?? 0;
+      const newOutstanding = newSales - newPayments;
+      const totalOutstanding = previousOutstanding + newOutstanding;
+      const hasOverdueInvoice = customerInvoices.some((invoice) => {
+        const invoiceOutstanding = invoice.totalSales - getPaidAmountForInvoice(invoice.id);
+        const effectiveDueDate = calculateDynamicDueDate(invoice.date, customer.tier, settings);
+        return getOutstandingStatus(effectiveDueDate, invoiceOutstanding) === 'Overdue';
+      });
+
       return {
-        Invoice: invoice.invoiceNumber,
-        Customer: invoice.customerName,
-        Date: invoice.date,
-        Due: effectiveDueDate,
-        Sales: formatMoney(invoice.totalSales),
-        Paid: formatMoney(paid),
-        Outstanding: formatMoney(outstanding),
-        Status: getOutstandingStatus(effectiveDueDate, outstanding)
+        customer,
+        newSales,
+        newPayments,
+        previousOutstanding,
+        newOutstanding,
+        totalOutstanding,
+        status: totalOutstanding <= 0 ? 'Paid' : hasOverdueInvoice ? 'Overdue' : 'Open'
       };
     })
-    .filter((row) => row.Status !== 'Paid');
+    .filter((row) => row.previousOutstanding > 0 || row.newOutstanding > 0 || row.totalOutstanding > 0);
+
+  const outstandingRows = outstandingRowsData.map((row) => ({
+    Customer: row.customer.name,
+    Tier: row.customer.tier,
+    Area: row.customer.area || '-',
+    'Previous Outstanding': formatMoney(row.previousOutstanding),
+    'New Sales': formatMoney(row.newSales),
+    'New Payments': formatMoney(row.newPayments),
+    'Invoice Outstanding': formatMoney(row.newOutstanding),
+    'Total Outstanding': formatMoney(row.totalOutstanding),
+    Status: row.status
+  }));
 
   const rankingRows = filteredScores.map((score) => ({
     Rank: score.rank,
@@ -240,14 +286,16 @@ const Reports = () => {
   });
 
   const giftRows = filteredGiftHistory.map((gift) => ({
-    Date: gift.giftedDate,
+    Date: gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10),
     Customer: gift.customerName,
     Tier: gift.tier,
     Period: `${gift.periodStart} to ${gift.periodEnd}`,
-    Sales: formatMoney(gift.salesAmount),
+    Profit: formatMoney(gift.profitConsidered),
     Percentage: `${gift.giftPercentage}%`,
-    'Gift Amount': formatMoney(gift.giftAmount),
-    'Gifted By': gift.giftedBy,
+    Status: gift.status,
+    'Suggested Budget': formatMoney(gift.suggestedGiftBudget),
+    'Gift Amount': formatMoney(gift.actualGiftAmount),
+    'Gifted By': gift.giftedBy || gift.approvedBy,
     Notes: gift.notes || '-'
   }));
 
@@ -264,11 +312,11 @@ const Reports = () => {
   const headersByReport: Record<ReportType, string[]> = {
     sales: ['Invoice', 'Date', 'Customer', 'Tier', 'Sales', 'Paid', 'Outstanding'],
     profit: ['Invoice', 'Date', 'Customer', 'Sales', 'Cost', 'Transport', 'Profit'],
-    payments: ['Date', 'Customer', 'Invoice', 'Amount', 'Mode', 'Notes'],
-    outstanding: ['Invoice', 'Customer', 'Date', 'Due', 'Sales', 'Paid', 'Outstanding', 'Status'],
+    payments: ['Date', 'Customer', 'Invoice', 'Amount', 'Cash Discount', 'Mode', 'Notes'],
+    outstanding: ['Customer', 'Tier', 'Area', 'Previous Outstanding', 'New Sales', 'New Payments', 'Invoice Outstanding', 'Total Outstanding', 'Status'],
     ranking: ['Rank', 'Customer', 'Tier', 'Score', 'Sales', 'Profit', 'Outstanding', 'Gift Budget', 'Overdue'],
     tier: ['Tier', 'Customers', 'Sales', 'Profit', 'Outstanding', 'Gift Budget'],
-    gifts: ['Date', 'Customer', 'Tier', 'Period', 'Sales', 'Percentage', 'Gift Amount', 'Gifted By', 'Notes']
+    gifts: ['Date', 'Customer', 'Tier', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested Budget', 'Gift Amount', 'Gifted By', 'Notes']
   };
 
   const activeRows = rowsByReport[reportType];
@@ -279,8 +327,8 @@ const Reports = () => {
     sales: filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0),
     profit: filteredInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0),
     payments: filteredPayments.reduce((sum, payment) => sum + payment.amount, 0),
-    outstanding: filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales - getPaidAmountForInvoice(invoice.id), 0),
-    gifts: filteredGiftHistory.reduce((sum, gift) => sum + gift.giftAmount, 0)
+    outstanding: outstandingRowsData.reduce((sum, row) => sum + row.totalOutstanding, 0),
+    gifts: filteredGiftHistory.reduce((sum, gift) => sum + gift.actualGiftAmount, 0)
   };
 
   const handleFilterChange = (field: keyof ReportFilters, value: string) => {
@@ -290,6 +338,10 @@ const Reports = () => {
   const handleApplyFilters = () => {
     setActiveFilters(draftFilters);
   };
+
+  const areaOptions = useMemo(() => {
+    return [...new Set(customers.map((customer) => customer.area).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }, [customers]);
 
   const handleExportExcel = () => {
     const html = buildReportTableHtml(activeTitle, activeHeaders, activeRows);
@@ -372,11 +424,20 @@ const Reports = () => {
     return <SectionHeader title="Reports" description="Loading Firestore report data..." />;
   }
 
+  if (userProfile?.role === 'Staff' && !settings.staffPermissions.canViewReports) {
+    return (
+      <SectionHeader
+        title="Reports"
+        description="Reports are currently limited to Admin users. An Admin can enable Staff report access in Settings."
+      />
+    );
+  }
+
   return (
     <div>
       <SectionHeader
         title="Reports"
-        description="Default range is last month. Use filters to review historical customer, month, year, tier, and gift data."
+        description="Default range is the current month. Use filters to review historical customer, month, year, tier, and gift data."
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
@@ -386,7 +447,7 @@ const Reports = () => {
         <StatCard title="Sales" value={formatMoney(summary.sales)} subtitle="Filtered invoice sales" />
         <StatCard title="Profit" value={formatMoney(summary.profit)} subtitle="Filtered estimated profit" />
         <StatCard title="Payments" value={formatMoney(summary.payments)} subtitle="Filtered payment receipts" />
-        <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Filtered sales minus payments" color="#EB5757" />
+        <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Previous + filtered new outstanding" color="#EB5757" />
         <StatCard title="Gifts" value={formatMoney(summary.gifts)} subtitle="Filtered gift history" />
       </div>
 
@@ -448,6 +509,16 @@ const Reports = () => {
               <option value="Tier 1">Tier 1</option>
               <option value="Tier 2">Tier 2</option>
               <option value="Tier 3">Tier 3</option>
+            </select>
+          </label>
+
+          <label style={labelStyle}>
+            Area
+            <select style={inputStyle} value={draftFilters.area} onChange={(event) => handleFilterChange('area', event.target.value)}>
+              <option value="all">All areas</option>
+              {areaOptions.map((area) => (
+                <option key={area} value={area}>{area}</option>
+              ))}
             </select>
           </label>
         </div>

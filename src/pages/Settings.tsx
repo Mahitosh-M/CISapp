@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import {
@@ -9,8 +9,9 @@ import {
   updateUserProfileRecord
 } from '../services/firestoreService';
 import { createStaffAuthAccount } from '../services/authService';
-import type { AppSettings, UserProfile, UserRole } from '../types';
-import { DEFAULT_SETTINGS, mergeWithDefaultSettings } from '../utils/settings';
+import { useAuth } from '../contexts/AuthContext';
+import type { AppSettings, TargetTierKey, UserProfile, UserRole } from '../types';
+import { DEFAULT_SETTINGS, isScoringWeightTotalValid, mergeWithDefaultSettings, validateAppSettings } from '../utils/settings';
 
 const Settings = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -23,6 +24,12 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const { userProfile } = useAuth();
+  const auditUser = {
+    userId: userProfile?.uid,
+    userEmail: userProfile?.email,
+    role: userProfile?.role
+  };
 
   const loadSettings = async () => {
     try {
@@ -42,6 +49,9 @@ const Settings = () => {
     loadSettings();
   }, []);
 
+  const settingsValidation = useMemo(() => validateAppSettings(settings), [settings]);
+  const hasValidScoringTotal = isScoringWeightTotalValid(settingsValidation.scoringWeightTotal);
+
   const updateNestedNumber = (
     group: 'giftPercentages' | 'creditDays' | 'paymentBuffers' | 'scoringWeights',
     key: string,
@@ -59,10 +69,17 @@ const Settings = () => {
   const handleSaveSettings = async (event: FormEvent) => {
     event.preventDefault();
 
+    // Business rule: scoring parts must add to 100%, otherwise weighted customer scores can exceed 100.
+    if (!settingsValidation.isValid) {
+      setMessage('');
+      setError(`Please adjust settings before saving. ${settingsValidation.errors.join(' ')}`);
+      return;
+    }
+
     try {
       setSaving(true);
       setError('');
-      await updateAppSettings(settings);
+      await updateAppSettings(settings, auditUser);
       setMessage('Settings saved successfully. New invoices, intelligence, reports, gifts, and overdue alerts will use the updated rules.');
       await loadSettings();
     } catch (err) {
@@ -98,20 +115,62 @@ const Settings = () => {
   };
 
   const handleRoleChange = async (user: UserProfile, role: UserRole) => {
-    await updateUserProfileRecord(user.id, { role });
+    await updateUserProfileRecord(user.id, { role }, auditUser);
     await loadSettings();
   };
 
   const handleToggleActive = async (user: UserProfile) => {
-    await updateUserProfileRecord(user.id, { active: !user.active });
+    await updateUserProfileRecord(user.id, { active: !user.active }, auditUser);
     await loadSettings();
   };
 
   const handleDeleteUserProfile = async (user: UserProfile) => {
     const confirmed = window.confirm(`Delete profile for ${user.email}? This removes ERP role access but does not delete the Firebase Auth account.`);
     if (!confirmed) return;
-    await deleteUserProfileRecord(user.id);
+    await deleteUserProfileRecord(user.id, auditUser);
     await loadSettings();
+  };
+
+  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod', value: string | boolean) => {
+    setSettings((current) => ({
+      ...current,
+      [field]: field === 'highOutstandingThreshold' ? Number(value) || 0 : value
+    }));
+  };
+
+  const handleStaffPermissionChange = (field: keyof AppSettings['staffPermissions'], value: boolean) => {
+    setSettings((current) => ({
+      ...current,
+      staffPermissions: {
+        ...current.staffPermissions,
+        [field]: value
+      }
+    }));
+  };
+
+  const handleTargetSettingChange = (
+    tierKey: TargetTierKey,
+    field: keyof AppSettings['targetSettings'][TargetTierKey],
+    value: string
+  ) => {
+    setSettings((current) => ({
+      ...current,
+      targetSettings: {
+        ...current.targetSettings,
+        [tierKey]: {
+          ...current.targetSettings[tierKey],
+          // Empty target fields intentionally become NaN so validation blocks saving instead of silently storing zero.
+          [field]: value.trim() === '' ? Number.NaN : Number(value)
+        }
+      }
+    }));
+  };
+
+  const handleResetTargetSettings = () => {
+    setSettings((current) => ({
+      ...current,
+      targetSettings: DEFAULT_SETTINGS.targetSettings
+    }));
   };
 
   const cardStyle: CSSProperties = {
@@ -181,6 +240,7 @@ const Settings = () => {
               <input
                 style={inputStyle}
                 type="number"
+                min="0"
                 step="0.1"
                 value={settings.giftPercentages[tier]}
                 onChange={(event) => updateNestedNumber('giftPercentages', tier, event.target.value)}
@@ -197,6 +257,7 @@ const Settings = () => {
               <input
                 style={inputStyle}
                 type="number"
+                min="0"
                 value={settings.creditDays[tier]}
                 onChange={(event) => updateNestedNumber('creditDays', tier, event.target.value)}
               />
@@ -212,6 +273,7 @@ const Settings = () => {
               <input
                 style={inputStyle}
                 type="number"
+                min="0"
                 value={settings.paymentBuffers[tier]}
                 onChange={(event) => updateNestedNumber('paymentBuffers', tier, event.target.value)}
               />
@@ -221,14 +283,157 @@ const Settings = () => {
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Scoring Settings</div>
         <div style={gridStyle}>
-          <label style={labelStyle}>Profit Weight %<input style={inputStyle} type="number" value={settings.scoringWeights.profit} onChange={(event) => updateNestedNumber('scoringWeights', 'profit', event.target.value)} /></label>
-          <label style={labelStyle}>Payment Discipline %<input style={inputStyle} type="number" value={settings.scoringWeights.paymentDiscipline} onChange={(event) => updateNestedNumber('scoringWeights', 'paymentDiscipline', event.target.value)} /></label>
-          <label style={labelStyle}>Frequency %<input style={inputStyle} type="number" value={settings.scoringWeights.frequency} onChange={(event) => updateNestedNumber('scoringWeights', 'frequency', event.target.value)} /></label>
-          <label style={labelStyle}>Sales %<input style={inputStyle} type="number" value={settings.scoringWeights.sales} onChange={(event) => updateNestedNumber('scoringWeights', 'sales', event.target.value)} /></label>
-          <label style={labelStyle}>Loyalty %<input style={inputStyle} type="number" value={settings.scoringWeights.loyalty} onChange={(event) => updateNestedNumber('scoringWeights', 'loyalty', event.target.value)} /></label>
+          <label style={labelStyle}>
+            Profit Weight %
+            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.profit} onChange={(event) => updateNestedNumber('scoringWeights', 'profit', event.target.value)} />
+          </label>
+          <label style={labelStyle}>
+            Payment Discipline %
+            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.paymentDiscipline} onChange={(event) => updateNestedNumber('scoringWeights', 'paymentDiscipline', event.target.value)} />
+          </label>
+          <label style={labelStyle}>
+            Frequency %
+            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.frequency} onChange={(event) => updateNestedNumber('scoringWeights', 'frequency', event.target.value)} />
+          </label>
+          <label style={labelStyle}>
+            Sales %
+            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.sales} onChange={(event) => updateNestedNumber('scoringWeights', 'sales', event.target.value)} />
+          </label>
+          <label style={labelStyle}>
+            Loyalty %
+            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.loyalty} onChange={(event) => updateNestedNumber('scoringWeights', 'loyalty', event.target.value)} />
+          </label>
         </div>
 
-        <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 18 }}>
+        <div
+          style={{
+            marginTop: 14,
+            padding: 12,
+            borderRadius: 10,
+            background: hasValidScoringTotal ? '#ECFDF3' : '#FFF4E5',
+            border: `1px solid ${hasValidScoringTotal ? '#ABEFC6' : '#FDB022'}`,
+            color: hasValidScoringTotal ? '#067647' : '#93370D',
+            fontWeight: 800
+          }}
+        >
+          Scoring total: {settingsValidation.scoringWeightTotal}% {hasValidScoringTotal ? 'ready to save' : 'must be exactly 100% before saving'}
+        </div>
+
+        {settingsValidation.errors.length > 0 ? (
+          <div style={{ marginTop: 10, color: '#B42318', fontWeight: 700 }}>
+            {settingsValidation.errors.map((validationError) => (
+              <div key={validationError}>{validationError}</div>
+            ))}
+          </div>
+        ) : null}
+
+        <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Tier-wise Monthly Targets</div>
+        <div style={{ color: '#5C6A84', fontSize: 13, marginBottom: 12 }}>
+          These targets feed the Sales Performance and Order Performance score portions without changing the total 100% weight.
+        </div>
+        <div style={gridStyle}>
+          {([
+            { tierKey: 'tier1', label: 'Tier 1' },
+            { tierKey: 'tier2', label: 'Tier 2' },
+            { tierKey: 'tier3', label: 'Tier 3' }
+          ] as { tierKey: TargetTierKey; label: string }[]).map(({ tierKey, label }) => (
+            <div key={tierKey} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 12 }}>
+              <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>{label}</div>
+              <label style={labelStyle}>
+                Monthly Sales Target
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="0"
+                  value={Number.isNaN(settings.targetSettings[tierKey].monthlySalesTarget) ? '' : settings.targetSettings[tierKey].monthlySalesTarget}
+                  onChange={(event) => handleTargetSettingChange(tierKey, 'monthlySalesTarget', event.target.value)}
+                />
+              </label>
+              <label style={{ ...labelStyle, marginTop: 10 }}>
+                Monthly Order Frequency Target
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={Number.isNaN(settings.targetSettings[tierKey].monthlyOrderTarget) ? '' : settings.targetSettings[tierKey].monthlyOrderTarget}
+                  onChange={(event) => handleTargetSettingChange(tierKey, 'monthlyOrderTarget', event.target.value)}
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }}
+          onClick={handleResetTargetSettings}
+        >
+          Reset Targets to Defaults
+        </button>
+
+        <div style={{ ...sectionTitleStyle, marginTop: 24 }}>ERP Control Settings</div>
+        <div style={gridStyle}>
+          <label style={labelStyle}>
+            High Outstanding Alert Threshold
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={settings.highOutstandingThreshold}
+              onChange={(event) => handleTopLevelSettingChange('highOutstandingThreshold', event.target.value)}
+            />
+          </label>
+          <label style={labelStyle}>
+            Invoice Prefix
+            <input
+              style={inputStyle}
+              value={settings.invoicePrefix}
+              onChange={(event) => handleTopLevelSettingChange('invoicePrefix', event.target.value.toUpperCase())}
+            />
+          </label>
+          <label style={labelStyle}>
+            Default Report Period
+            <select
+              style={inputStyle}
+              value={settings.defaultReportPeriod}
+              onChange={(event) => handleTopLevelSettingChange('defaultReportPeriod', event.target.value as AppSettings['defaultReportPeriod'])}
+            >
+              <option value="current_month">Current month</option>
+              <option value="last_month">Last month</option>
+              <option value="previous_30_days">Previous 30 days</option>
+            </select>
+          </label>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+            <input
+              type="checkbox"
+              checked={settings.financialYearReset}
+              onChange={(event) => handleTopLevelSettingChange('financialYearReset', event.target.checked)}
+            />
+            Reset invoice number each financial year
+          </label>
+        </div>
+
+        <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Staff Permissions</div>
+        <div style={gridStyle}>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={settings.staffPermissions.canViewDashboard}
+              onChange={(event) => handleStaffPermissionChange('canViewDashboard', event.target.checked)}
+            />
+            Staff can view dashboard
+          </label>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={settings.staffPermissions.canViewReports}
+              onChange={(event) => handleStaffPermissionChange('canViewReports', event.target.checked)}
+            />
+            Staff can view reports
+          </label>
+        </div>
+
+        <button type="submit" disabled={saving || !settingsValidation.isValid} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 18 }}>
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
       </form>

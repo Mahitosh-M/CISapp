@@ -118,7 +118,7 @@ const Intelligence = () => {
         <StatCard title="Rolling Sales" value={formatMoney(summary.totalSales)} subtitle="Current 2-month window" />
         <StatCard title="Rolling Profit" value={formatMoney(summary.totalProfit)} subtitle="Profit contribution" />
         <StatCard title="Total Payments" value={formatMoney(summary.totalPayments)} subtitle="Collected against scored invoices" />
-        <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Sales minus payments" color="#EB5757" />
+        <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Previous + invoice outstanding" color="#EB5757" />
         <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Weighted score" />
         <StatCard title="Gift Budget" value={formatMoney(summary.giftBudget)} subtitle="3% of sales" />
       </div>
@@ -148,7 +148,11 @@ const Intelligence = () => {
             <div style={{ color: '#BFC8D9' }}>Add Firestore invoices to generate customer rankings.</div>
           ) : (
             topCustomers.map((customer) =>
-              renderCustomerRow(customer, `#${customer.rank}`, `Score ${customer.intelligenceScore} | ${formatMoney(customer.totalSales)} sales`)
+              renderCustomerRow(
+                customer,
+                `#${customer.rank}`,
+                `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${customer.customerMonthlyOrders.toFixed(1)} / ${customer.monthlyOrderTarget}`
+              )
             )
           )}
         </div>

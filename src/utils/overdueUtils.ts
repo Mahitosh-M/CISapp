@@ -1,4 +1,5 @@
 import type { AppSettings, Customer, Invoice, OverdueInvoiceAlert, Payment } from '../types';
+import { getInvoicePaymentEffect } from './paymentUtils';
 import { calculateDynamicDueDate } from './settings';
 
 const parseDate = (dateString: string) => {
@@ -16,7 +17,7 @@ const getToday = () => new Date().toISOString().slice(0, 10);
 export const getPaidAmountForInvoice = (invoiceId: string, payments: Payment[]) => {
   return payments
     .filter((payment) => payment.invoiceId === invoiceId)
-    .reduce((sum, payment) => sum + payment.amount, 0);
+    .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
 };
 
 export const buildOverdueInvoiceAlerts = (
@@ -69,19 +70,25 @@ export const buildCustomerOutstandingRows = (
   return customers.map((customer) => {
     const customerInvoices = invoices.filter((invoice) => invoice.customerId === customer.id);
     const totalSales = customerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-    const totalPayments = payments
-      .filter((payment) => payment.customerId === customer.id)
-      .reduce((sum, payment) => sum + payment.amount, 0);
+    const customerPayments = payments.filter((payment) => payment.customerId === customer.id);
+    const totalPayments = customerPayments.reduce((sum, payment) => sum + payment.amount + payment.cashDiscount, 0);
+    const invoicePaymentEffect = customerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+    // Previous outstanding is the opening balance from old records before this ERP started.
+    const previousOutstanding = customer.previousOutstandingAmount ?? 0;
+    const newOutstanding = totalSales - invoicePaymentEffect;
     const customerAlerts = overdueAlerts.filter((alert) => alert.customerId === customer.id);
     const overdueAmount = customerAlerts.reduce((sum, alert) => sum + alert.overdueAmount, 0);
     const overdueDays = customerAlerts.reduce((highest, alert) => Math.max(highest, alert.overdueDays), 0);
-    const outstanding = totalSales - totalPayments;
+    const outstanding = previousOutstanding + newOutstanding;
     const indicator = overdueAmount > 0 ? 'red' : outstanding > 0 ? 'yellow' : 'green';
 
     return {
       customerId: customer.id,
       totalSales,
       totalPayments,
+      previousOutstanding,
+      newOutstanding,
+      // Future improvement: allow payments to be allocated specifically to previous outstanding.
       outstanding,
       overdueAmount,
       overdueDays,

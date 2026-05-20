@@ -11,8 +11,11 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   canDeleteRecords: boolean;
+  canEditRecords: boolean;
   canManageSettings: boolean;
   canViewReports: boolean;
+  canApproveGifts: boolean;
+  canManageUsers: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -57,8 +60,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       },
       logout: logoutUser,
       canDeleteRecords: role === 'Admin',
+      canEditRecords: role === 'Admin',
       canManageSettings: role === 'Admin',
-      canViewReports: role === 'Admin'
+      canViewReports: role === 'Admin',
+      canApproveGifts: role === 'Admin',
+      canManageUsers: role === 'Admin'
     };
   }, [firebaseUser, loading, userProfile]);
 

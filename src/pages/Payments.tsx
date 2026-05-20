@@ -13,8 +13,9 @@ import {
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { getAmountAppliedToInvoice, getInvoicePaymentEffect } from '../utils/paymentUtils';
 
-const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Card', 'Other'];
+const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -23,6 +24,7 @@ const emptyPaymentForm: PaymentFormData = {
   invoiceNumber: '',
   date: getTodayDateString(),
   amount: 0,
+  cashDiscount: 0,
   mode: 'Cash',
   notes: ''
 };
@@ -40,7 +42,12 @@ const Payments = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const { canDeleteRecords } = useAuth();
+  const { canDeleteRecords, canEditRecords, userProfile } = useAuth();
+  const auditUser = {
+    userId: userProfile?.uid,
+    userEmail: userProfile?.email,
+    role: userProfile?.role
+  };
 
   const loadData = async () => {
     try {
@@ -70,7 +77,7 @@ const Payments = () => {
   const getPaidAmountForInvoice = (invoiceId: string, ignoredPaymentId = '') => {
     return payments
       .filter((payment) => payment.invoiceId === invoiceId && payment.id !== ignoredPaymentId)
-      .reduce((sum, payment) => sum + payment.amount, 0);
+      .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
   };
 
   const invoiceOptions = useMemo(() => {
@@ -81,6 +88,16 @@ const Payments = () => {
   const selectedInvoice = invoices.find((invoice) => invoice.id === formData.invoiceId);
   const selectedInvoicePaid = selectedInvoice ? getPaidAmountForInvoice(selectedInvoice.id, editingPaymentId) : 0;
   const selectedInvoiceOutstanding = selectedInvoice ? selectedInvoice.totalSales - selectedInvoicePaid : 0;
+  const selectedCustomer = customers.find((customer) => customer.id === formData.customerId);
+  const editingPayment = payments.find((payment) => payment.id === editingPaymentId);
+  const oldBalanceBeforePayment =
+    selectedCustomer && editingPayment?.customerId === selectedCustomer.id
+      ? (selectedCustomer.previousOutstandingAmount ?? 0) + (editingPayment.amountUsedForOldBalance ?? 0)
+      : selectedCustomer?.previousOutstandingAmount ?? 0;
+  const amountUsedForOldBalancePreview = Math.min(formData.amount, Math.max(0, oldBalanceBeforePayment));
+  const amountAppliedToInvoicePreview = Math.max(0, formData.amount - amountUsedForOldBalancePreview);
+  const paymentEffect = amountAppliedToInvoicePreview + formData.cashDiscount;
+  const overpaymentAmount = selectedInvoice ? Math.max(0, paymentEffect - selectedInvoiceOutstanding) : 0;
 
   const paymentRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
@@ -121,10 +138,10 @@ const Payments = () => {
       return;
     }
 
-    if (field === 'amount') {
+    if (field === 'amount' || field === 'cashDiscount') {
       setFormData((current) => ({
         ...current,
-        amount: Number(value) || 0
+        [field]: Number(value) || 0
       }));
       return;
     }
@@ -140,6 +157,11 @@ const Payments = () => {
     setEditingPaymentId('');
   };
 
+  const canEditPayment = (payment: Payment) => {
+    if (canEditRecords) return true;
+    return (payment.createdAt || '').slice(0, 10) === getTodayDateString();
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
@@ -148,16 +170,29 @@ const Payments = () => {
       return;
     }
 
+    if (selectedInvoice && formData.date < selectedInvoice.date) {
+      setError('Payment date cannot be before invoice date.');
+      return;
+    }
+
     try {
       setSaving(true);
       setError('');
 
       if (editingPaymentId) {
-        await updatePaymentRecord(editingPaymentId, formData);
-        setMessage('Payment updated successfully.');
+        await updatePaymentRecord(editingPaymentId, formData, auditUser);
+        setMessage(
+          amountUsedForOldBalancePreview > 0
+            ? `Payment updated. ${formatMoney(amountUsedForOldBalancePreview)} cleared old balance and ${formatMoney(amountAppliedToInvoicePreview)} applied to invoice.`
+            : 'Payment updated successfully.'
+        );
       } else {
-        await createPayment(formData);
-        setMessage('Payment added successfully.');
+        await createPayment(formData, auditUser);
+        setMessage(
+          amountUsedForOldBalancePreview > 0
+            ? `Payment added. ${formatMoney(amountUsedForOldBalancePreview)} cleared old balance and ${formatMoney(amountAppliedToInvoicePreview)} applied to invoice.`
+            : 'Payment added successfully.'
+        );
       }
 
       resetForm();
@@ -170,6 +205,11 @@ const Payments = () => {
   };
 
   const handleEdit = (payment: Payment) => {
+    if (!canEditPayment(payment)) {
+      setError('Staff can only edit payments created today. Ask an Admin to edit old payments.');
+      return;
+    }
+
     setEditingPaymentId(payment.id);
     setFormData({
       customerId: payment.customerId,
@@ -178,6 +218,7 @@ const Payments = () => {
       invoiceNumber: payment.invoiceNumber,
       date: payment.date,
       amount: payment.amount,
+      cashDiscount: payment.cashDiscount,
       mode: payment.mode,
       notes: payment.notes
     });
@@ -196,7 +237,7 @@ const Payments = () => {
     if (!confirmed) return;
 
     try {
-      await deletePaymentRecord(payment.id);
+      await deletePaymentRecord(payment.id, auditUser);
       setMessage('Payment deleted successfully.');
       await loadData();
     } catch (err) {
@@ -277,10 +318,17 @@ const Payments = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingPaymentId ? 'Edit Payment' : 'Add Payment'}</div>
-            <div style={{ color: '#67738E', marginTop: 4 }}>Outstanding uses invoice sales minus all linked payments.</div>
+            <div style={{ color: '#67738E', marginTop: 4 }}>Payment clears old customer balance first, then the remaining amount reduces the selected invoice.</div>
           </div>
-          <div style={{ color: selectedInvoiceOutstanding > 0 ? '#B42318' : '#1B7F3A', fontWeight: 800 }}>
-            Invoice Outstanding: {selectedInvoice ? formatMoney(selectedInvoiceOutstanding) : 'Select invoice'}
+          <div style={{ color: '#0B1F3A', fontWeight: 800 }}>
+            <div style={{ color: selectedInvoiceOutstanding > 0 ? '#B42318' : '#1B7F3A' }}>
+              Invoice Outstanding: {selectedInvoice ? formatMoney(selectedInvoiceOutstanding) : 'Select invoice'}
+            </div>
+            {selectedCustomer ? (
+              <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+                Old Balance: {formatMoney(oldBalanceBeforePayment)} | Old Balance Clear: {formatMoney(amountUsedForOldBalancePreview)} | Invoice Apply: {formatMoney(amountAppliedToInvoicePreview)}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -311,6 +359,11 @@ const Payments = () => {
           </label>
 
           <label style={labelStyle}>
+            Cash Discount
+            <input style={inputStyle} type="number" min="0" value={formData.cashDiscount} onChange={(event) => handleFieldChange('cashDiscount', event.target.value)} />
+          </label>
+
+          <label style={labelStyle}>
             Payment Mode
             <select style={inputStyle} value={formData.mode} onChange={(event) => handleFieldChange('mode', event.target.value as PaymentMode)}>
               {paymentModes.map((mode) => (
@@ -331,6 +384,11 @@ const Payments = () => {
         </div>
 
         {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
+        {overpaymentAmount > 0 ? (
+          <div style={{ color: '#B7791F', marginTop: 12, fontWeight: 800 }}>
+            Warning: this creates an advance or extra amount of {formatMoney(overpaymentAmount)}. It is allowed.
+          </div>
+        ) : null}
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
@@ -381,6 +439,7 @@ const Payments = () => {
                 <th style={headerCellStyle}>Customer</th>
                 <th style={headerCellStyle}>Invoice</th>
                 <th style={headerCellStyle}>Amount</th>
+                <th style={headerCellStyle}>Cash Discount</th>
                 <th style={headerCellStyle}>Mode</th>
                 <th style={headerCellStyle}>Notes</th>
                 <th style={headerCellStyle}>Actions</th>
@@ -388,22 +447,37 @@ const Payments = () => {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td style={cellStyle} colSpan={7}>Loading payments...</td></tr>
+                <tr><td style={cellStyle} colSpan={8}>Loading payments...</td></tr>
               ) : paymentRows.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={7}>No payments found.</td></tr>
+                <tr><td style={cellStyle} colSpan={8}>No payments found.</td></tr>
               ) : (
                 paymentRows.map((payment) => (
                   <tr key={payment.id}>
                     <td style={cellStyle}>{payment.date}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
                     <td style={cellStyle}>{payment.invoiceNumber}</td>
-                    <td style={{ ...cellStyle, fontWeight: 800 }}>{formatMoney(payment.amount)}</td>
+                    <td style={{ ...cellStyle, fontWeight: 800 }}>
+                      {formatMoney(payment.amount)}
+                      {payment.amountUsedForOldBalance > 0 ? (
+                        <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
+                          Old balance: {formatMoney(payment.amountUsedForOldBalance)}
+                        </div>
+                      ) : null}
+                      {payment.amountUsedForOldBalance > 0 ? (
+                        <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
+                          Invoice: {formatMoney(getAmountAppliedToInvoice(payment))}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={cellStyle}>{formatMoney(payment.cashDiscount)}</td>
                     <td style={cellStyle}>{payment.mode}</td>
                     <td style={cellStyle}>{payment.notes || '-'}</td>
                     <td style={cellStyle}>
-                      <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(payment)}>
-                        Edit
-                      </button>
+                      {canEditPayment(payment) ? (
+                        <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(payment)}>
+                          Edit
+                        </button>
+                      ) : null}
                       {canDeleteRecords ? (
                         <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(payment)}>
                           Delete

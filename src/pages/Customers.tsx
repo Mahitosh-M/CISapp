@@ -17,7 +17,7 @@ import {
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
 import { formatMoney } from '../utils/formatters';
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
-import { DEFAULT_SETTINGS } from '../utils/settings';
+import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
 
 const emptyCustomerForm: CustomerFormData = {
   name: '',
@@ -25,8 +25,13 @@ const emptyCustomerForm: CustomerFormData = {
   area: '',
   tier: 'Tier 3',
   paymentTerms: getPaymentTermsForTier('Tier 3'),
-  notes: ''
+  notes: '',
+  previousOutstandingAmount: 0,
+  tierOverride: false,
+  status: 'Active'
 };
+
+type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount' | 'tierOverride'>;
 
 const Customers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -40,7 +45,13 @@ const Customers = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const { canDeleteRecords } = useAuth();
+  const { canDeleteRecords, userProfile } = useAuth();
+  const isAdmin = userProfile?.role === 'Admin';
+  const auditUser = {
+    userId: userProfile?.uid,
+    userEmail: userProfile?.email,
+    role: userProfile?.role
+  };
 
   const loadCustomers = async () => {
     try {
@@ -91,7 +102,21 @@ const Customers = () => {
     );
   }, [customers, invoices, payments, settings]);
 
-  const handleFieldChange = (field: keyof CustomerFormData, value: string) => {
+  const giftBudgetByCustomerId = useMemo(() => {
+    return new Map(
+      customers.map((customer) => {
+        const totalProfit = invoices
+          .filter((invoice) => invoice.customerId === customer.id)
+          .reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+        const giftPercentage = getGiftPercentageForTier(customer.tier, settings);
+
+        // Gift budget is shown from real invoice profit and the tier percentage saved in Settings.
+        return [customer.id, Math.max(0, Math.round(totalProfit * (giftPercentage / 100)))];
+      })
+    );
+  }, [customers, invoices, settings]);
+
+  const handleFieldChange = (field: CustomerTextField, value: string) => {
     if (field === 'tier') {
       const tier = value as CustomerTier;
       setFormData((current) => ({
@@ -108,8 +133,18 @@ const Customers = () => {
     }));
   };
 
+  const handlePreviousOutstandingChange = (value: string) => {
+    const parsedValue = value.trim() === '' ? 0 : Number(value);
+
+    setFormData((current) => ({
+      ...current,
+      // This is an Admin-only opening balance from before the ERP was implemented.
+      previousOutstandingAmount: parsedValue
+    }));
+  };
+
   const resetForm = () => {
-    setFormData(emptyCustomerForm);
+    setFormData({ ...emptyCustomerForm });
     setEditingCustomerId('');
   };
 
@@ -121,15 +156,25 @@ const Customers = () => {
       return;
     }
 
+    const previousOutstandingAmount = Number(formData.previousOutstandingAmount ?? 0);
+    if (!Number.isFinite(previousOutstandingAmount) || previousOutstandingAmount < 0) {
+      setError('Previous outstanding amount must be a valid number greater than or equal to 0.');
+      return;
+    }
+
     try {
       setSaving(true);
       setError('');
+      const customerPayload = {
+        ...formData,
+        previousOutstandingAmount
+      };
 
       if (editingCustomerId) {
-        await updateCustomerRecord(editingCustomerId, formData);
+        await updateCustomerRecord(editingCustomerId, customerPayload, auditUser);
         setMessage('Customer updated successfully.');
       } else {
-        await createCustomer(formData);
+        await createCustomer(customerPayload, auditUser);
         setMessage('Customer added successfully.');
       }
 
@@ -150,7 +195,10 @@ const Customers = () => {
       area: customer.area,
       tier: customer.tier,
       paymentTerms: customer.paymentTerms,
-      notes: customer.notes
+      notes: customer.notes,
+      previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
+      tierOverride: Boolean(customer.tierOverride),
+      status: customer.status || 'Active'
     });
     setMessage('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -170,7 +218,7 @@ const Customers = () => {
 
       if (!confirmed) return;
 
-      await deleteCustomerRecord(customer.id);
+      await deleteCustomerRecord(customer.id, auditUser);
       setMessage('Customer deleted successfully.');
       await loadCustomers();
     } catch (err) {
@@ -220,7 +268,7 @@ const Customers = () => {
 
   const tableStyle: CSSProperties = {
     width: '100%',
-    minWidth: 1320,
+    minWidth: 1520,
     borderCollapse: 'collapse'
   };
 
@@ -277,6 +325,44 @@ const Customers = () => {
               <option value="Tier 3">Tier 3</option>
             </select>
           </label>
+
+          <label style={labelStyle}>
+            Status
+            <select style={inputStyle} value={formData.status || 'Active'} onChange={(event) => handleFieldChange('status', event.target.value)}>
+              <option value="Active">Active</option>
+              <option value="Watch">Watch</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </label>
+
+          {isAdmin ? (
+            <>
+              <label style={labelStyle}>
+                Previous Outstanding Amount
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={Number.isFinite(formData.previousOutstandingAmount) ? formData.previousOutstandingAmount : ''}
+                  onChange={(event) => handlePreviousOutstandingChange(event.target.value)}
+                />
+              </label>
+
+              <div style={{ color: '#67738E', fontSize: 12, lineHeight: 1.5, marginTop: -6, marginBottom: 12 }}>
+                Old opening balance before this ERP. It is added to invoice sales minus payments for total outstanding.
+              </div>
+
+              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.tierOverride)}
+                  onChange={(event) => setFormData((current) => ({ ...current, tierOverride: event.target.checked }))}
+                />
+                Admin tier override
+              </label>
+            </>
+          ) : null}
 
           <label style={labelStyle}>
             Payment Terms
@@ -347,9 +433,11 @@ const Customers = () => {
                   <th style={headerCellStyle}>Customer</th>
                   <th style={headerCellStyle}>Area</th>
                   <th style={headerCellStyle}>Tier</th>
-                  <th style={headerCellStyle}>Sales</th>
+                  <th style={headerCellStyle}>Invoice Sales</th>
                   <th style={headerCellStyle}>Payments</th>
-                  <th style={headerCellStyle}>Outstanding</th>
+                  <th style={headerCellStyle}>Previous Outstanding</th>
+                  <th style={headerCellStyle}>Invoice Outstanding</th>
+                  <th style={headerCellStyle}>Total Outstanding</th>
                   <th style={headerCellStyle}>Overdue</th>
                   <th style={headerCellStyle}>Payment Terms</th>
                   <th style={headerCellStyle}>Notes</th>
@@ -358,9 +446,9 @@ const Customers = () => {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td style={cellStyle} colSpan={10}>Loading customers...</td></tr>
+                  <tr><td style={cellStyle} colSpan={12}>Loading customers...</td></tr>
                 ) : filteredCustomers.length === 0 ? (
-                  <tr><td style={cellStyle} colSpan={10}>No customers found.</td></tr>
+                  <tr><td style={cellStyle} colSpan={12}>No customers found.</td></tr>
                 ) : (
                   filteredCustomers.map((customer) => (
                     <tr key={customer.id}>
@@ -370,12 +458,21 @@ const Customers = () => {
                       */}
                       <td style={cellStyle}>
                         <strong>{customer.name}</strong>
+                        <div style={{ color: '#0B1F3A', fontSize: 12, fontWeight: 800, marginTop: 4 }}>
+                          Gift Budget: <span style={{ color: '#D4AF37' }}>{formatMoney(giftBudgetByCustomerId.get(customer.id) ?? 0)}</span>
+                        </div>
+                        <div style={{ color: (giftBudgetByCustomerId.get(customer.id) ?? 0) > 0 ? '#1B7F3A' : '#67738E', fontSize: 12, fontWeight: 700 }}>
+                          {(giftBudgetByCustomerId.get(customer.id) ?? 0) > 0 ? 'Gift eligible' : 'No gift budget yet'}
+                        </div>
                         <div style={{ color: '#67738E', fontSize: 12 }}>{customer.mobile}</div>
+                        {customer.status ? <div style={{ color: '#67738E', fontSize: 12 }}>Status: {customer.status}</div> : null}
                       </td>
                       <td style={cellStyle}>{customer.area}</td>
                       <td style={cellStyle}><TierBadge tier={customer.tier} /></td>
                       <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.totalSales ?? 0)}</td>
                       <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.totalPayments ?? 0)}</td>
+                      <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.previousOutstanding ?? 0)}</td>
+                      <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.newOutstanding ?? 0)}</td>
                       <td style={{ ...cellStyle, color: outstandingByCustomerId.get(customer.id)?.indicator === 'green' ? '#1B7F3A' : outstandingByCustomerId.get(customer.id)?.indicator === 'yellow' ? '#B7791F' : '#B42318', fontWeight: 800 }}>
                         {formatMoney(outstandingByCustomerId.get(customer.id)?.outstanding ?? 0)}
                       </td>

@@ -39,7 +39,6 @@ const Login = () => {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0B1F3A', padding: 20 }}>
       <form onSubmit={handleSubmit} style={{ background: '#FFFFFF', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#0B1F3A' }}>
-       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>This is Giftbudget branch</div> 
         <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 24, marginBottom: 6 }}>Customer Intelligence ERP</div>
         <div style={{ color: '#67738E', marginBottom: 22 }}>Login with your Email  account.</div>
 
