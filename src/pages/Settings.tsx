@@ -11,6 +11,7 @@ import {
 import { createStaffAuthAccount } from '../services/authService';
 import { useAuth } from '../contexts/AuthContext';
 import type { AppSettings, TargetTierKey, UserProfile, UserRole } from '../types';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { DEFAULT_SETTINGS, isScoringWeightTotalValid, mergeWithDefaultSettings, validateAppSettings } from '../utils/settings';
 
 const Settings = () => {
@@ -51,6 +52,7 @@ const Settings = () => {
 
   const settingsValidation = useMemo(() => validateAppSettings(settings), [settings]);
   const hasValidScoringTotal = isScoringWeightTotalValid(settingsValidation.scoringWeightTotal);
+  const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
 
   const updateNestedNumber = (
     group: 'giftPercentages' | 'creditDays' | 'paymentBuffers' | 'scoringWeights',
@@ -131,7 +133,7 @@ const Settings = () => {
     await loadSettings();
   };
 
-  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod', value: string | boolean) => {
+  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer', value: string | boolean) => {
     setSettings((current) => ({
       ...current,
       [field]: field === 'highOutstandingThreshold' ? Number(value) || 0 : value
@@ -411,6 +413,14 @@ const Settings = () => {
             />
             Reset invoice number each financial year
           </label>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+            <input
+              type="checkbox"
+              checked={settings.showCustomerTierToCustomer}
+              onChange={(event) => handleTopLevelSettingChange('showCustomerTierToCustomer', event.target.checked)}
+            />
+            Show customer category in customer portal
+          </label>
         </div>
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Staff Permissions</div>
@@ -460,17 +470,18 @@ const Settings = () => {
 
       <div style={cardStyle}>
         <div style={sectionTitleStyle}>Existing Users</div>
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Name', 'Email', 'Role', 'Active', 'Actions'].map((header) => (
+                {['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'].map((header) => (
                   <th key={header} style={{ textAlign: 'left', padding: 12, background: '#F8F9FB', borderBottom: '1px solid #E8EDF4' }}>{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {sortedUsers.map((user) => (
                 <tr key={user.id}>
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.name}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.email}</td>
@@ -478,8 +489,10 @@ const Settings = () => {
                     <select style={inputStyle} value={user.role} onChange={(event) => handleRoleChange(user, event.target.value as UserRole)}>
                       <option value="Staff">Staff</option>
                       <option value="Admin">Admin</option>
+                      <option value="customer">Customer</option>
                     </select>
                   </td>
+                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.customerName || '-'}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.active ? 'Yes' : 'No'}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>
                     <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleToggleActive(user)}>

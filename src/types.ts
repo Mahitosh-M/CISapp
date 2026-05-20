@@ -6,9 +6,9 @@ export type RiskLevel = 'Low' | 'Medium' | 'High';
 
 export type PaymentMode = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Card' | 'Other';
 
-export type UserRole = 'Admin' | 'Staff';
+export type UserRole = 'Admin' | 'Staff' | 'customer';
 
-export type GiftPeriod = '3_months' | '6_months' | '1_year' | 'custom';
+export type GiftPeriod = '1_month' | '3_months' | '6_months' | '1_year' | 'custom';
 
 export type GiftStatus = 'Pending Approval' | 'Approved' | 'Given';
 
@@ -97,6 +97,8 @@ export interface UserProfile {
   email: string;
   name: string;
   role: UserRole;
+  customerId?: string;
+  customerName?: string;
   active: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -125,17 +127,32 @@ export interface AppSettings {
     canViewDashboard: boolean;
   };
   targetSettings: Record<TargetTierKey, TierTargetSetting>;
+  showCustomerTierToCustomer: boolean;
+  updatedAt?: string;
+}
+
+export interface Offer {
+  id: string;
+  title: string;
+  imageUrl: string;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
   updatedAt?: string;
 }
 
 export interface GiftItem {
   id: string;
   giftItemName: string;
-  targetType: GiftItemTargetType;
+  // Current simplified gift rule: targetValue is the maximum gift budget needed
+  // before this item can be suggested. Legacy fields remain optional for old docs.
+  targetType?: GiftItemTargetType;
   targetValue: number;
-  minBudget: number;
-  maxBudget: number;
-  eligibleTier: GiftEligibleTier;
+  minBudget?: number;
+  maxBudget?: number;
+  eligibleTier?: GiftEligibleTier;
   notes: string;
   isActive: boolean;
   createdAt: string;
@@ -144,11 +161,7 @@ export interface GiftItem {
 
 export interface GiftItemFormData {
   giftItemName: string;
-  targetType: GiftItemTargetType;
   targetValue: number;
-  minBudget: number;
-  maxBudget: number;
-  eligibleTier: GiftEligibleTier;
   notes: string;
   isActive: boolean;
 }
@@ -322,19 +335,6 @@ export interface CustomerScore {
   recommendedAction: string;
   overdueStatus: string;
   scoreBreakdown: ScoreBreakdownItem[];
-}
-
-export interface ActivityLog {
-  id: string;
-  action: string;
-  userId: string;
-  userEmail: string;
-  role: UserRole;
-  targetType: string;
-  targetId: string;
-  oldValue?: unknown;
-  newValue?: unknown;
-  createdAt: string;
 }
 
 export interface Alert {

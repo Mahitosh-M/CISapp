@@ -17,6 +17,7 @@ import {
 import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS, calculateDynamicDueDate } from '../utils/settings';
 
@@ -111,7 +112,7 @@ const Invoices = () => {
   const invoiceRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
-    return invoices
+    const rows = invoices
       .map((invoice) => {
         const paidAmount = getPaidAmount(invoice.id);
         const outstanding = invoice.totalSales - paidAmount;
@@ -133,6 +134,8 @@ const Invoices = () => {
         const matchesStatus = statusFilter === 'all' || invoice.status.label === statusFilter;
         return matchesSearch && matchesCustomer && matchesStatus;
       });
+
+    return sortNewestFirst(rows, ['updatedAt', 'createdAt', 'date']);
   }, [customerFilter, customers, invoices, payments, searchText, settings, statusFilter]);
 
   const recalculateTotals = (nextFormData: InvoiceFormData): InvoiceFormData => {
@@ -485,7 +488,8 @@ const Invoices = () => {
           </label>
         </div>
 
-        <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 16 }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
           <table style={tableStyle}>
             <thead>
               <tr>

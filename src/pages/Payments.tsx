@@ -13,6 +13,7 @@ import {
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect } from '../utils/paymentUtils';
 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
@@ -102,7 +103,7 @@ const Payments = () => {
   const paymentRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
-    return payments.filter((payment) => {
+    return sortNewestFirst(payments.filter((payment) => {
       const matchesSearch =
         !term ||
         [payment.customerName, payment.invoiceNumber, payment.mode].some((value) => value.toLowerCase().includes(term));
@@ -110,7 +111,7 @@ const Payments = () => {
       const matchesMode = modeFilter === 'all' || payment.mode === modeFilter;
 
       return matchesSearch && matchesCustomer && matchesMode;
-    });
+    }), ['updatedAt', 'createdAt', 'date']);
   }, [customerFilter, modeFilter, payments, searchText]);
 
   const handleFieldChange = (field: keyof PaymentFormData, value: string) => {
@@ -431,7 +432,8 @@ const Payments = () => {
           </label>
         </div>
 
-        <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 16 }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
           <table style={tableStyle}>
             <thead>
               <tr>

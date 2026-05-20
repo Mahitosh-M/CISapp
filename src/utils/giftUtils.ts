@@ -1,20 +1,33 @@
-import type { AppSettings, Customer, CustomerScore, GiftHistory, GiftItem, GiftPeriod, Invoice } from '../types';
+import type { AppSettings, Customer, GiftHistory, GiftItem, GiftPeriod, Invoice } from '../types';
 import { getGiftPercentageForTier } from './settings';
 
 export const getGiftPeriodLabel = (period: GiftPeriod) => {
+  if (period === '1_month') return '1 month';
   if (period === '3_months') return '3 months';
   if (period === '6_months') return '6 months';
   if (period === 'custom') return 'Custom';
   return '1 year';
 };
 
+const formatDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const getMonthEndDateString = (dateString: string) => {
+  const [year, month] = dateString.split('-').map(Number);
+  // Gift period end is always normalized to the last day of the selected month.
+  return formatDateInputValue(new Date(year, month, 0));
+};
+
 export const getGiftPeriodStart = (period: GiftPeriod, periodEnd: string) => {
-  const [year, month, day] = periodEnd.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  const monthsBack = period === '3_months' ? 3 : period === '6_months' ? 6 : 12;
-  date.setMonth(date.getMonth() - monthsBack);
-  date.setDate(date.getDate() + 1);
-  return date.toISOString().slice(0, 10);
+  const [year, month] = periodEnd.split('-').map(Number);
+  const monthsInPeriod = period === '1_month' ? 1 : period === '3_months' ? 3 : period === '6_months' ? 6 : 12;
+  // Minimum gift cycle is one full month. For multi-month periods, start on the
+  // first day of the earliest month and end on the month-end date.
+  return formatDateInputValue(new Date(year, month - monthsInPeriod, 1));
 };
 
 export const doPeriodsOverlap = (startA: string, endA: string, startB: string, endB: string) => {
@@ -26,8 +39,42 @@ export const calculateCustomerGiftBudget = (profitConsidered: number, customer: 
   return Math.round(Math.max(0, profitConsidered) * (getGiftPercentageForTier(customer.tier, settings) / 100));
 };
 
-export const isGiftBudgetInRange = (giftBudget: number, giftItem: GiftItem) => {
-  return giftBudget >= giftItem.minBudget && giftBudget <= giftItem.maxBudget;
+export const calculateGiftDifference = (customerGiftBudget: number, giftItem: GiftItem) => {
+  return Math.max(0, customerGiftBudget - giftItem.targetValue);
+};
+
+export const getNearestGiftOptions = (giftItems: GiftItem[], customerGiftBudget: number) => {
+  // customerGiftBudget comes from the Gifts page calculation: profit considered x tier gift percentage.
+  // A gift item targetValue means "suggest this item only when the customer's budget reaches this value".
+  const activeWithinBudget = giftItems
+    .filter((giftItem) => giftItem.isActive && giftItem.targetValue <= customerGiftBudget)
+    .sort((a, b) => b.targetValue - a.targetValue || a.giftItemName.localeCompare(b.giftItemName));
+
+  // Pick the nearest top 3 distinct target values, then include every item sharing those values.
+  // This keeps low-value noise out while still showing alternatives like Dinner Set A/B at the same value.
+  const nearestTargetValues = Array.from(new Set(activeWithinBudget.map((giftItem) => giftItem.targetValue))).slice(0, 3);
+  return activeWithinBudget.filter((giftItem) => nearestTargetValues.includes(giftItem.targetValue));
+};
+
+export const getSuggestedGiftItems = (giftItems: GiftItem[], customerGiftBudget: number) => {
+  return getNearestGiftOptions(giftItems, customerGiftBudget);
+};
+
+export const getGiftHistoryRecordForPeriod = (
+  customerId: string,
+  giftHistory: GiftHistory[],
+  periodStart: string,
+  periodEnd: string
+) => {
+  // Duplicate prevention is based on the same customer and the exact same sales/profit period.
+  // Approved or Given records both block another reward for that period.
+  return giftHistory.find(
+    (gift) =>
+      gift.customerId === customerId &&
+      gift.periodStart === periodStart &&
+      gift.periodEnd === periodEnd &&
+      (gift.status === 'Approved' || gift.status === 'Given')
+  );
 };
 
 export const hasAlreadyGiftedForPeriod = (
@@ -36,31 +83,7 @@ export const hasAlreadyGiftedForPeriod = (
   periodStart: string,
   periodEnd: string
 ) => {
-  // Duplicate prevention: a Given gift for any overlapping period blocks suggestions for that customer.
-  return giftHistory.some(
-    (gift) =>
-      gift.customerId === customerId &&
-      gift.status === 'Given' &&
-      doPeriodsOverlap(periodStart, periodEnd, gift.periodStart, gift.periodEnd)
-  );
-};
-
-export const getEligibleGiftItemsForCustomer = (
-  customer: Customer,
-  giftItems: GiftItem[],
-  metrics: { sales: number; profit: number; score: number; giftBudget: number }
-) => {
-  return giftItems.filter((giftItem) => {
-    if (!giftItem.isActive) return false;
-    if (giftItem.eligibleTier !== 'All' && giftItem.eligibleTier !== customer.tier) return false;
-    if (!isGiftBudgetInRange(metrics.giftBudget, giftItem)) return false;
-
-    // Target type tells the engine which customer metric must reach the admin-defined target.
-    const targetMetric =
-      giftItem.targetType === 'sales' ? metrics.sales : giftItem.targetType === 'score' ? metrics.score : metrics.profit;
-
-    return targetMetric >= giftItem.targetValue;
-  });
+  return Boolean(getGiftHistoryRecordForPeriod(customerId, giftHistory, periodStart, periodEnd));
 };
 
 export const suggestGiftItem = (budget: number, tier: Customer['tier']) => {
@@ -87,22 +110,17 @@ export const buildGiftEligibilityRows = (
     const profitConsidered = customerInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
     const giftPercentage = getGiftPercentageForTier(customer.tier, settings);
     const giftBudget = calculateCustomerGiftBudget(profitConsidered, customer, settings);
+    const periodGiftRecord = getGiftHistoryRecordForPeriod(customer.id, giftHistory, periodStart, periodEnd);
     const overlappingGifts = giftHistory.filter(
       (gift) =>
         gift.customerId === customer.id &&
         gift.status === 'Given' &&
         doPeriodsOverlap(periodStart, periodEnd, gift.periodStart, gift.periodEnd)
     );
-    const pendingApproval = giftHistory.find(
-      (gift) =>
-        gift.customerId === customer.id &&
-        gift.status !== 'Given' &&
-        gift.periodStart === periodStart &&
-        gift.periodEnd === periodEnd
-    );
+    const pendingApproval = periodGiftRecord?.status === 'Approved' ? periodGiftRecord : undefined;
     const alreadyGiftedAmount = overlappingGifts.reduce((sum, gift) => sum + gift.giftAmount, 0);
     const remainingEligibility = Math.max(0, giftBudget - alreadyGiftedAmount);
-    const isDuplicatePeriod = overlappingGifts.length > 0;
+    const isDuplicatePeriod = Boolean(periodGiftRecord);
 
     return {
       customer,
@@ -113,7 +131,7 @@ export const buildGiftEligibilityRows = (
       profitConsidered,
       giftPercentage,
       giftBudget,
-      suggestedGiftItem: suggestGiftItem(giftBudget, customer.tier),
+      suggestedGiftItem: suggestGiftItem(remainingEligibility, customer.tier),
       alreadyGiftedAmount,
       remainingEligibility,
       isDuplicatePeriod,
@@ -130,56 +148,50 @@ export const buildSuggestedGiftRows = (
   settings: AppSettings,
   periodType: GiftPeriod,
   periodStart: string,
-  periodEnd: string,
-  customerScores: CustomerScore[]
+  periodEnd: string
 ) => {
-  const scoreByCustomerId = new Map(customerScores.map((score) => [score.customerId, score]));
+  const giftBudgetRows = buildGiftEligibilityRows(customers, invoices, giftHistory, settings, periodType, periodStart, periodEnd);
 
-  return customers.map((customer) => {
-    const customerInvoices = invoices.filter((invoice) => invoice.customerId === customer.id && invoice.date >= periodStart && invoice.date <= periodEnd);
-    const salesAmount = customerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-    const profitConsidered = customerInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
-    const giftBudget = calculateCustomerGiftBudget(profitConsidered, customer, settings);
-    const score = scoreByCustomerId.get(customer.id)?.intelligenceScore ?? 0;
-    const alreadyGifted = hasAlreadyGiftedForPeriod(customer.id, giftHistory, periodStart, periodEnd);
-    const pendingApproval = giftHistory.find(
-      (gift) =>
-        gift.customerId === customer.id &&
-        gift.status !== 'Given' &&
-        gift.periodStart === periodStart &&
-        gift.periodEnd === periodEnd
-    );
-    const matchedGiftItems = alreadyGifted
-      ? []
-      : getEligibleGiftItemsForCustomer(customer, giftItems, {
-          sales: salesAmount,
-          profit: profitConsidered,
-          score,
-          giftBudget
-        });
-
-    const status = alreadyGifted ? 'Already Gifted' : matchedGiftItems.length > 0 ? 'Eligible' : 'Not Eligible';
-    const eligibilityReason = alreadyGifted
-      ? 'Gift already given for an overlapping period.'
-      : matchedGiftItems.length > 0
-        ? 'Target, tier, and budget range matched.'
-        : 'No active gift item matched target, tier, and budget range.';
+  return giftBudgetRows.map((giftBudgetRow) => {
+    const periodGiftRecord = getGiftHistoryRecordForPeriod(giftBudgetRow.customer.id, giftHistory, periodStart, periodEnd);
+    // Approved gifts are still editable until they are marked Given, so keep the
+    // same eligible options visible. Given gifts stay locked to prevent duplicates.
+    const customerGiftBudget =
+      periodGiftRecord?.status === 'Approved'
+        ? periodGiftRecord.giftBudget ?? periodGiftRecord.suggestedGiftBudget ?? giftBudgetRow.remainingEligibility
+        : giftBudgetRow.remainingEligibility;
+    const matchedGiftItems = periodGiftRecord?.status === 'Given' ? [] : getSuggestedGiftItems(giftItems, customerGiftBudget);
+    const status = periodGiftRecord?.status === 'Given'
+      ? 'Already Gifted'
+      : periodGiftRecord?.status === 'Approved'
+        ? 'Approved'
+        : matchedGiftItems.length > 0
+          ? 'Eligible'
+          : 'Not Eligible';
+    const eligibilityReason = periodGiftRecord?.status === 'Given'
+      ? 'Gift already marked as given for this exact period.'
+      : periodGiftRecord?.status === 'Approved'
+        ? 'Gift already approved for this exact period.'
+        : matchedGiftItems.length > 0
+          ? 'Gift item target value is within the customer gift budget.'
+          : 'No active gift item target value is within the customer gift budget.';
 
     return {
-      customer,
+      ...giftBudgetRow,
+      // Suggested Gifts works with remaining gift budget after subtracting older
+      // overlapping Given records. Example: 1-month gift already given, then a
+      // 6-month review only suggests gifts for the unpaid balance.
+      giftBudget: customerGiftBudget,
+      customer: giftBudgetRow.customer,
       periodType,
       periodStart,
       periodEnd,
-      salesAmount,
-      profitConsidered,
-      giftBudget,
-      score,
       matchedGiftItems,
       suggestedGiftNames: matchedGiftItems.map((giftItem) => giftItem.giftItemName),
       status,
       eligibilityReason,
-      alreadyGifted,
-      pendingApproval
+      alreadyGifted: periodGiftRecord?.status === 'Given',
+      pendingApproval: periodGiftRecord?.status === 'Approved' ? periodGiftRecord : undefined
     };
   });
 };

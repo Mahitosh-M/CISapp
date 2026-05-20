@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   invoicePrefix: 'INV',
   financialYearReset: true,
   defaultReportPeriod: 'current_month',
-  giftPeriodOptions: ['3_months', '6_months', '1_year', 'custom'],
+  giftPeriodOptions: ['1_month', '3_months', '6_months', '1_year', 'custom'],
   staffPermissions: {
     canViewReports: false,
     canViewDashboard: true
@@ -51,7 +51,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
       monthlySalesTarget: 20000,
       monthlyOrderTarget: 2
     }
-  }
+  },
+  // Customer portal privacy flag. Default false hides tier/category until Admin explicitly allows it.
+  showCustomerTierToCustomer: false
 };
 
 const roundToTwoDecimals = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -89,6 +91,7 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
     ...DEFAULT_SETTINGS.staffPermissions,
     ...settings?.staffPermissions
   },
+  showCustomerTierToCustomer: settings?.showCustomerTierToCustomer ?? DEFAULT_SETTINGS.showCustomerTierToCustomer,
   targetSettings: {
     tier1: {
       ...DEFAULT_SETTINGS.targetSettings.tier1,

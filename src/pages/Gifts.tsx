@@ -15,18 +15,15 @@ import {
   updateGiftHistoryRecord,
   updateGiftItemRecord
 } from '../services/firestoreService';
-import type { GiftEligibleTier, GiftHistory, GiftItem, GiftItemFormData, GiftItemTargetType, GiftPeriod } from '../types';
+import type { GiftHistory, GiftItem, GiftItemFormData, GiftPeriod } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
-import { buildGiftEligibilityRows, getGiftPeriodLabel, getGiftPeriodStart } from '../utils/giftUtils';
+import { buildGiftEligibilityRows, getGiftPeriodLabel, getGiftPeriodStart, getMonthEndDateString } from '../utils/giftUtils';
+import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 
 const emptyGiftItemForm: GiftItemFormData = {
   giftItemName: '',
-  targetType: 'profit',
   targetValue: 0,
-  minBudget: 0,
-  maxBudget: 0,
-  eligibleTier: 'All',
   notes: '',
   isActive: true
 };
@@ -39,9 +36,10 @@ const Gifts = () => {
   const [giftItemForm, setGiftItemForm] = useState<GiftItemFormData>(emptyGiftItemForm);
   const [editingGiftItemId, setEditingGiftItemId] = useState('');
   const [savingGiftItem, setSavingGiftItem] = useState(false);
-  const [periodType, setPeriodType] = useState<GiftPeriod>('3_months');
-  const [periodEnd, setPeriodEnd] = useState(getTodayDateString());
-  const [customPeriodStart, setCustomPeriodStart] = useState(getGiftPeriodStart('3_months', getTodayDateString()));
+  const defaultPeriodEnd = getMonthEndDateString(getTodayDateString());
+  const [periodType, setPeriodType] = useState<GiftPeriod>('1_month');
+  const [periodEnd, setPeriodEnd] = useState(defaultPeriodEnd);
+  const [customPeriodStart, setCustomPeriodStart] = useState(getGiftPeriodStart('1_month', defaultPeriodEnd));
   const [notesByCustomer, setNotesByCustomer] = useState<Record<string, string>>({});
   const [giftError, setGiftError] = useState('');
   const [message, setMessage] = useState('');
@@ -71,6 +69,18 @@ const Gifts = () => {
   const giftRows = useMemo(() => {
     return buildGiftEligibilityRows(customers, invoices, giftHistory, settings, periodType, periodStart, periodEnd);
   }, [customers, giftHistory, invoices, periodEnd, periodStart, periodType, settings]);
+  const sortedGiftItems = useMemo(() => sortNewestFirst(giftItems, ['updatedAt', 'createdAt']), [giftItems]);
+  const sortedGiftRows = useMemo(() => {
+    return sortNewestFirst(
+      giftRows.map((row) => ({ ...row, updatedAt: row.customer.updatedAt, createdAt: row.customer.createdAt })),
+      ['updatedAt', 'createdAt']
+    );
+  }, [giftRows]);
+  const sortedGiftHistory = useMemo(() => sortNewestFirst(giftHistory, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [giftHistory]);
+
+  const getActionGiftBudget = (row: (typeof giftRows)[number]) => {
+    return row.pendingApproval?.giftBudget ?? row.pendingApproval?.suggestedGiftBudget ?? row.remainingEligibility;
+  };
 
   const totals = useMemo(() => {
     return {
@@ -93,10 +103,11 @@ const Gifts = () => {
     salesAmount: row.salesAmount,
     profitConsidered: row.profitConsidered,
     giftPercentage: row.giftPercentage,
-    giftAmount: status === 'Given' ? row.giftBudget : 0,
-    suggestedGiftBudget: row.giftBudget,
-    actualGiftAmount: status === 'Given' ? row.giftBudget : 0,
+    giftAmount: status === 'Given' ? getActionGiftBudget(row) : 0,
+    suggestedGiftBudget: getActionGiftBudget(row),
+    actualGiftAmount: status === 'Given' ? getActionGiftBudget(row) : 0,
     giftItem: row.suggestedGiftItem,
+    giftBudget: getActionGiftBudget(row),
     giftedDate: status === 'Given' ? getTodayDateString() : '',
     giftGivenDate: status === 'Given' ? getTodayDateString() : '',
     giftedBy: status === 'Given' ? userProfile?.email || 'Admin' : '',
@@ -111,12 +122,12 @@ const Gifts = () => {
       return;
     }
 
-    if (row.giftBudget <= 0) {
+    if (row.remainingEligibility <= 0) {
       setGiftError('Gift budget is zero for this customer and period.');
       return;
     }
 
-    const confirmed = window.confirm(`Approve ${formatMoney(row.giftBudget)} gift budget for ${row.customer.name}?`);
+    const confirmed = window.confirm(`Approve ${formatMoney(row.remainingEligibility)} gift budget for ${row.customer.name}?`);
     if (!confirmed) return;
 
     await createGiftHistoryRecord(buildGiftPayload(row, 'Approved'), auditUser);
@@ -131,7 +142,7 @@ const Gifts = () => {
       return;
     }
 
-    const confirmed = window.confirm(`Mark approved gift ${formatMoney(row.giftBudget)} as given to ${row.customer.name}?`);
+    const confirmed = window.confirm(`Mark approved gift ${formatMoney(getActionGiftBudget(row))} as given to ${row.customer.name}?`);
     if (!confirmed) return;
 
     await updateGiftHistoryRecord(row.pendingApproval.id, buildGiftPayload(row, 'Given'), auditUser);
@@ -147,10 +158,10 @@ const Gifts = () => {
     await loadGiftData();
   };
 
-  const handleGiftItemNumberChange = (field: 'targetValue' | 'minBudget' | 'maxBudget', value: string) => {
+  const handleGiftItemNumberChange = (value: string) => {
     setGiftItemForm((current) => ({
       ...current,
-      [field]: value.trim() === '' ? 0 : Number(value)
+      targetValue: value.trim() === '' ? 0 : Number(value)
     }));
   };
 
@@ -172,18 +183,9 @@ const Gifts = () => {
 
     if (
       !Number.isFinite(giftItemForm.targetValue) ||
-      !Number.isFinite(giftItemForm.minBudget) ||
-      !Number.isFinite(giftItemForm.maxBudget) ||
-      giftItemForm.targetValue < 0 ||
-      giftItemForm.minBudget < 0 ||
-      giftItemForm.maxBudget < 0
+      giftItemForm.targetValue < 0
     ) {
-      setGiftError('Gift item target and budget values must be valid non-negative numbers.');
-      return;
-    }
-
-    if (giftItemForm.maxBudget < giftItemForm.minBudget) {
-      setGiftError('Maximum budget must be greater than or equal to minimum budget.');
+      setGiftError('Gift item target value must be a valid non-negative number.');
       return;
     }
 
@@ -191,7 +193,7 @@ const Gifts = () => {
       setSavingGiftItem(true);
       setGiftError('');
 
-      // Admin-only rule: gift item targets decide which gift options are suggested later.
+      // Admin-only rule: targetValue is the customer gift budget threshold used on Suggested Gifts.
       if (editingGiftItemId) {
         await updateGiftItemRecord(editingGiftItemId, giftItemForm, auditUser);
         setMessage('Gift item updated successfully.');
@@ -213,11 +215,7 @@ const Gifts = () => {
     setEditingGiftItemId(giftItem.id);
     setGiftItemForm({
       giftItemName: giftItem.giftItemName,
-      targetType: giftItem.targetType,
       targetValue: giftItem.targetValue,
-      minBudget: giftItem.minBudget,
-      maxBudget: giftItem.maxBudget,
-      eligibleTier: giftItem.eligibleTier,
       notes: giftItem.notes,
       isActive: giftItem.isActive
     });
@@ -236,6 +234,19 @@ const Gifts = () => {
     await deleteGiftItemRecord(giftItem.id, auditUser);
     setMessage('Gift item deleted.');
     await loadGiftData();
+  };
+
+  const handlePeriodEndChange = (value: string) => {
+    const normalizedMonthEnd = getMonthEndDateString(value);
+    const minimumPeriodStart = getGiftPeriodStart('1_month', normalizedMonthEnd);
+    setPeriodEnd(normalizedMonthEnd);
+    setCustomPeriodStart((current) => (current > minimumPeriodStart ? minimumPeriodStart : current));
+  };
+
+  const handleCustomPeriodStartChange = (value: string) => {
+    const minimumPeriodStart = getGiftPeriodStart('1_month', periodEnd);
+    // Custom gift ranges cannot be shorter than one full month.
+    setCustomPeriodStart(value > minimumPeriodStart ? minimumPeriodStart : value);
   };
 
   const cardStyle: CSSProperties = {
@@ -309,7 +320,7 @@ const Gifts = () => {
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Admin Gift Item Settings</div>
         <div style={{ color: '#67738E', marginBottom: 14 }}>
-          Gift item targets are admin-managed rules. Matching rules are used on the Suggested Gifts page.
+          Gift item targets are admin-managed rules. Target Value means the customer gift budget needed before this item can be suggested.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14, marginBottom: 14 }}>
           <label style={{ fontWeight: 800 }}>
@@ -321,41 +332,8 @@ const Gifts = () => {
             />
           </label>
           <label style={{ fontWeight: 800 }}>
-            Target Type
-            <select
-              style={{ ...inputStyle, marginTop: 6 }}
-              value={giftItemForm.targetType}
-              onChange={(event) => setGiftItemForm((current) => ({ ...current, targetType: event.target.value as GiftItemTargetType }))}
-            >
-              <option value="profit">Profit</option>
-              <option value="sales">Sales</option>
-              <option value="score">Score</option>
-            </select>
-          </label>
-          <label style={{ fontWeight: 800 }}>
             Target Value
-            <input style={{ ...inputStyle, marginTop: 6 }} type="number" min={0} value={giftItemForm.targetValue} onChange={(event) => handleGiftItemNumberChange('targetValue', event.target.value)} />
-          </label>
-          <label style={{ fontWeight: 800 }}>
-            Minimum Budget
-            <input style={{ ...inputStyle, marginTop: 6 }} type="number" min={0} value={giftItemForm.minBudget} onChange={(event) => handleGiftItemNumberChange('minBudget', event.target.value)} />
-          </label>
-          <label style={{ fontWeight: 800 }}>
-            Maximum Budget
-            <input style={{ ...inputStyle, marginTop: 6 }} type="number" min={0} value={giftItemForm.maxBudget} onChange={(event) => handleGiftItemNumberChange('maxBudget', event.target.value)} />
-          </label>
-          <label style={{ fontWeight: 800 }}>
-            Eligible Tier
-            <select
-              style={{ ...inputStyle, marginTop: 6 }}
-              value={giftItemForm.eligibleTier}
-              onChange={(event) => setGiftItemForm((current) => ({ ...current, eligibleTier: event.target.value as GiftEligibleTier }))}
-            >
-              <option value="All">All</option>
-              <option value="Tier 1">Tier 1</option>
-              <option value="Tier 2">Tier 2</option>
-              <option value="Tier 3">Tier 3</option>
-            </select>
+            <input style={{ ...inputStyle, marginTop: 6 }} type="number" min={0} value={giftItemForm.targetValue} onChange={(event) => handleGiftItemNumberChange(event.target.value)} />
           </label>
           <label style={{ fontWeight: 800 }}>
             Active / Inactive
@@ -387,25 +365,24 @@ const Gifts = () => {
             </button>
           ) : null}
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ ...tableStyle, minWidth: 1040 }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
+          <table style={{ ...tableStyle, minWidth: 820 }}>
             <thead>
               <tr>
-                {['Gift Item', 'Target', 'Budget Range', 'Eligible Tier', 'Status', 'Notes', 'Actions'].map((header) => (
+                {['Gift Item', 'Target Value', 'Status', 'Notes', 'Actions'].map((header) => (
                   <th key={header} style={headerCellStyle}>{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {giftItems.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={7}>No gift items added yet.</td></tr>
+              {sortedGiftItems.length === 0 ? (
+                <tr><td style={cellStyle} colSpan={5}>No gift items added yet.</td></tr>
               ) : (
-                giftItems.map((giftItem) => (
+                sortedGiftItems.map((giftItem) => (
                   <tr key={giftItem.id}>
                     <td style={cellStyle}><strong>{giftItem.giftItemName}</strong></td>
-                    <td style={cellStyle}>{giftItem.targetType}: {giftItem.targetType === 'score' ? giftItem.targetValue : formatMoney(giftItem.targetValue)}</td>
-                    <td style={cellStyle}>{formatMoney(giftItem.minBudget)} - {formatMoney(giftItem.maxBudget)}</td>
-                    <td style={cellStyle}>{giftItem.eligibleTier}</td>
+                    <td style={cellStyle}>{formatMoney(giftItem.targetValue)}</td>
                     <td style={{ ...cellStyle, color: giftItem.isActive ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{giftItem.isActive ? 'Active' : 'Inactive'}</td>
                     <td style={cellStyle}>{giftItem.notes || '-'}</td>
                     <td style={cellStyle}>
@@ -432,6 +409,7 @@ const Gifts = () => {
           <label style={{ fontWeight: 800 }}>
             Gift Period
             <select style={{ ...inputStyle, marginTop: 6 }} value={periodType} onChange={(event) => setPeriodType(event.target.value as GiftPeriod)}>
+              <option value="1_month">1 month</option>
               <option value="3_months">3 months</option>
               <option value="6_months">6 months</option>
               <option value="1_year">1 year</option>
@@ -441,19 +419,23 @@ const Gifts = () => {
           {periodType === 'custom' ? (
             <label style={{ fontWeight: 800 }}>
               Period Start
-              <input style={{ ...inputStyle, marginTop: 6 }} type="date" value={customPeriodStart} onChange={(event) => setCustomPeriodStart(event.target.value)} />
+              <input style={{ ...inputStyle, marginTop: 6 }} type="date" value={customPeriodStart} onChange={(event) => handleCustomPeriodStartChange(event.target.value)} />
             </label>
           ) : null}
           <label style={{ fontWeight: 800 }}>
             Period End
-            <input style={{ ...inputStyle, marginTop: 6 }} type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} />
+            <input style={{ ...inputStyle, marginTop: 6 }} type="date" value={periodEnd} onChange={(event) => handlePeriodEndChange(event.target.value)} />
           </label>
         </div>
       </div>
 
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Gift Eligibility</div>
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
+          Period end is normalized to month-end. Already gifted overlapping periods are deducted from Remaining.
+        </div>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -463,7 +445,7 @@ const Gifts = () => {
               </tr>
             </thead>
             <tbody>
-              {giftRows.map((row) => (
+              {sortedGiftRows.map((row) => (
                 <tr key={row.customer.id}>
                   <td style={cellStyle}><strong>{row.customer.name}</strong></td>
                   <td style={cellStyle}><TierBadge tier={row.customer.tier} /></td>
@@ -485,7 +467,6 @@ const Gifts = () => {
                     {row.pendingApproval ? (
                       <button
                         type="button"
-                        disabled={row.isDuplicatePeriod}
                         style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}
                         onClick={() => handleMarkGifted(row)}
                       >
@@ -494,7 +475,7 @@ const Gifts = () => {
                     ) : (
                       <button
                         type="button"
-                        disabled={row.isDuplicatePeriod || row.giftBudget <= 0}
+                        disabled={row.isDuplicatePeriod || row.remainingEligibility <= 0}
                         style={{ ...buttonStyle, background: row.isDuplicatePeriod ? '#E8EDF4' : '#D4AF37', color: '#0B1F3A' }}
                         onClick={() => handleApproveGift(row)}
                       >
@@ -511,7 +492,8 @@ const Gifts = () => {
 
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Gift History</div>
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -521,10 +503,10 @@ const Gifts = () => {
               </tr>
             </thead>
             <tbody>
-              {giftHistory.length === 0 ? (
+              {sortedGiftHistory.length === 0 ? (
                 <tr><td style={cellStyle} colSpan={12}>No gift history yet.</td></tr>
               ) : (
-                giftHistory.map((gift) => (
+                sortedGiftHistory.map((gift) => (
                   <tr key={gift.id}>
                     <td style={cellStyle}>{gift.customerName}</td>
                     <td style={cellStyle}><TierBadge tier={gift.tierAtGiftTime} /></td>
@@ -533,7 +515,7 @@ const Gifts = () => {
                     <td style={cellStyle}>{formatMoney(gift.profitConsidered)}</td>
                     <td style={cellStyle}>{formatMoney(gift.suggestedGiftBudget)}</td>
                     <td style={cellStyle}>{formatMoney(gift.actualGiftAmount)}</td>
-                    <td style={cellStyle}>{gift.giftItem || '-'}</td>
+                    <td style={cellStyle}>{gift.selectedGiftItemName || gift.giftItem || '-'}</td>
                     <td style={cellStyle}>{gift.giftGivenDate || '-'}</td>
                     <td style={cellStyle}>{gift.approvedBy || '-'}</td>
                     <td style={cellStyle}>{gift.notes || '-'}</td>
