@@ -10,13 +10,13 @@ import {
   getCustomers,
   getInvoices,
   getNextInvoiceNumber,
-  getPayments,
   getPaymentsByInvoiceId,
+  getPaymentsByInvoiceIds,
   updateInvoiceRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS, calculateDynamicDueDate } from '../utils/settings';
@@ -34,6 +34,8 @@ const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   totalProfit: 0,
   notes: ''
 });
+
+const LIST_PAGE_SIZE = 50;
 
 const getInvoiceStatus = (dueDate: string, totalSales: number, paidAmount: number) => {
   const outstanding = totalSales - paidAmount;
@@ -63,6 +65,7 @@ const Invoices = () => {
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [invoiceLimit, setInvoiceLimit] = useState(LIST_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -79,13 +82,13 @@ const Invoices = () => {
       setLoading(true);
       setError('');
 
-      const [customerRows, invoiceRows, paymentRows, invoiceNumber, appSettings] = await Promise.all([
+      const [customerRows, invoiceRows, invoiceNumber, appSettings] = await Promise.all([
         getCustomers(),
-        getInvoices(),
-        getPayments(),
+        getInvoices({ limitCount: invoiceLimit }),
         getNextInvoiceNumber(),
         getAppSettings()
       ]);
+      const paymentRows = await getPaymentsByInvoiceIds(invoiceRows.map((invoice) => invoice.id));
 
       setCustomers(customerRows);
       setInvoices(invoiceRows);
@@ -101,7 +104,7 @@ const Invoices = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [invoiceLimit]);
 
   const getPaidAmount = (invoiceId: string) => {
     return payments
@@ -304,8 +307,8 @@ const Invoices = () => {
             </div>
             <div>
               <strong>${escapeHtml(invoice.invoiceNumber)}</strong><br />
-              Date: ${escapeHtml(invoice.date)}<br />
-              Due: ${escapeHtml(invoice.dueDate)}
+              Date: ${escapeHtml(formatDate(invoice.date))}<br />
+              Due: ${escapeHtml(formatDate(invoice.dueDate))}
             </div>
           </div>
           <div><strong>Customer:</strong> ${escapeHtml(invoice.customerName)}</div>
@@ -322,6 +325,11 @@ const Invoices = () => {
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
+  };
+
+  const handleLoadMore = () => {
+    // Free-tier safety: older rows are fetched only when the user asks for them.
+    setInvoiceLimit((current) => current + LIST_PAGE_SIZE);
   };
 
   const cardStyle: CSSProperties = {
@@ -517,8 +525,8 @@ const Invoices = () => {
                   <tr key={invoice.id}>
                     <td style={cellStyle}><strong>{invoice.invoiceNumber}</strong></td>
                     <td style={cellStyle}>{invoice.customerName}</td>
-                    <td style={cellStyle}>{invoice.date}</td>
-                    <td style={cellStyle}>{invoice.effectiveDueDate}</td>
+                    <td style={cellStyle}>{formatDate(invoice.date)}</td>
+                    <td style={cellStyle}>{formatDate(invoice.effectiveDueDate)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.totalSales)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.costAmount)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.transportAmount)}</td>
@@ -549,6 +557,11 @@ const Invoices = () => {
             </tbody>
           </table>
         </div>
+        {!loading && invoices.length >= invoiceLimit ? (
+          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
+            Load More
+          </button>
+        ) : null}
       </div>
     </div>
   );

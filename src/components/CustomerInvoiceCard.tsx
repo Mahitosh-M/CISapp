@@ -1,6 +1,6 @@
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import type { CustomerInvoiceView } from '../utils/customerPortal';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatMoney } from '../utils/formatters';
 
 interface CustomerInvoiceCardProps {
   invoiceView: CustomerInvoiceView;
@@ -27,8 +27,8 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
               {invoiceView.status}
             </span>
           </div>
-          <div style={{ color: '#67738E', fontSize: 12, marginTop: 8 }}>Invoice: {invoiceView.invoice.date}</div>
-          <div style={{ color: '#67738E', fontSize: 12 }}>Due: {invoiceView.invoice.dueDate || 'Due date not set'}</div>
+          <div style={{ color: '#67738E', fontSize: 12, marginTop: 8 }}>Invoice: {formatDate(invoiceView.invoice.date)}</div>
+          <div style={{ color: '#67738E', fontSize: 12 }}>Due: {invoiceView.invoice.dueDate ? formatDate(invoiceView.invoice.dueDate) : 'Due date not set'}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
             <div>
               <div style={{ color: '#67738E', fontSize: 11 }}>Paid</div>

@@ -21,18 +21,18 @@ import SectionHeader from '../components/SectionHeader';
 import { useErpData } from '../hooks/useErpData';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { getPrevious30DaysRange, isDateInRange } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatMoney } from '../utils/formatters';
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
 
 const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#F2994A'];
 
 const Analytics = () => {
-  const { customers, invoices, payments, settings, loading, error } = useErpData();
   const defaultRange = useMemo(() => getPrevious30DaysRange(), []);
   const [fromDate, setFromDate] = useState(defaultRange.fromDate);
   const [toDate, setToDate] = useState(defaultRange.toDate);
   const [activeFromDate, setActiveFromDate] = useState(defaultRange.fromDate);
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
+  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
@@ -164,9 +164,9 @@ const Analytics = () => {
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={salesTrend}>
               <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="date" />
+              <XAxis dataKey="date" tickFormatter={formatDate} />
               <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
+              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(String(label))} />
               <Line type="monotone" dataKey="sales" stroke="#D4AF37" strokeWidth={3} dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -177,9 +177,9 @@ const Analytics = () => {
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={profitTrend}>
               <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="month" />
+              <XAxis dataKey="month" tickFormatter={(value) => formatDate(`${value}-01`)} />
               <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
+              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(`${String(label)}-01`)} />
               <Area type="monotone" dataKey="profit" stroke="#0B1F3A" fill="#D4AF37" fillOpacity={0.35} />
             </AreaChart>
           </ResponsiveContainer>
@@ -218,9 +218,9 @@ const Analytics = () => {
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={paymentCollectionTrend}>
               <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="date" />
+              <XAxis dataKey="date" tickFormatter={formatDate} />
               <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
+              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(String(label))} />
               <Line type="monotone" dataKey="collected" stroke="#56CCF2" strokeWidth={3} dot={false} />
             </LineChart>
           </ResponsiveContainer>

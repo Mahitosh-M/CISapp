@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, FileText, ShoppingCart, WalletCards } from
 import { Link } from 'react-router-dom';
 import CustomerInvoiceCard from '../../components/CustomerInvoiceCard';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
-import { formatMoney } from '../../utils/formatters';
+import { formatDate, formatMoney } from '../../utils/formatters';
 import { calculateCustomerTotalOutstanding, isCurrentMonth, sortInvoicesByUrgency } from '../../utils/customerPortal';
 import { sortNewestFirst } from '../../utils/listDisplay';
 
@@ -20,7 +20,7 @@ const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; va
 );
 
 const CustomerDashboard = () => {
-  const { customer, invoices, payments, invoiceViews, settings } = useCustomerPortalContext();
+  const { customer, invoices, payments, invoiceViews } = useCustomerPortalContext();
   const currentMonthInvoices = invoices.filter((invoice) => isCurrentMonth(invoice.date));
   const currentMonthPayments = payments.filter((payment) => isCurrentMonth(payment.date));
   const currentMonthPurchases = currentMonthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
@@ -38,10 +38,6 @@ const CustomerDashboard = () => {
     <div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ color: '#67738E', fontSize: 13, fontWeight: 800 }}>Welcome back</div>
-        <div style={{ fontSize: 24, fontWeight: 900 }}>{customer?.name || 'Customer'}</div>
-        {settings.showCustomerTierToCustomer && customer ? (
-          <div style={{ color: '#D4AF37', fontWeight: 900, marginTop: 4 }}>Customer Category: {customer.tier}</div>
-        ) : null}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
@@ -95,7 +91,7 @@ const CustomerDashboard = () => {
           <div key={invoice.id} style={{ background: '#FFFFFF', borderRadius: 16, padding: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
             <div>
               <div style={{ fontWeight: 900 }}>{invoice.invoiceNumber}</div>
-              <div style={{ color: '#67738E', fontSize: 12 }}>{invoice.date}</div>
+              <div style={{ color: '#67738E', fontSize: 12 }}>{formatDate(invoice.date)}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontWeight: 900 }}>{formatMoney(invoice.totalSales)}</div>
@@ -116,7 +112,7 @@ const CustomerDashboard = () => {
           <div key={payment.id} style={{ background: '#FFFFFF', borderRadius: 16, padding: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
             <div>
               <div style={{ fontWeight: 900 }}>{payment.invoiceNumber || payment.id.slice(0, 8)}</div>
-              <div style={{ color: '#67738E', fontSize: 12 }}>{payment.date} | {payment.mode}</div>
+              <div style={{ color: '#67738E', fontSize: 12 }}>{formatDate(payment.date)} | {payment.mode}</div>
             </div>
             <div style={{ textAlign: 'right', color: '#166534', fontWeight: 900 }}>
               <CheckCircle2 size={17} style={{ verticalAlign: 'middle', marginRight: 4 }} />

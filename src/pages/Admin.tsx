@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import SectionHeader from '../components/SectionHeader';
@@ -7,24 +7,40 @@ import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { createCustomerAuthAccount, createStaffAuthAccount, sendUserPasswordResetEmail } from '../services/authService';
 import {
+  createOffer,
   deleteUserProfileRecord,
+  deleteOfferRecord,
   getAlerts,
   getGiftHistory,
+  getOffers,
   getUserProfiles,
   updateAlertStatus,
   updateCustomerRecord,
   updateGiftHistoryRecord,
+  updateOfferRecord,
   updateUserProfileRecord,
   upsertAlerts
 } from '../services/firestoreService';
 import { useErpData } from '../hooks/useErpData';
-import type { Alert, GiftHistory, UserProfile, UserRole } from '../types';
+import { uploadOfferImage, validateOfferImageFile } from '../services/storageService';
+import type { Alert, GiftHistory, Offer, OfferFormData, UserProfile, UserRole } from '../types';
 import { buildOperationalAlerts } from '../utils/alertUtils';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
 import { getPaymentTermsLabel } from '../utils/settings';
+
+const emptyOfferForm: OfferFormData = {
+  title: '',
+  description: '',
+  imageUrl: '',
+  imagePath: '',
+  startDate: '',
+  endDate: '',
+  isActive: true
+};
 
 const Admin = () => {
   const { customers, invoices, payments, settings, loading, error, refreshData } = useErpData();
@@ -32,6 +48,14 @@ const Admin = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [offerForm, setOfferForm] = useState<OfferFormData>(emptyOfferForm);
+  const [editingOfferId, setEditingOfferId] = useState('');
+  const [selectedOfferImageFile, setSelectedOfferImageFile] = useState<File | null>(null);
+  const [offerImagePreviewUrl, setOfferImagePreviewUrl] = useState('');
+  const [offerImageError, setOfferImageError] = useState('');
+  const [offerUploadProgress, setOfferUploadProgress] = useState(0);
+  const [offerImageInputKey, setOfferImageInputKey] = useState(0);
   const [staffName, setStaffName] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
@@ -54,14 +78,16 @@ const Admin = () => {
   const loadAdminData = async () => {
     try {
       setAdminError('');
-      const [userRows, alertRows, giftRows] = await Promise.all([
+      const [userRows, alertRows, giftRows, offerRows] = await Promise.all([
         getUserProfiles(),
         getAlerts(),
-        getGiftHistory()
+        getGiftHistory(),
+        getOffers()
       ]);
       setUsers(userRows);
       setAlerts(alertRows);
       setGiftHistory(giftRows);
+      setOffers(offerRows);
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Unable to load admin data.');
     }
@@ -70,6 +96,18 @@ const Admin = () => {
   useEffect(() => {
     loadAdminData();
   }, []);
+
+  useEffect(() => {
+    if (!selectedOfferImageFile) {
+      setOfferImagePreviewUrl('');
+      return undefined;
+    }
+
+    const objectUrl = URL.createObjectURL(selectedOfferImageFile);
+    setOfferImagePreviewUrl(objectUrl);
+
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [selectedOfferImageFile]);
 
   const generatedAlerts = useMemo(() => buildOperationalAlerts(customers, invoices, payments, settings), [customers, invoices, payments, settings]);
   const openAlerts = alerts.filter((alert) => alert.status === 'Open');
@@ -88,6 +126,8 @@ const Admin = () => {
   );
   const sortedPendingGifts = useMemo(() => sortNewestFirst(pendingGifts, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [pendingGifts]);
   const sortedTierOverrides = useMemo(() => sortNewestFirst(tierOverrides, ['updatedAt', 'createdAt']), [tierOverrides]);
+  const sortedOffers = useMemo(() => sortOffersByLatest(offers), [offers]);
+  const isAdmin = userProfile?.role === 'Admin';
 
   const handleSyncAlerts = async () => {
     try {
@@ -132,7 +172,7 @@ const Admin = () => {
           date: getTodayDateString(),
           status: 'Open' as const,
           actionRequired: 'Approve or mark the pending gift as given.',
-          message: `${gift.customerName} has a pending gift for ${gift.periodStart} to ${gift.periodEnd}.`
+          message: `${gift.customerName} has a pending gift for ${formatDateRange(gift.periodStart, gift.periodEnd)}.`
         }));
 
       await upsertAlerts([...generatedAlerts, ...giftPendingAlerts], auditUser);
@@ -198,6 +238,152 @@ const Admin = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleOfferFieldChange = (field: keyof OfferFormData, value: string | boolean) => {
+    setOfferForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  };
+
+  const clearSelectedImage = () => {
+    setSelectedOfferImageFile(null);
+    setOfferImageError('');
+    setOfferUploadProgress(0);
+    setOfferImageInputKey((current) => current + 1);
+  };
+
+  const handleImagePreview = (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+
+    const validationError = validateOfferImageFile(selectedFile);
+    if (validationError) {
+      setOfferImageError(validationError);
+      setSelectedOfferImageFile(null);
+      setOfferUploadProgress(0);
+      event.target.value = '';
+      return;
+    }
+
+    setOfferImageError('');
+    setOfferUploadProgress(0);
+    setSelectedOfferImageFile(selectedFile);
+  };
+
+  const resetOfferForm = () => {
+    setOfferForm({ ...emptyOfferForm });
+    setEditingOfferId('');
+    clearSelectedImage();
+  };
+
+  const handleSaveOffer = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (!isAdmin) {
+      setAdminError('Only Admin users can manage offers.');
+      return;
+    }
+
+    if (!offerForm.title.trim()) {
+      setAdminError('Offer title is required.');
+      return;
+    }
+
+    if (offerForm.startDate && offerForm.endDate && offerForm.startDate > offerForm.endDate) {
+      setAdminError('Offer start date cannot be after end date.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setAdminError('');
+      setOfferUploadProgress(0);
+      let offerPayload = offerForm;
+
+      if (selectedOfferImageFile) {
+        // Upload selected offer image to Firebase Storage before saving Firestore offer metadata.
+        const uploadedImage = await uploadOfferImage(selectedOfferImageFile, editingOfferId || undefined, setOfferUploadProgress);
+        offerPayload = {
+          ...offerForm,
+          // Existing customer popup/carousel read this imageUrl field, so uploaded images appear automatically.
+          imageUrl: uploadedImage.imageUrl,
+          imagePath: uploadedImage.imagePath
+        };
+      }
+
+      if (editingOfferId) {
+        await updateOfferRecord(editingOfferId, offerPayload, auditUser);
+        setMessage('Offer updated successfully.');
+      } else {
+        await createOffer(offerPayload, auditUser);
+        setMessage('Offer created successfully.');
+      }
+
+      resetOfferForm();
+      await loadAdminData();
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Unable to save offer.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditOffer = (offer: Offer) => {
+    setEditingOfferId(offer.id);
+    setOfferForm({
+      title: offer.title,
+      description: offer.description || '',
+      imageUrl: offer.imageUrl || '',
+      imagePath: offer.imagePath || '',
+      startDate: offer.startDate || '',
+      endDate: offer.endDate || '',
+      isActive: offer.isActive
+    });
+    clearSelectedImage();
+    setAdminError('');
+    setMessage('');
+  };
+
+  const handleToggleOffer = async (offer: Offer) => {
+    if (!isAdmin) {
+      setAdminError('Only Admin users can manage offers.');
+      return;
+    }
+
+    await updateOfferRecord(
+      offer.id,
+      {
+        title: offer.title,
+        description: offer.description || '',
+        imageUrl: offer.imageUrl || '',
+        imagePath: offer.imagePath || '',
+        startDate: offer.startDate || '',
+        endDate: offer.endDate || '',
+        isActive: !offer.isActive
+      },
+      auditUser
+    );
+    setMessage(offer.isActive ? 'Offer deactivated.' : 'Offer activated.');
+    await loadAdminData();
+  };
+
+  const handleDeleteOffer = async (offer: Offer) => {
+    if (!isAdmin) {
+      setAdminError('Only Admin users can manage offers.');
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete offer "${offer.title}"?`);
+    if (!confirmed) return;
+
+    await deleteOfferRecord(offer.id, auditUser);
+    setMessage('Offer deleted successfully.');
+    if (editingOfferId === offer.id) {
+      resetOfferForm();
+    }
+    await loadAdminData();
   };
 
   const handleUserRoleChange = async (user: UserProfile, role: UserRole) => {
@@ -348,6 +534,8 @@ const Admin = () => {
     </>
   );
 
+  const offerImagePreviewSource = offerImagePreviewUrl || offerForm.imageUrl;
+
   if (loading) {
     return <SectionHeader title="Admin" description="Loading system health..." />;
   }
@@ -382,6 +570,140 @@ const Admin = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      <form style={cardStyle} onSubmit={handleSaveOffer}>
+        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>{editingOfferId ? 'Edit Offer' : 'Create Offer'}</div>
+        <div style={{ color: '#67738E', marginBottom: 12 }}>
+          Admin-created active offers appear in the customer popup and Offers carousel. Inactive offers stay saved but are hidden from customers.
+        </div>
+        <div style={gridStyle}>
+          <label style={{ fontWeight: 800 }}>
+            Title
+            <input style={inputStyle} value={offerForm.title} onChange={(event) => handleOfferFieldChange('title', event.target.value)} />
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            Image URL fallback
+            <input style={inputStyle} value={offerForm.imageUrl} onChange={(event) => handleOfferFieldChange('imageUrl', event.target.value)} />
+            <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
+              Optional manual URL. If you upload an image, the Firebase Storage download URL is saved here.
+            </span>
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            Upload Image
+            <input
+              key={offerImageInputKey}
+              style={inputStyle}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleImagePreview}
+            />
+            <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
+              JPG, PNG, or WebP below 2 MB.
+            </span>
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            Start Date
+            <input style={inputStyle} type="date" value={offerForm.startDate} onChange={(event) => handleOfferFieldChange('startDate', event.target.value)} />
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            End Date
+            <input style={inputStyle} type="date" value={offerForm.endDate} onChange={(event) => handleOfferFieldChange('endDate', event.target.value)} />
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            Status
+            <select style={inputStyle} value={offerForm.isActive ? 'active' : 'inactive'} onChange={(event) => handleOfferFieldChange('isActive', event.target.value === 'active')}>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
+        </div>
+        {offerImageError ? <div style={{ color: '#B42318', marginTop: 12, fontWeight: 800 }}>{offerImageError}</div> : null}
+        {offerImagePreviewSource ? (
+          <div style={{ marginTop: 14, border: '1px solid #E8EDF4', borderRadius: 14, padding: 12 }}>
+            <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
+              {selectedOfferImageFile ? 'Selected image preview' : 'Current image preview'}
+            </div>
+            <img
+              src={offerImagePreviewSource}
+              alt="Offer preview"
+              style={{ width: '100%', maxWidth: 360, height: 180, objectFit: 'cover', borderRadius: 12, display: 'block' }}
+            />
+            {selectedOfferImageFile ? (
+              <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 10 }} onClick={clearSelectedImage}>
+                Remove Selected Image
+              </button>
+            ) : null}
+            {offerForm.imagePath ? (
+              <div style={{ color: '#67738E', fontSize: 12, marginTop: 8 }}>
+                Storage image is linked. Future improvement: add safe old-image deletion or compression when replacing images.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {saving && selectedOfferImageFile ? (
+          <div style={{ marginTop: 12, color: '#67738E', fontWeight: 800 }}>
+            Uploading image: {offerUploadProgress}%
+          </div>
+        ) : null}
+        <label style={{ display: 'block', fontWeight: 800, marginTop: 14 }}>
+          Description
+          <textarea
+            style={{ ...inputStyle, minHeight: 76, resize: 'vertical' }}
+            value={offerForm.description}
+            onChange={(event) => handleOfferFieldChange('description', event.target.value)}
+          />
+        </label>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
+          <button type="submit" disabled={saving || !isAdmin} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
+            {saving ? 'Saving...' : editingOfferId ? 'Update Offer' : 'Add Offer'}
+          </button>
+          {editingOfferId ? (
+            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={resetOfferForm}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      </form>
+
+      <div style={cardStyle}>
+        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Offers</div>
+        {renderTable(
+          ['Title', 'Description', 'Validity', 'Status', 'Customer Visible', 'Image', 'Actions'],
+          <>
+            {sortedOffers.length === 0 ? (
+              <tr><td style={cellStyle} colSpan={7}>No offers created yet.</td></tr>
+            ) : (
+              sortedOffers.map((offer) => {
+                const visibleToCustomers = isOfferCurrentlyActive(offer);
+
+                return (
+                  <tr key={offer.id}>
+                    <td style={cellStyle}><strong>{offer.title}</strong></td>
+                    <td style={cellStyle}>{offer.description || '-'}</td>
+                    <td style={cellStyle}>{getOfferDateRangeLabel(offer)}</td>
+                    <td style={{ ...cellStyle, color: offer.isActive ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{offer.isActive ? 'Active' : 'Inactive'}</td>
+                    <td style={{ ...cellStyle, color: visibleToCustomers ? '#1B7F3A' : '#67738E', fontWeight: 900 }}>
+                      {visibleToCustomers ? 'Visible' : 'Hidden'}
+                    </td>
+                    <td style={cellStyle}>{offer.imagePath ? 'Uploaded' : offer.imageUrl ? 'Manual URL' : 'No'}</td>
+                    <td style={cellStyle}>
+                      <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEditOffer(offer)}>
+                        Edit
+                      </button>
+                      <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }} onClick={() => handleToggleOffer(offer)}>
+                        {offer.isActive ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDeleteOffer(offer)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </>
+        )}
       </div>
 
       <form style={cardStyle} onSubmit={handleCreateStaff}>
@@ -506,7 +828,7 @@ const Admin = () => {
                   <td style={cellStyle}>{gift.customerName}</td>
                   <td style={cellStyle}><TierBadge tier={gift.tierAtGiftTime} /></td>
                   <td style={cellStyle}>{gift.status}</td>
-                  <td style={cellStyle}>{gift.periodStart} to {gift.periodEnd}</td>
+                  <td style={cellStyle}>{formatDateRange(gift.periodStart, gift.periodEnd)}</td>
                   <td style={cellStyle}>{formatMoney(gift.suggestedGiftBudget)}</td>
                   <td style={cellStyle}>{gift.giftItem || '-'}</td>
                   <td style={cellStyle}>

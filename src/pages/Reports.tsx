@@ -8,7 +8,7 @@ import { getGiftHistory } from '../services/firestoreService';
 import type { CustomerTier, GiftHistory } from '../types';
 import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { calculateDynamicDueDate } from '../utils/settings';
@@ -102,7 +102,6 @@ const getOutstandingStatus = (dueDate: string, outstanding: number) => {
 };
 
 const Reports = () => {
-  const { customers, invoices, payments, settings, loading, error } = useErpData();
   const { userProfile } = useAuth();
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [giftError, setGiftError] = useState('');
@@ -120,12 +119,13 @@ const Reports = () => {
   const [reportType, setReportType] = useState<ReportType>('sales');
   const [draftFilters, setDraftFilters] = useState<ReportFilters>(defaultFilters);
   const [activeFilters, setActiveFilters] = useState<ReportFilters>(defaultFilters);
+  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFilters.fromDate, toDate: activeFilters.toDate });
 
   useEffect(() => {
-    getGiftHistory()
+    getGiftHistory({ fromDate: activeFilters.fromDate, toDate: activeFilters.toDate, limitCount: 100 })
       .then(setGiftHistory)
       .catch((err) => setGiftError(err instanceof Error ? err.message : 'Unable to load gift history.'));
-  }, []);
+  }, [activeFilters.fromDate, activeFilters.toDate]);
 
   const customerById = useMemo(() => new Map(customers.map((customer) => [customer.id, customer])), [customers]);
 
@@ -187,7 +187,8 @@ const Reports = () => {
     const paid = getPaidAmountForInvoice(invoice.id);
     return {
       Invoice: invoice.invoiceNumber,
-      Date: invoice.date,
+      Date: formatDate(invoice.date),
+      SortDate: invoice.date,
       Customer: invoice.customerName,
       Tier: customerById.get(invoice.customerId)?.tier ?? '-',
       Sales: formatMoney(invoice.totalSales),
@@ -198,7 +199,8 @@ const Reports = () => {
 
   const profitRows = filteredInvoices.map((invoice) => ({
     Invoice: invoice.invoiceNumber,
-    Date: invoice.date,
+    Date: formatDate(invoice.date),
+    SortDate: invoice.date,
     Customer: invoice.customerName,
     Sales: formatMoney(invoice.totalSales),
     Cost: formatMoney(invoice.costAmount),
@@ -207,7 +209,8 @@ const Reports = () => {
   }));
 
   const paymentRows = filteredPayments.map((payment) => ({
-    Date: payment.date,
+    Date: formatDate(payment.date),
+    SortDate: payment.date,
     Customer: payment.customerName,
     Invoice: payment.invoiceNumber,
     Amount: formatMoney(payment.amount),
@@ -288,10 +291,11 @@ const Reports = () => {
   });
 
   const giftRows = filteredGiftHistory.map((gift) => ({
-    Date: gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10),
+    Date: formatDate(gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10)),
+    SortDate: gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10),
     Customer: gift.customerName,
     Tier: gift.tier,
-    Period: `${gift.periodStart} to ${gift.periodEnd}`,
+    Period: formatDateRange(gift.periodStart, gift.periodEnd),
     Profit: formatMoney(gift.profitConsidered),
     Percentage: `${gift.giftPercentage}%`,
     Status: gift.status,
@@ -321,7 +325,7 @@ const Reports = () => {
     gifts: ['Date', 'Customer', 'Tier', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested Budget', 'Gift Amount', 'Gifted By', 'Notes']
   };
 
-  const activeRows = sortNewestFirst(rowsByReport[reportType], ['Date', 'SortDate', 'Due', 'Period']);
+  const activeRows = sortNewestFirst(rowsByReport[reportType], ['SortDate', 'Date', 'Due', 'Period']);
   const activeHeaders = headersByReport[reportType];
   const activeTitle = reportOptions.find((option) => option.value === reportType)?.label ?? 'Report';
 

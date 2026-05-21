@@ -22,7 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
 import { buildCustomerScores, buildIntelligenceSummary } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
@@ -30,13 +30,13 @@ import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 const chartColors = ['#D4AF37', '#56CCF2', '#EB5757'];
 
 const Dashboard = () => {
-  const { customers, invoices, payments, settings, loading, error } = useErpData();
-  const { userProfile } = useAuth();
   const defaultRange = useMemo(() => getCurrentMonthRange(), []);
   const [fromDate, setFromDate] = useState(defaultRange.fromDate);
   const [toDate, setToDate] = useState(defaultRange.toDate);
   const [activeFromDate, setActiveFromDate] = useState(defaultRange.fromDate);
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
+  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
+  const { userProfile } = useAuth();
 
   const periodInvoices = useMemo(() => {
     return invoices.filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
@@ -175,7 +175,7 @@ const Dashboard = () => {
     <div>
       <SectionHeader
         title="ERP Dashboard"
-        description={`Default view: current month (${activeFromDate} to ${activeToDate}) plus rolling customer intelligence.`}
+        description={`Default view: current month (${formatDateRange(activeFromDate, activeToDate)}) plus rolling customer intelligence.`}
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
@@ -219,9 +219,9 @@ const Dashboard = () => {
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={salesTrend}>
               <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="date" />
+              <XAxis dataKey="date" tickFormatter={formatDate} />
               <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
+              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(String(label))} />
               <Legend />
               <Line type="monotone" dataKey="sales" stroke="#D4AF37" strokeWidth={3} dot={false} />
               <Line type="monotone" dataKey="profit" stroke="#0B1F3A" strokeWidth={3} dot={false} />
@@ -234,9 +234,9 @@ const Dashboard = () => {
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={paymentTrend}>
               <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="date" />
+              <XAxis dataKey="date" tickFormatter={formatDate} />
               <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
+              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(String(label))} />
               <Line type="monotone" dataKey="collected" stroke="#56CCF2" strokeWidth={3} dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -318,7 +318,7 @@ const Dashboard = () => {
                 <div key={alert.invoiceId} style={rowStyle}>
                   <div>
                     <div style={{ fontWeight: 800 }}>{alert.invoiceNumber} - {alert.customerName}</div>
-                    <div style={mutedTextStyle}>Due {alert.effectiveDueDate} | {alert.overdueDays} day(s) overdue</div>
+                    <div style={mutedTextStyle}>Due {formatDate(alert.effectiveDueDate)} | {alert.overdueDays} day(s) overdue</div>
                   </div>
                   <div style={{ color: '#EB5757', fontWeight: 900 }}>{formatMoney(alert.overdueAmount)}</div>
                 </div>

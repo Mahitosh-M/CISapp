@@ -38,6 +38,8 @@ export const useCustomerPortalData = () => {
         linkedCustomer = (await getCustomersByName(userProfile.customerName))[0];
       }
 
+      // Customer portal free-tier/privacy rule: these helpers query only the linked customer
+      // (customerId first, customerName only as a legacy fallback), never full company collections.
       const [customerInvoices, customerPayments, appSettings, activeOffers] = await Promise.all([
         getInvoicesForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
         getPaymentsForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),

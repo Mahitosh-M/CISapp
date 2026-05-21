@@ -39,6 +39,29 @@ The app uses these Firestore collections:
 - `settings`
 - `giftHistory`
 - `users`
+- `offers`
+
+## Free Tier Optimization Notes
+
+This app is tuned to stay friendly for roughly 200-300 customers on the Firebase free tier:
+
+- Dashboard, Analytics, and Reports use date-filtered invoice/payment queries instead of loading all history by default.
+- Reports default to the current month. Use From Date, To Date, and Apply Filter before reviewing older periods.
+- Customer portal reads only the logged-in customer's linked records. `customerId` is preferred; `customerName` is only a legacy fallback.
+- Invoice and Payment list pages fetch the latest 50 records first and load older rows only when Load More is clicked.
+- Customer offer reads fetch active offers only; inactive offers are filtered away from customer popup/carousel.
+- Offer images should be compressed and hosted externally when possible, ideally below 1 MB for mobile customers.
+- Monitor the Firebase Usage dashboard monthly, especially Firestore document reads.
+
+Firestore may ask for composite indexes the first time new filtered queries run. Create the Firebase Console index from the error link if prompted. Common index shapes are:
+
+- `invoices`: `customerId ASC, date DESC`
+- `invoices`: `date DESC`
+- `payments`: `customerId ASC, date DESC`
+- `payments`: `invoiceId ASC, date DESC`
+- `payments`: `date DESC`
+- `giftHistory`: `giftedDate DESC`
+- `offers`: `isActive ASC, createdAt DESC`
 
 ## Project Setup
 

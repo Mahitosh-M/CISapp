@@ -12,11 +12,13 @@ import {
 } from '../services/firestoreService';
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect } from '../utils/paymentUtils';
 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
+const LIST_PAGE_SIZE = 50;
+const PAYMENT_FORM_INVOICE_LIMIT = 200;
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -39,6 +41,7 @@ const Payments = () => {
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
   const [modeFilter, setModeFilter] = useState('all');
+  const [paymentLimit, setPaymentLimit] = useState(LIST_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -57,8 +60,8 @@ const Payments = () => {
 
       const [customerRows, invoiceRows, paymentRows] = await Promise.all([
         getCustomers(),
-        getInvoices(),
-        getPayments()
+        getInvoices({ limitCount: PAYMENT_FORM_INVOICE_LIMIT }),
+        getPayments({ limitCount: paymentLimit })
       ]);
 
       setCustomers(customerRows);
@@ -73,7 +76,7 @@ const Payments = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [paymentLimit]);
 
   const getPaidAmountForInvoice = (invoiceId: string, ignoredPaymentId = '') => {
     return payments
@@ -244,6 +247,11 @@ const Payments = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to delete payment.');
     }
+  };
+
+  const handleLoadMore = () => {
+    // Free-tier safety: initial payment screen reads only latest records; older rows load on demand.
+    setPaymentLimit((current) => current + LIST_PAGE_SIZE);
   };
 
   const cardStyle: CSSProperties = {
@@ -455,7 +463,7 @@ const Payments = () => {
               ) : (
                 paymentRows.map((payment) => (
                   <tr key={payment.id}>
-                    <td style={cellStyle}>{payment.date}</td>
+                    <td style={cellStyle}>{formatDate(payment.date)}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
                     <td style={cellStyle}>{payment.invoiceNumber}</td>
                     <td style={{ ...cellStyle, fontWeight: 800 }}>
@@ -492,6 +500,11 @@ const Payments = () => {
             </tbody>
           </table>
         </div>
+        {!loading && payments.length >= paymentLimit ? (
+          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
+            Load More
+          </button>
+        ) : null}
       </div>
     </div>
   );

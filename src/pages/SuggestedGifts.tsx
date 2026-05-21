@@ -7,9 +7,9 @@ import { useErpData } from '../hooks/useErpData';
 import { createGiftHistoryRecord, deleteGiftHistoryRecord, getGiftHistory, getGiftItems, updateGiftHistoryRecord } from '../services/firestoreService';
 import type { GiftHistory, GiftItem, GiftPeriod } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDateRange, formatMoney } from '../utils/formatters';
 import { buildSuggestedGiftRows, calculateGiftDifference, getGiftPeriodLabel, getGiftPeriodStart, getMonthEndDateString } from '../utils/giftUtils';
-import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 
 const SuggestedGifts = () => {
   const { customers, invoices, settings, loading, error } = useErpData();
@@ -70,7 +70,6 @@ const SuggestedGifts = () => {
     return [...suggestedRows].sort((a, b) => b.giftBudget - a.giftBudget || a.customer.name.localeCompare(b.customer.name));
   }, [suggestedRows]);
 
-  const sortedGiftHistory = useMemo(() => sortNewestFirst(giftHistory, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [giftHistory]);
   const eligibleCount = sortedSuggestedRows.filter((row) => row.status === 'Eligible').length;
   const blockedCount = sortedSuggestedRows.filter((row) => row.status === 'Approved' || row.status === 'Already Gifted').length;
 
@@ -252,20 +251,6 @@ const SuggestedGifts = () => {
     padding: '10px 14px',
     fontWeight: 800,
     cursor: 'pointer'
-  };
-
-  const headerCellStyle: CSSProperties = {
-    padding: '12px 14px',
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4',
-    textAlign: 'left',
-    fontWeight: 900
-  };
-
-  const cellStyle: CSSProperties = {
-    padding: '12px 14px',
-    borderBottom: '1px solid #E8EDF4',
-    verticalAlign: 'top'
   };
 
   const getStatusStyle = (status: string): CSSProperties => {
@@ -463,43 +448,10 @@ const SuggestedGifts = () => {
           )}
         </div>
         <div style={{ color: '#67738E', fontSize: 12, marginTop: 12 }}>
-          {getGiftPeriodLabel(periodType)} period: {periodStart} to {periodEnd}. Period end is always month-end. Earlier gifted amounts inside this range are deducted from available gift budget.
+          {getGiftPeriodLabel(periodType)} period: {formatDateRange(periodStart, periodEnd)}. Period end is always month-end. Earlier gifted amounts inside this range are deducted from available gift budget.
         </div>
       </div>
 
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Gift History</div>
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 920, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['Customer', 'Period Start', 'Period End', 'Gift Budget', 'Selected Gift', 'Gifted Date', 'Status', 'Notes'].map((header) => (
-                  <th key={header} style={headerCellStyle}>{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedGiftHistory.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={8}>No gift history yet.</td></tr>
-              ) : (
-                sortedGiftHistory.map((gift) => (
-                  <tr key={gift.id}>
-                    <td style={cellStyle}>{gift.customerName}</td>
-                    <td style={cellStyle}>{gift.periodStart}</td>
-                    <td style={cellStyle}>{gift.periodEnd}</td>
-                    <td style={cellStyle}>{formatMoney(gift.giftBudget ?? gift.suggestedGiftBudget)}</td>
-                    <td style={cellStyle}>{gift.selectedGiftItemName || gift.giftItem || '-'}</td>
-                    <td style={cellStyle}>{gift.giftGivenDate || gift.giftedDate || '-'}</td>
-                    <td style={cellStyle}>{gift.status === 'Given' ? 'Gifted' : gift.status}</td>
-                    <td style={cellStyle}>{gift.notes || '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 };

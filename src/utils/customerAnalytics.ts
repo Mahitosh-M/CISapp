@@ -22,6 +22,7 @@ import {
   getTierTargetSettings,
   normalizeScoreWeights
 } from './settings';
+import { formatDate } from './formatters';
 
 interface DateWindow {
   start: Date;
@@ -104,11 +105,11 @@ const isDateInsideWindow = (dateString: string, window: DateWindow) => {
 };
 
 const formatPeriodDate = (date: Date) => {
-  return date.toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric'
-  });
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return formatDate(`${year}-${month}-${day}`);
 };
 
 // Current rolling window = current calendar month + previous calendar month.

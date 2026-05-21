@@ -134,13 +134,25 @@ export interface AppSettings {
 export interface Offer {
   id: string;
   title: string;
+  description?: string;
   imageUrl: string;
+  imagePath?: string;
   startDate: string;
   endDate: string;
   isActive: boolean;
   createdAt: string;
-  createdBy: string;
+  createdBy?: string;
   updatedAt?: string;
+}
+
+export interface OfferFormData {
+  title: string;
+  description: string;
+  imageUrl: string;
+  imagePath?: string;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
 }
 
 export interface GiftItem {

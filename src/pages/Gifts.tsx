@@ -17,7 +17,7 @@ import {
 } from '../services/firestoreService';
 import type { GiftHistory, GiftItem, GiftItemFormData, GiftPeriod } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatters';
+import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { buildGiftEligibilityRows, getGiftPeriodLabel, getGiftPeriodStart, getMonthEndDateString } from '../utils/giftUtils';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 
@@ -310,7 +310,7 @@ const Gifts = () => {
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 18, marginBottom: 24 }}>
-        <StatCard title="Period Sales" value={formatMoney(totals.sales)} subtitle={`${periodStart} to ${periodEnd}`} />
+        <StatCard title="Period Sales" value={formatMoney(totals.sales)} subtitle={formatDateRange(periodStart, periodEnd)} />
         <StatCard title="Period Profit" value={formatMoney(totals.profit)} subtitle="Used for gift budget" />
         <StatCard title="Gift Budget" value={formatMoney(totals.budget)} subtitle="Profit x tier gift %" />
         <StatCard title="Total Gifted" value={formatMoney(totals.gifted)} subtitle="All gift history" />
@@ -511,12 +511,12 @@ const Gifts = () => {
                     <td style={cellStyle}>{gift.customerName}</td>
                     <td style={cellStyle}><TierBadge tier={gift.tierAtGiftTime} /></td>
                     <td style={cellStyle}>{gift.status}</td>
-                    <td style={cellStyle}>{getGiftPeriodLabel(gift.periodType)}: {gift.periodStart} to {gift.periodEnd}</td>
+                    <td style={cellStyle}>{getGiftPeriodLabel(gift.periodType)}: {formatDateRange(gift.periodStart, gift.periodEnd)}</td>
                     <td style={cellStyle}>{formatMoney(gift.profitConsidered)}</td>
                     <td style={cellStyle}>{formatMoney(gift.suggestedGiftBudget)}</td>
                     <td style={cellStyle}>{formatMoney(gift.actualGiftAmount)}</td>
                     <td style={cellStyle}>{gift.selectedGiftItemName || gift.giftItem || '-'}</td>
-                    <td style={cellStyle}>{gift.giftGivenDate || '-'}</td>
+                    <td style={cellStyle}>{gift.giftGivenDate ? formatDate(gift.giftGivenDate) : '-'}</td>
                     <td style={cellStyle}>{gift.approvedBy || '-'}</td>
                     <td style={cellStyle}>{gift.notes || '-'}</td>
                     <td style={cellStyle}>

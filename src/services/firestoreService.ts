@@ -5,8 +5,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit as firestoreLimit,
   orderBy,
   query,
+  QueryConstraint,
   runTransaction,
   setDoc,
   updateDoc,
@@ -27,6 +29,7 @@ import type {
   Invoice,
   InvoiceFormData,
   Offer,
+  OfferFormData,
   Payment,
   PaymentFormData,
   UserProfile,
@@ -39,6 +42,7 @@ import {
   mergeWithDefaultSettings,
   validateAppSettings
 } from '../utils/settings';
+import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
 
 const CUSTOMERS = 'customers';
 const INVOICES = 'invoices';
@@ -50,6 +54,8 @@ const GIFT_ITEMS = 'giftItems';
 const USERS = 'users';
 const ALERTS = 'alerts';
 const OFFERS = 'offers';
+const DEFAULT_LIST_LIMIT = 50;
+const ACTIVE_OFFER_LIMIT = 20;
 
 export interface AuditUser {
   userId?: string;
@@ -57,9 +63,22 @@ export interface AuditUser {
   role?: UserRole;
 }
 
+interface DateRangeQueryOptions {
+  fromDate?: string;
+  toDate?: string;
+  limitCount?: number;
+}
+
+interface CustomerScopedQueryOptions extends DateRangeQueryOptions {
+  customerId?: string;
+  customerName?: string;
+}
+
 const nowIso = () => new Date().toISOString();
 
 const getTodayDateString = () => nowIso().slice(0, 10);
+
+let appSettingsCache: AppSettings | undefined;
 
 const numberOrZero = (value: unknown) => {
   const parsed = Number(value);
@@ -240,16 +259,79 @@ const mapAlertDoc = (id: string, data: Record<string, unknown>): Alert => ({
   updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
 });
 
+const dateFieldToString = (value: unknown) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+
+  const timestampValue = value as { toDate?: () => Date };
+  if (typeof timestampValue.toDate === 'function') {
+    return timestampValue.toDate().toISOString();
+  }
+
+  return String(value);
+};
+
+const applyDateRangeConstraints = (constraints: QueryConstraint[], dateField: string, options?: DateRangeQueryOptions) => {
+  if (options?.fromDate) constraints.push(where(dateField, '>=', options.fromDate));
+  if (options?.toDate) constraints.push(where(dateField, '<=', options.toDate));
+};
+
+const applyLimitConstraint = (constraints: QueryConstraint[], limitCount?: number) => {
+  if (limitCount && limitCount > 0) {
+    constraints.push(firestoreLimit(limitCount));
+  }
+};
+
+const buildInvoiceQueryConstraints = (options?: CustomerScopedQueryOptions) => {
+  const constraints: QueryConstraint[] = [];
+
+  if (options?.customerId) constraints.push(where('customerId', '==', options.customerId));
+  if (options?.customerName && !options.customerId) constraints.push(where('customerName', '==', options.customerName));
+
+  // Free-tier safety: filter by date/customer in Firestore before React receives rows.
+  applyDateRangeConstraints(constraints, 'date', options);
+  constraints.push(orderBy('date', 'desc'));
+  applyLimitConstraint(constraints, options?.limitCount);
+
+  return constraints;
+};
+
+const buildPaymentQueryConstraints = (options?: CustomerScopedQueryOptions) => {
+  const constraints: QueryConstraint[] = [];
+
+  if (options?.customerId) constraints.push(where('customerId', '==', options.customerId));
+  if (options?.customerName && !options.customerId) constraints.push(where('customerName', '==', options.customerName));
+
+  applyDateRangeConstraints(constraints, 'date', options);
+  constraints.push(orderBy('date', 'desc'));
+  applyLimitConstraint(constraints, options?.limitCount);
+
+  return constraints;
+};
+
 const mapOfferDoc = (id: string, data: Record<string, unknown>): Offer => ({
   id,
   title: String(data.title || ''),
+  description: data.description ? String(data.description) : '',
   imageUrl: String(data.imageUrl || ''),
+  imagePath: data.imagePath ? String(data.imagePath) : undefined,
   startDate: String(data.startDate || ''),
   endDate: String(data.endDate || ''),
   isActive: data.isActive === true,
-  createdAt: String(data.createdAt || ''),
-  createdBy: String(data.createdBy || ''),
-  updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
+  createdAt: dateFieldToString(data.createdAt),
+  createdBy: data.createdBy ? String(data.createdBy) : undefined,
+  updatedAt: data.updatedAt ? dateFieldToString(data.updatedAt) : undefined
+});
+
+const sanitizeOfferPayload = (offer: OfferFormData): OfferFormData => ({
+  title: offer.title.trim(),
+  description: offer.description.trim(),
+  // Uploaded offer images save their Firebase Storage download URL here; manual imageUrl remains a fallback.
+  imageUrl: offer.imageUrl.trim(),
+  imagePath: offer.imagePath || '',
+  startDate: offer.startDate,
+  endDate: offer.endDate,
+  isActive: offer.isActive
 });
 
 export const mapUserProfileDoc = (id: string, data: Record<string, unknown>): UserProfile => ({
@@ -323,30 +405,30 @@ export const deleteCustomerRecord = async (customerId: string, auditUser?: Audit
   await deleteDoc(doc(db, CUSTOMERS, customerId));
 };
 
-export const getInvoices = async () => {
-  const invoicesQuery = query(collection(db, INVOICES), orderBy('date', 'desc'));
+export const getInvoices = async (options?: DateRangeQueryOptions) => {
+  const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints(options));
   const snapshot = await getDocs(invoicesQuery);
   return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
 };
 
-export const getInvoicesByCustomerId = async (customerId: string) => {
-  const invoicesQuery = query(collection(db, INVOICES), where('customerId', '==', customerId));
+export const getInvoicesByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
+  const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints({ ...options, customerId }));
   const snapshot = await getDocs(invoicesQuery);
-  return snapshot.docs
-    .map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()))
-    .sort((a, b) => b.date.localeCompare(a.date));
+  return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
 };
 
 export const getInvoicesForCustomerViewer = async (customerId?: string, customerName?: string) => {
   const invoiceMap = new Map<string, Invoice>();
 
   if (customerId) {
+    // Customer portal avoids composite indexes: query only this customer, then sort locally.
     const byIdQuery = query(collection(db, INVOICES), where('customerId', '==', customerId));
     const byIdSnapshot = await getDocs(byIdQuery);
     byIdSnapshot.docs.forEach((invoiceDoc) => invoiceMap.set(invoiceDoc.id, mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data())));
   }
 
-  if (customerName) {
+  if (!customerId && customerName) {
+    // Legacy fallback only. New user profiles and invoice documents should use customerId.
     const byNameQuery = query(collection(db, INVOICES), where('customerName', '==', customerName));
     const byNameSnapshot = await getDocs(byNameQuery);
     byNameSnapshot.docs.forEach((invoiceDoc) => invoiceMap.set(invoiceDoc.id, mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data())));
@@ -367,9 +449,11 @@ const getFinancialYearRange = (date = new Date()) => {
 export const getNextInvoiceNumber = async (settings?: AppSettings) => {
   const activeSettings = mergeWithDefaultSettings(settings ?? (await getAppSettings()));
   const prefix = activeSettings.invoicePrefix || 'INV';
-  const invoicesQuery = query(collection(db, INVOICES), orderBy('invoiceNumber', 'desc'));
-  const snapshot = await getDocs(invoicesQuery);
   const financialYear = getFinancialYearRange();
+  const invoicesQuery = activeSettings.financialYearReset
+    ? query(collection(db, INVOICES), where('date', '>=', financialYear.start), where('date', '<=', financialYear.end), orderBy('date', 'desc'))
+    : query(collection(db, INVOICES), orderBy('invoiceNumber', 'desc'), firestoreLimit(1));
+  const snapshot = await getDocs(invoicesQuery);
   const highestNumber = snapshot.docs.reduce((highest, invoiceDoc) => {
     if (activeSettings.financialYearReset) {
       const invoiceDate = String(invoiceDoc.data().date || invoiceDoc.data().invoiceDate || '');
@@ -411,30 +495,47 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
   await deleteDoc(doc(db, INVOICES, invoiceId));
 };
 
-export const getPayments = async () => {
-  const paymentsQuery = query(collection(db, PAYMENTS), orderBy('date', 'desc'));
+export const getPayments = async (options?: DateRangeQueryOptions) => {
+  const paymentsQuery = query(collection(db, PAYMENTS), ...buildPaymentQueryConstraints(options));
   const snapshot = await getDocs(paymentsQuery);
   return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
 };
 
-export const getPaymentsByInvoiceId = async (invoiceId: string) => {
-  const paymentsQuery = query(collection(db, PAYMENTS), where('invoiceId', '==', invoiceId));
+export const getPaymentsByInvoiceId = async (invoiceId: string, options?: Pick<DateRangeQueryOptions, 'limitCount'>) => {
+  const constraints: QueryConstraint[] = [where('invoiceId', '==', invoiceId), orderBy('date', 'desc')];
+  applyLimitConstraint(constraints, options?.limitCount);
+  const paymentsQuery = query(collection(db, PAYMENTS), ...constraints);
   const snapshot = await getDocs(paymentsQuery);
-  return snapshot.docs
-    .map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
-    .sort((a, b) => b.date.localeCompare(a.date));
+  return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+};
+
+export const getPaymentsByInvoiceIds = async (invoiceIds: string[]) => {
+  const uniqueInvoiceIds = [...new Set(invoiceIds.filter(Boolean))];
+  const chunks: string[][] = [];
+
+  for (let index = 0; index < uniqueInvoiceIds.length; index += 30) {
+    chunks.push(uniqueInvoiceIds.slice(index, index + 30));
+  }
+
+  const snapshots = await Promise.all(
+    chunks.map((chunk) => getDocs(query(collection(db, PAYMENTS), where('invoiceId', 'in', chunk))))
+  );
+
+  return snapshots.flatMap((snapshot) => snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data())));
 };
 
 export const getPaymentsForCustomerViewer = async (customerId?: string, customerName?: string) => {
   const paymentMap = new Map<string, Payment>();
 
   if (customerId) {
+    // Customer portal avoids composite indexes: query only this customer, then sort locally.
     const byIdQuery = query(collection(db, PAYMENTS), where('customerId', '==', customerId));
     const byIdSnapshot = await getDocs(byIdQuery);
     byIdSnapshot.docs.forEach((paymentDoc) => paymentMap.set(paymentDoc.id, mapPaymentDoc(paymentDoc.id, paymentDoc.data())));
   }
 
-  if (customerName) {
+  if (!customerId && customerName) {
+    // Legacy fallback only. Prefer customerId in user profiles and new payment docs.
     const byNameQuery = query(collection(db, PAYMENTS), where('customerName', '==', customerName));
     const byNameSnapshot = await getDocs(byNameQuery);
     byNameSnapshot.docs.forEach((paymentDoc) => paymentMap.set(paymentDoc.id, mapPaymentDoc(paymentDoc.id, paymentDoc.data())));
@@ -580,11 +681,16 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
 
 };
 
-export const getAppSettings = async () => {
+export const getAppSettings = async (forceRefresh = false) => {
+  if (appSettingsCache && !forceRefresh) {
+    return appSettingsCache;
+  }
+
   const preferredSettingsDoc = await getDoc(doc(db, SETTINGS, APP_SETTINGS_DOC_ID));
 
   if (preferredSettingsDoc.exists()) {
-    return mapSettingsDoc(preferredSettingsDoc.id, preferredSettingsDoc.data());
+    appSettingsCache = mapSettingsDoc(preferredSettingsDoc.id, preferredSettingsDoc.data());
+    return appSettingsCache;
   }
 
   const settingsQuery = query(collection(db, SETTINGS), where('key', '==', 'erpSettings'));
@@ -592,19 +698,24 @@ export const getAppSettings = async () => {
   const existingSettings = snapshot.docs[0];
 
   if (existingSettings) {
-    return mapSettingsDoc(existingSettings.id, existingSettings.data());
+    appSettingsCache = mapSettingsDoc(existingSettings.id, existingSettings.data());
+    return appSettingsCache;
   }
+
+  const timestamp = nowIso();
 
   await setDoc(doc(db, SETTINGS, APP_SETTINGS_DOC_ID), {
     ...DEFAULT_SETTINGS,
-    updatedAt: nowIso()
+    updatedAt: timestamp
   });
 
-  return {
+  appSettingsCache = {
     ...DEFAULT_SETTINGS,
     id: APP_SETTINGS_DOC_ID,
-    updatedAt: nowIso()
+    updatedAt: timestamp
   };
+
+  return appSettingsCache;
 };
 
 export const updateAppSettings = async (settings: AppSettings, auditUser?: AuditUser) => {
@@ -616,23 +727,31 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
   }
 
   if (!settings.id) {
+    const timestamp = nowIso();
     const docRef = await addDoc(collection(db, SETTINGS), {
       ...appSettings,
-      updatedAt: nowIso()
+      updatedAt: timestamp
     });
 
+    appSettingsCache = { ...appSettings, id: docRef.id, updatedAt: timestamp };
     return docRef;
   }
 
+  const timestamp = nowIso();
   await updateDoc(doc(db, SETTINGS, settings.id), {
     ...appSettings,
-    updatedAt: nowIso()
+    updatedAt: timestamp
   });
 
+  appSettingsCache = { ...appSettings, id: settings.id, updatedAt: timestamp };
 };
 
-export const getGiftHistory = async () => {
-  const giftQuery = query(collection(db, GIFT_HISTORY), orderBy('giftedDate', 'desc'));
+export const getGiftHistory = async (options?: DateRangeQueryOptions) => {
+  const constraints: QueryConstraint[] = [];
+  applyDateRangeConstraints(constraints, 'giftedDate', options);
+  constraints.push(orderBy('giftedDate', 'desc'));
+  applyLimitConstraint(constraints, options?.limitCount);
+  const giftQuery = query(collection(db, GIFT_HISTORY), ...constraints);
   const snapshot = await getDocs(giftQuery);
   return snapshot.docs.map((giftDoc) => mapGiftHistoryDoc(giftDoc.id, giftDoc.data()));
 };
@@ -738,14 +857,16 @@ export const deleteUserProfileRecord = async (profileId: string, auditUser?: Aud
   await deleteDoc(doc(db, USERS, profileId));
 };
 
-export const getAlerts = async () => {
-  const alertsQuery = query(collection(db, ALERTS), orderBy('createdAt', 'desc'));
+export const getAlerts = async (limitCount = DEFAULT_LIST_LIMIT) => {
+  const alertsQuery = query(collection(db, ALERTS), orderBy('createdAt', 'desc'), firestoreLimit(limitCount));
   const snapshot = await getDocs(alertsQuery);
   return snapshot.docs.map((alertDoc) => mapAlertDoc(alertDoc.id, alertDoc.data()));
 };
 
 export const upsertAlerts = async (alerts: Omit<Alert, 'id' | 'createdAt' | 'updatedAt'>[], auditUser?: AuditUser) => {
-  const existingAlerts = await getAlerts();
+  // Upsert needs the complete existing key set to avoid duplicate alert writes.
+  const existingSnapshot = await getDocs(query(collection(db, ALERTS), orderBy('createdAt', 'desc')));
+  const existingAlerts = existingSnapshot.docs.map((alertDoc) => mapAlertDoc(alertDoc.id, alertDoc.data()));
   const existingByKey = new Map(existingAlerts.map((alert) => [alert.uniqueKey, alert]));
 
   await Promise.all(
@@ -779,15 +900,44 @@ export const updateAlertStatus = async (alertId: string, status: AlertStatus, au
 };
 
 export const getOffers = async () => {
-  const offersQuery = query(collection(db, OFFERS), orderBy('createdAt', 'desc'));
+  const offersQuery = query(collection(db, OFFERS), orderBy('createdAt', 'desc'), firestoreLimit(DEFAULT_LIST_LIMIT));
   const snapshot = await getDocs(offersQuery);
   return snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
 };
 
 export const getActiveOffers = async () => {
-  const today = getTodayDateString();
-  const offers = await getOffers();
+  // Free-tier safety: customers only read active offer docs. Sorting stays local so this
+  // customer portal query does not require a composite Firestore index.
+  const offersQuery = query(collection(db, OFFERS), where('isActive', '==', true));
+  const snapshot = await getDocs(offersQuery);
+  const offers = snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
 
-  // Future improvement: Admin can upload offer posters to Firebase Storage and save imageUrl here.
-  return offers.filter((offer) => offer.isActive && (!offer.startDate || offer.startDate <= today) && (!offer.endDate || offer.endDate >= today));
+  // Inactive offer filtering: customers only receive active offers inside any valid date window.
+  return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer, getTodayDateString()))).slice(0, ACTIVE_OFFER_LIMIT);
+};
+
+export const createOffer = async (offer: OfferFormData, auditUser?: AuditUser) => {
+  const payload = sanitizeOfferPayload(offer);
+
+  const docRef = await addDoc(collection(db, OFFERS), {
+    ...payload,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    createdBy: auditUser?.userEmail || auditUser?.userId || ''
+  });
+
+  return docRef;
+};
+
+export const updateOfferRecord = async (offerId: string, offer: OfferFormData, auditUser?: AuditUser) => {
+  const payload = sanitizeOfferPayload(offer);
+
+  await updateDoc(doc(db, OFFERS, offerId), {
+    ...payload,
+    updatedAt: nowIso()
+  });
+};
+
+export const deleteOfferRecord = async (offerId: string, auditUser?: AuditUser) => {
+  await deleteDoc(doc(db, OFFERS, offerId));
 };
