@@ -3,6 +3,11 @@ import { getCurrentMonthRange } from './dateUtils';
 import { getInvoicePaymentEffect } from './paymentUtils';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const PAID_GREEN = '#166534';
+const DUE_STAGE_YELLOW = '#FACC15';
+const DUE_STAGE_ORANGE = '#F97316';
+const DUE_STAGE_LIGHT_RED = '#F87171';
+const OVERDUE_BLOOD_RED = '#7F1D1D';
 
 export interface CustomerInvoiceView {
   invoice: Invoice;
@@ -58,12 +63,14 @@ export const calculateInvoiceOutstanding = (invoice: Invoice, payments: Payment[
 };
 
 export const getDueUrgencyColor = (dueProgressPercentage: number, isOverdue: boolean, isPaid: boolean) => {
-  // Donut urgency moves from yellow to red as due date approaches; paid invoices stay green.
-  if (isPaid) return '#166534';
-  if (isOverdue) return '#7F1D1D';
-  if (dueProgressPercentage <= 50) return '#FACC15';
-  if (dueProgressPercentage <= 75) return '#F97316';
-  return '#F87171';
+  // Paid invoice portions stay dark green and are independent of due urgency.
+  if (isPaid) return PAID_GREEN;
+
+  // Due urgency stages: overdue blood red, then yellow/orange/light red as credit period is used.
+  if (isOverdue) return OVERDUE_BLOOD_RED;
+  if (dueProgressPercentage <= 50) return DUE_STAGE_YELLOW;
+  if (dueProgressPercentage <= 75) return DUE_STAGE_ORANGE;
+  return DUE_STAGE_LIGHT_RED;
 };
 
 export const calculatePaidPendingPercentages = (invoiceAmount: number, paidAmount: number, outstandingAmount: number) => {
@@ -103,11 +110,14 @@ export const calculateDueStatus = (invoice: Invoice, payments: Payment[], todayS
     };
   }
 
+  // Guard against zero-day credit periods before calculating due progress.
   const totalCreditDays = Math.max(1, daysBetween(invoiceDate, dueDate));
   const daysUsed = Math.max(0, daysBetween(invoiceDate, today));
   const daysRemaining = daysBetween(today, dueDate);
   const isOverdue = outstandingAmount > 0 && daysRemaining < 0;
-  const dueProgressPercentage = Math.min(100, Math.max(0, (daysUsed / totalCreditDays) * 100));
+  const rawDueProgressPercentage = (daysUsed / totalCreditDays) * 100;
+  // Non-overdue invoices are capped to 0-100 so orange is 51-75 and light red is 76-100.
+  const dueProgressPercentage = Math.min(100, Math.max(0, rawDueProgressPercentage));
   const percentages = calculatePaidPendingPercentages(invoiceAmount, paidAmount, outstandingAmount);
   const status: CustomerInvoiceView['status'] = isPaid
     ? 'Paid'

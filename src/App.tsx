@@ -20,8 +20,11 @@ import CustomerInvoices from './pages/customer/CustomerInvoices';
 import CustomerPayments from './pages/customer/CustomerPayments';
 import CustomerOffers from './pages/customer/CustomerOffers';
 import CustomerProfile from './pages/customer/CustomerProfile';
+import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 
 const App = () => {
+  useEnterKeyNavigation();
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
