@@ -20,6 +20,27 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+const INACTIVITY_LOGOUT_MS = 10 * 60 * 1000;
+const LAST_ACTIVITY_STORAGE_KEY = 'cisapp:lastActivityAt';
+const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+
+const readStoredLastActivityAt = () => {
+  try {
+    const timestamp = Number(window.localStorage.getItem(LAST_ACTIVITY_STORAGE_KEY));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const writeStoredLastActivityAt = (timestamp: number) => {
+  try {
+    window.localStorage.setItem(LAST_ACTIVITY_STORAGE_KEY, String(timestamp));
+  } catch {
+    // Session timeout still works in this tab if localStorage is unavailable.
+  }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -55,6 +76,84 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!firebaseUser || !userProfile) return undefined;
+
+    let timeoutId: number | undefined;
+    let lastActivityAt = Math.max(Date.now(), readStoredLastActivityAt());
+    let logoutStarted = false;
+
+    const getLastActivityAt = () => Math.max(lastActivityAt, readStoredLastActivityAt());
+
+    const runInactivityLogout = async () => {
+      if (logoutStarted) return;
+      logoutStarted = true;
+      await logoutUser();
+    };
+
+    const scheduleLogout = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      const elapsed = Date.now() - getLastActivityAt();
+      const remaining = Math.max(INACTIVITY_LOGOUT_MS - elapsed, 0);
+
+      timeoutId = window.setTimeout(() => {
+        if (Date.now() - getLastActivityAt() >= INACTIVITY_LOGOUT_MS) {
+          void runInactivityLogout();
+          return;
+        }
+
+        scheduleLogout();
+      }, remaining);
+    };
+
+    const recordActivity = () => {
+      if (document.visibilityState === 'hidden') return;
+
+      lastActivityAt = Date.now();
+      writeStoredLastActivityAt(lastActivityAt);
+      scheduleLogout();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+
+      if (Date.now() - getLastActivityAt() >= INACTIVITY_LOGOUT_MS) {
+        void runInactivityLogout();
+        return;
+      }
+
+      recordActivity();
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== LAST_ACTIVITY_STORAGE_KEY) return;
+
+      const timestamp = Number(event.newValue);
+      if (Number.isFinite(timestamp)) {
+        lastActivityAt = Math.max(lastActivityAt, timestamp);
+        scheduleLogout();
+      }
+    };
+
+    recordActivity();
+    ACTIVITY_EVENTS.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }));
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      ACTIVITY_EVENTS.forEach((eventName) => window.removeEventListener(eventName, recordActivity));
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [firebaseUser, userProfile]);
 
   const value = useMemo<AuthContextValue>(() => {
     const role = userProfile?.role ?? null;
