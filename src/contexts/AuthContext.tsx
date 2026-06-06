@@ -41,6 +41,18 @@ const writeStoredLastActivityAt = (timestamp: number) => {
   }
 };
 
+const clearStoredLastActivityAt = () => {
+  try {
+    window.localStorage.removeItem(LAST_ACTIVITY_STORAGE_KEY);
+  } catch {
+    // Firebase sign-out still clears the authenticated app session.
+  }
+};
+
+const isSessionExpired = (timestamp: number) => {
+  return !timestamp || Date.now() - timestamp >= INACTIVITY_LOGOUT_MS;
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -54,6 +66,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (!currentUser) {
           setUserProfile(null);
+          clearStoredLastActivityAt();
+          return;
+        }
+
+        if (isSessionExpired(readStoredLastActivityAt())) {
+          setFirebaseUser(null);
+          setUserProfile(null);
+          await logoutUser();
           return;
         }
 
@@ -68,6 +88,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (currentUser) {
           await logoutUser();
         }
+        clearStoredLastActivityAt();
         console.error(err);
       } finally {
         setLoading(false);
@@ -81,7 +102,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!firebaseUser || !userProfile) return undefined;
 
     let timeoutId: number | undefined;
-    let lastActivityAt = Math.max(Date.now(), readStoredLastActivityAt());
+    let lastActivityAt = readStoredLastActivityAt();
     let logoutStarted = false;
 
     const getLastActivityAt = () => Math.max(lastActivityAt, readStoredLastActivityAt());
@@ -89,6 +110,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const runInactivityLogout = async () => {
       if (logoutStarted) return;
       logoutStarted = true;
+      clearStoredLastActivityAt();
       await logoutUser();
     };
 
@@ -139,6 +161,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
+    if (isSessionExpired(getLastActivityAt())) {
+      void runInactivityLogout();
+      return undefined;
+    }
+
     recordActivity();
     ACTIVITY_EVENTS.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }));
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -164,9 +191,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role,
       loading,
       login: async (email: string, password: string) => {
+        writeStoredLastActivityAt(Date.now());
         await loginWithEmail(email, password);
+        writeStoredLastActivityAt(Date.now());
       },
-      logout: logoutUser,
+      logout: async () => {
+        clearStoredLastActivityAt();
+        await logoutUser();
+      },
       canDeleteRecords: role === 'Admin',
       canEditRecords: role === 'Admin',
       canManageSettings: role === 'Admin',

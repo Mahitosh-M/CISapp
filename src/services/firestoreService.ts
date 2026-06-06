@@ -567,11 +567,13 @@ export const getPayments = async (options?: DateRangeQueryOptions) => {
 };
 
 export const getPaymentsByInvoiceId = async (invoiceId: string, options?: Pick<DateRangeQueryOptions, 'limitCount'>) => {
-  const constraints: QueryConstraint[] = [where('invoiceId', '==', invoiceId), orderBy('date', 'desc')];
-  applyLimitConstraint(constraints, options?.limitCount);
-  const paymentsQuery = query(collection(db, PAYMENTS), ...constraints);
+  const paymentsQuery = query(collection(db, PAYMENTS), where('invoiceId', '==', invoiceId));
   const snapshot = await getDocs(paymentsQuery);
-  return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+  const rows = snapshot.docs
+    .map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
+    .sort((left, right) => right.date.localeCompare(left.date));
+
+  return options?.limitCount && options.limitCount > 0 ? rows.slice(0, options.limitCount) : rows;
 };
 
 export const getPaymentsByInvoiceIds = async (invoiceIds: string[]) => {
