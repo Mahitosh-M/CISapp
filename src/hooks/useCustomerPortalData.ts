@@ -63,7 +63,10 @@ export const useCustomerPortalData = () => {
     refreshData();
   }, [refreshData]);
 
-  const invoiceViews = useMemo(() => invoices.map((invoice) => calculateDueStatus(invoice, payments)), [invoices, payments]);
+  const invoiceViews = useMemo(
+    () => invoices.map((invoice) => calculateDueStatus(invoice, payments, undefined, customer?.tier, settings)),
+    [customer?.tier, invoices, payments, settings]
+  );
 
   return {
     userProfile,

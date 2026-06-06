@@ -1,6 +1,7 @@
-import type { Customer, Invoice, Payment, UserProfile } from '../types';
+import type { AppSettings, Customer, CustomerTier, Invoice, Payment, UserProfile } from '../types';
 import { getCurrentMonthRange } from './dateUtils';
 import { getInvoicePaymentEffect } from './paymentUtils';
+import { getEffectiveInvoiceDueDate } from './settings';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const PAID_GREEN = '#166534';
@@ -85,17 +86,25 @@ export const calculatePaidPendingPercentages = (invoiceAmount: number, paidAmoun
   return { paidPercentage, pendingPercentage };
 };
 
-export const calculateDueStatus = (invoice: Invoice, payments: Payment[], todayString = new Date().toISOString().slice(0, 10)): CustomerInvoiceView => {
+export const calculateDueStatus = (
+  invoice: Invoice,
+  payments: Payment[],
+  todayString = new Date().toISOString().slice(0, 10),
+  tier?: CustomerTier,
+  settings?: AppSettings
+): CustomerInvoiceView => {
   const { invoiceAmount, paidAmount, outstandingAmount } = calculateInvoiceOutstanding(invoice, payments);
   const invoiceDate = parseDate(invoice.date);
-  const dueDate = parseDate(invoice.dueDate);
+  const effectiveDueDate = tier ? getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings) : invoice.dueDate;
+  const invoiceWithEffectiveDueDate = effectiveDueDate && effectiveDueDate !== invoice.dueDate ? { ...invoice, dueDate: effectiveDueDate } : invoice;
+  const dueDate = parseDate(effectiveDueDate);
   const today = parseDate(todayString) ?? new Date();
   const isPaid = outstandingAmount <= 0;
 
   if (!invoiceDate || !dueDate) {
     const percentages = calculatePaidPendingPercentages(invoiceAmount, paidAmount, outstandingAmount);
     return {
-      invoice,
+      invoice: invoiceWithEffectiveDueDate,
       invoiceAmount,
       paidAmount,
       outstandingAmount,
@@ -130,7 +139,7 @@ export const calculateDueStatus = (invoice: Invoice, payments: Payment[], todayS
           : 'Pending';
 
   return {
-    invoice,
+    invoice: invoiceWithEffectiveDueDate,
     invoiceAmount,
     paidAmount,
     outstandingAmount,

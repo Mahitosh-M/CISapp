@@ -14,7 +14,7 @@ import type {
 } from '../types';
 import { getInvoicePaymentEffect } from './paymentUtils';
 import {
-  calculateDynamicDueDate,
+  getEffectiveInvoiceDueDate,
   getCreditDaysForTierFromSettings,
   getGiftPercentageForTier,
   getPaymentBufferForTier,
@@ -221,7 +221,7 @@ const ratePaymentDiscipline = (customerInvoices: Invoice[], payments: Payment[],
   }
 
   const delayMeasures = customerInvoices.map((invoice) => {
-    const dueDate = parseDate(calculateDynamicDueDate(invoice.date, tier, settings));
+    const dueDate = parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings));
     const paidDate = getInvoicePaidDate(invoice, payments, asOfDate);
 
     if (paidDate) {
@@ -297,7 +297,7 @@ const getRecommendedAction = (riskLevel: RiskLevel, tier: CustomerTier, outstand
 const getOverdueStatus = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
   const hasOverdueInvoice = customerInvoices.some((invoice) => {
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-    return invoice.totalSales - paidAmount > 0 && parseDate(calculateDynamicDueDate(invoice.date, tier, settings)) < startOfDay(asOfDate);
+    return invoice.totalSales - paidAmount > 0 && parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings)) < startOfDay(asOfDate);
   });
 
   return hasOverdueInvoice ? 'Overdue' : 'Clear';

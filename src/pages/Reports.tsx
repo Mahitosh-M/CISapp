@@ -11,7 +11,7 @@ import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
-import { calculateDynamicDueDate } from '../utils/settings';
+import { getEffectiveInvoiceDueDate } from '../utils/settings';
 
 type ReportType = 'sales' | 'profit' | 'payments' | 'outstanding' | 'ranking' | 'tier' | 'gifts';
 
@@ -237,7 +237,7 @@ const Reports = () => {
       const totalOutstanding = previousOutstanding + newOutstanding;
       const hasOverdueInvoice = customerInvoices.some((invoice) => {
         const invoiceOutstanding = invoice.totalSales - getPaidAmountForInvoice(invoice.id);
-        const effectiveDueDate = calculateDynamicDueDate(invoice.date, customer.tier, settings);
+        const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
         return getOutstandingStatus(effectiveDueDate, invoiceOutstanding) === 'Overdue';
       });
 

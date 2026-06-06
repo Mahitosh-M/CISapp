@@ -130,7 +130,7 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     customerId: String(data.customerId || ''),
     customerName: String(data.customerName || ''),
     date: String(data.date || data.invoiceDate || ''),
-    dueDate: String(data.dueDate || data.date || data.invoiceDate || ''),
+    dueDate: String(data.dueDate || ''),
     salesAmount,
     costAmount,
     transportAmount,
@@ -492,7 +492,72 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
 };
 
 export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUser) => {
-  await deleteDoc(doc(db, INVOICES, invoiceId));
+  const invoiceRef = doc(db, INVOICES, invoiceId);
+  const linkedPaymentsSnapshot = await getDocs(query(collection(db, PAYMENTS), where('invoiceId', '==', invoiceId)));
+  const linkedPaymentRefs = linkedPaymentsSnapshot.docs.map((paymentDoc) => paymentDoc.ref);
+  let deletedPaymentCount = 0;
+
+  if (linkedPaymentRefs.length >= 450) {
+    throw new Error('This invoice has too many linked payments to delete safely in one operation.');
+  }
+
+  await runTransaction(db, async (transaction) => {
+    const invoiceSnapshot = await transaction.get(invoiceRef);
+
+    if (!invoiceSnapshot.exists()) {
+      throw new Error('Invoice record no longer exists. Refresh the list and try again.');
+    }
+
+    const paymentSnapshots = await Promise.all(linkedPaymentRefs.map((paymentRef) => transaction.get(paymentRef)));
+    const paymentsToDelete = paymentSnapshots
+      .filter((paymentSnapshot) => paymentSnapshot.exists())
+      .map((paymentSnapshot) => mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()));
+    const oldBalanceRestoreByCustomerId = paymentsToDelete.reduce((restoreMap, payment) => {
+      const amountToRestore = Math.max(0, payment.amountUsedForOldBalance ?? 0);
+
+      if (amountToRestore > 0 && payment.customerId) {
+        restoreMap.set(payment.customerId, (restoreMap.get(payment.customerId) ?? 0) + amountToRestore);
+      }
+
+      return restoreMap;
+    }, new Map<string, number>());
+    const customerRefsById = new Map([...oldBalanceRestoreByCustomerId.keys()].map((customerId) => [customerId, doc(db, CUSTOMERS, customerId)]));
+    const customerSnapshotsById = new Map(
+      await Promise.all(
+        [...customerRefsById.entries()].map(async ([customerId, customerRef]) => [customerId, await transaction.get(customerRef)] as const)
+      )
+    );
+    const timestamp = nowIso();
+
+    customerSnapshotsById.forEach((customerSnapshot, customerId) => {
+      const amountToRestore = oldBalanceRestoreByCustomerId.get(customerId) ?? 0;
+      const customerRef = customerRefsById.get(customerId);
+
+      if (customerRef && customerSnapshot.exists() && amountToRestore > 0) {
+        transaction.update(customerRef, {
+          previousOutstandingAmount: Math.max(0, numberOrZero(customerSnapshot.data().previousOutstandingAmount) + amountToRestore),
+          updatedAt: timestamp
+        });
+      }
+    });
+
+    paymentSnapshots.forEach((paymentSnapshot) => {
+      if (paymentSnapshot.exists()) {
+        transaction.delete(paymentSnapshot.ref);
+      }
+    });
+
+    transaction.delete(invoiceRef);
+    deletedPaymentCount = paymentsToDelete.length;
+  });
+
+  const deletedInvoiceSnapshot = await getDoc(invoiceRef);
+
+  if (deletedInvoiceSnapshot.exists()) {
+    throw new Error('Invoice delete did not complete. Refresh the list and try again.');
+  }
+
+  return { deletedPaymentCount };
 };
 
 export const getPayments = async (options?: DateRangeQueryOptions) => {
@@ -657,7 +722,7 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
     const paymentSnapshot = await transaction.get(paymentRef);
 
     if (!paymentSnapshot.exists()) {
-      return;
+      throw new Error('Payment record no longer exists. Refresh the list and try again.');
     }
 
     deletedPayment = mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data());
@@ -679,6 +744,11 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
     transaction.delete(paymentRef);
   });
 
+  const deletedPaymentSnapshot = await getDoc(paymentRef);
+
+  if (deletedPaymentSnapshot.exists()) {
+    throw new Error('Payment delete did not complete. Refresh the list and try again.');
+  }
 };
 
 export const getAppSettings = async (forceRefresh = false) => {

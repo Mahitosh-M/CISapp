@@ -19,7 +19,7 @@ import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
-import { DEFAULT_SETTINGS, calculateDynamicDueDate } from '../utils/settings';
+import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
 
 const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   customerId: '',
@@ -120,7 +120,7 @@ const Invoices = () => {
         const paidAmount = getPaidAmount(invoice.id);
         const outstanding = invoice.totalSales - paidAmount;
         const customer = customers.find((item) => item.id === invoice.customerId);
-        const effectiveDueDate = calculateDynamicDueDate(invoice.date, customer?.tier ?? 'Tier 3', settings);
+        const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 3', settings);
         const status = getInvoiceStatus(effectiveDueDate, invoice.totalSales, paidAmount);
 
         return {
@@ -264,13 +264,17 @@ const Invoices = () => {
 
       // This where-query checks payment history before removing the invoice document.
       const linkedPayments = await getPaymentsByInvoiceId(invoice.id);
-      const extraWarning = linkedPayments.length > 0 ? ` This invoice has ${linkedPayments.length} payment(s). Payment documents will remain in Firestore for audit history.` : '';
+      const extraWarning = linkedPayments.length > 0 ? ` This invoice has ${linkedPayments.length} linked payment(s). They will also be deleted and any old-balance clearing from those payments will be reversed.` : '';
       const confirmed = window.confirm(`Delete invoice ${invoice.invoiceNumber}?${extraWarning}`);
 
       if (!confirmed) return;
 
-      await deleteInvoiceRecord(invoice.id, auditUser);
-      setMessage('Invoice deleted successfully.');
+      const deleteResult = await deleteInvoiceRecord(invoice.id, auditUser);
+      setMessage(
+        deleteResult.deletedPaymentCount > 0
+          ? `Invoice deleted with ${deleteResult.deletedPaymentCount} linked payment(s).`
+          : 'Invoice deleted successfully.'
+      );
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to delete invoice.');

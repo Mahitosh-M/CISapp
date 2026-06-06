@@ -1,6 +1,6 @@
 import type { AppSettings, Customer, Invoice, OverdueInvoiceAlert, Payment } from '../types';
 import { getInvoicePaymentEffect } from './paymentUtils';
-import { calculateDynamicDueDate } from './settings';
+import { getEffectiveInvoiceDueDate } from './settings';
 
 const parseDate = (dateString: string) => {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -35,7 +35,7 @@ export const buildOverdueInvoiceAlerts = (
       const tier = customer?.tier ?? 'Tier 3';
       const paidAmount = getPaidAmountForInvoice(invoice.id, payments);
       const overdueAmount = invoice.totalSales - paidAmount;
-      const effectiveDueDate = calculateDynamicDueDate(invoice.date, tier, settings);
+      const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);
       const overdueDays = effectiveDueDate < today && overdueAmount > 0 ? daysBetween(effectiveDueDate, today) : 0;
       const severity: OverdueInvoiceAlert['severity'] = overdueAmount <= 0 ? 'green' : overdueDays > 7 ? 'red' : overdueDays > 0 ? 'yellow' : 'green';
 

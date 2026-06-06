@@ -239,6 +239,16 @@ export const calculateDynamicDueDate = (invoiceDate: string, tier: CustomerTier,
   return addDaysToDateString(invoiceDate, getTotalCreditDaysForTier(tier, settings));
 };
 
+export const getEffectiveInvoiceDueDate = (
+  invoiceDate: string,
+  storedDueDate: string | undefined,
+  tier: CustomerTier,
+  settings?: AppSettings
+) => {
+  const normalizedStoredDueDate = storedDueDate?.trim();
+  return normalizedStoredDueDate || calculateDynamicDueDate(invoiceDate, tier, settings);
+};
+
 export const getPaymentTermsLabel = (tier: CustomerTier, settings?: AppSettings) => {
   const creditDays = getCreditDaysForTierFromSettings(tier, settings);
   const bufferDays = getPaymentBufferForTier(tier, settings);
