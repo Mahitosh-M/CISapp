@@ -78,6 +78,10 @@ const nowIso = () => new Date().toISOString();
 
 const getTodayDateString = () => nowIso().slice(0, 10);
 
+const withoutUndefined = <T extends Record<string, unknown>>(payload: T) => {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)) as Partial<T>;
+};
+
 let appSettingsCache: AppSettings | undefined;
 
 const numberOrZero = (value: unknown) => {
@@ -896,6 +900,12 @@ export const getUserProfiles = async () => {
 };
 
 export const getUserProfileByUid = async (uid: string) => {
+  const directSnapshot = await getDoc(doc(db, USERS, uid));
+
+  if (directSnapshot.exists()) {
+    return mapUserProfileDoc(directSnapshot.id, directSnapshot.data());
+  }
+
   const userQuery = query(collection(db, USERS), where('uid', '==', uid));
   const snapshot = await getDocs(userQuery);
   const userDoc = snapshot.docs[0];
@@ -910,16 +920,21 @@ export const getUserProfileByEmail = async (email: string) => {
 };
 
 export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'createdAt' | 'updatedAt'>) => {
-  return addDoc(collection(db, USERS), {
-    ...profile,
-    createdAt: nowIso(),
-    updatedAt: nowIso()
+  const profileRef = profile.uid ? doc(db, USERS, profile.uid) : doc(collection(db, USERS));
+  const timestamp = nowIso();
+
+  await setDoc(profileRef, {
+    ...withoutUndefined(profile),
+    createdAt: timestamp,
+    updatedAt: timestamp
   });
+
+  return profileRef;
 };
 
 export const updateUserProfileRecord = async (profileId: string, profile: Partial<UserProfile>, auditUser?: AuditUser) => {
   await updateDoc(doc(db, USERS, profileId), {
-    ...profile,
+    ...withoutUndefined(profile),
     updatedAt: nowIso()
   });
 

@@ -192,8 +192,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       loading,
       login: async (email: string, password: string) => {
         writeStoredLastActivityAt(Date.now());
-        await loginWithEmail(email, password);
-        writeStoredLastActivityAt(Date.now());
+        try {
+          const credential = await loginWithEmail(email, password);
+          const profile = await loadOrCreateUserProfile(credential.user);
+
+          if (!profile.active) {
+            throw new Error('This login is inactive. Please contact Admin.');
+          }
+
+          setFirebaseUser(credential.user);
+          setUserProfile(profile);
+          writeStoredLastActivityAt(Date.now());
+        } catch (err) {
+          setFirebaseUser(null);
+          setUserProfile(null);
+          clearStoredLastActivityAt();
+          await logoutUser();
+          throw err;
+        }
       },
       logout: async () => {
         clearStoredLastActivityAt();

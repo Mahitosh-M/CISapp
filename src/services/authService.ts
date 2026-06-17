@@ -14,17 +14,17 @@ import { auth, firebaseConfig } from '../firebase';
 import {
   createUserProfile,
   getUserProfileByEmail,
-  getUserProfileByUid,
-  getUserProfiles,
-  updateUserProfileRecord
+  getUserProfileByUid
 } from './firestoreService';
 import type { UserProfile, UserRole } from '../types';
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 export const listenToAuthState = (callback: (user: User | null) => void) => onAuthStateChanged(auth, callback);
 
 export const loginWithEmail = async (email: string, password: string) => {
   await setPersistence(auth, browserLocalPersistence);
-  return signInWithEmailAndPassword(auth, email, password);
+  return signInWithEmailAndPassword(auth, normalizeEmail(email), password);
 };
 
 export const logoutUser = async () => {
@@ -35,38 +35,61 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
   const existingByUid = await getUserProfileByUid(user.uid);
 
   if (existingByUid) {
+    if (existingByUid.id !== user.uid) {
+      await createUserProfile({
+        uid: user.uid,
+        email: normalizeEmail(existingByUid.email || user.email || ''),
+        name: existingByUid.name || user.displayName || user.email || 'ERP User',
+        role: existingByUid.role,
+        customerId: existingByUid.customerId,
+        customerName: existingByUid.customerName,
+        active: existingByUid.active
+      });
+
+      return {
+        ...existingByUid,
+        id: user.uid,
+        uid: user.uid,
+        email: normalizeEmail(existingByUid.email || user.email || '')
+      };
+    }
+
     return existingByUid;
   }
 
-  const existingByEmail = user.email ? await getUserProfileByEmail(user.email) : undefined;
+  const rawEmail = user.email || '';
+  const email = normalizeEmail(rawEmail);
+  const existingByEmail = email
+    ? (await getUserProfileByEmail(email)) || (rawEmail !== email ? await getUserProfileByEmail(rawEmail) : undefined)
+    : undefined;
 
   if (existingByEmail) {
-    await updateUserProfileRecord(existingByEmail.id, {
+    await createUserProfile({
       uid: user.uid,
+      email,
+      name: existingByEmail.name || user.displayName || user.email || 'ERP User',
+      role: existingByEmail.role,
+      customerId: existingByEmail.customerId,
+      customerName: existingByEmail.customerName,
       active: true
     });
 
     return {
       ...existingByEmail,
+      id: user.uid,
       uid: user.uid,
+      email,
       active: true
     };
   }
 
-  // First login becomes Admin so a fresh Firebase project can bootstrap itself without server code.
-  // After bootstrap, users must be created by Admin. This prevents deleted Firebase Auth
-  // accounts from recreating app access after their Firestore user profile is removed.
-  const existingProfiles = await getUserProfiles();
-
-  if (existingProfiles.length > 0) {
-    throw new Error('No ERP user profile found for this login. Please contact Admin.');
-  }
-
+  // First unmatched Firebase Auth login becomes Admin so a fresh project can bootstrap.
+  // After bootstrap, Admin-created users get deterministic users/{uid} profiles.
   const role: UserRole = 'Admin';
 
   await createUserProfile({
     uid: user.uid,
-    email: user.email || '',
+    email,
     name: user.displayName || user.email || 'ERP User',
     role,
     active: true
@@ -84,14 +107,15 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
 export const createStaffAuthAccount = async (email: string, password: string, name: string, role: UserRole) => {
   // A secondary Firebase app prevents staff creation from logging out the current Admin session.
   const secondaryApp = initializeApp(firebaseConfig, `staff-admin-${Date.now()}`);
+  const normalizedEmail = normalizeEmail(email);
 
   try {
     const secondaryAuth = getAuth(secondaryApp);
-    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, password);
 
     await createUserProfile({
       uid: credential.user.uid,
-      email,
+      email: normalizedEmail,
       name,
       role,
       active: true
@@ -112,14 +136,15 @@ export const createCustomerAuthAccount = async (
 ) => {
   // A secondary Firebase app prevents customer login creation from replacing the current Admin session.
   const secondaryApp = initializeApp(firebaseConfig, `customer-admin-${Date.now()}`);
+  const normalizedEmail = normalizeEmail(email);
 
   try {
     const secondaryAuth = getAuth(secondaryApp);
-    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, password);
 
     await createUserProfile({
       uid: credential.user.uid,
-      email,
+      email: normalizedEmail,
       name: customerName,
       role: 'customer',
       customerId,
@@ -137,5 +162,5 @@ export const createCustomerAuthAccount = async (
 export const sendUserPasswordResetEmail = async (email: string) => {
   // Firebase Auth never exposes existing passwords. Admin can safely help a user
   // regain access by sending the official Firebase reset email instead.
-  return sendPasswordResetEmail(auth, email);
+  return sendPasswordResetEmail(auth, normalizeEmail(email));
 };
