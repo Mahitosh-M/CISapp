@@ -297,11 +297,7 @@ const getRecommendedAction = (riskLevel: RiskLevel, tier: CustomerTier, outstand
 const getOverdueStatus = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
   const hasOverdueInvoice = customerInvoices.some((invoice) => {
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-<<<<<<< HEAD
-    return invoice.totalSales - paidAmount > 0 && parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings)) < startOfDay(asOfDate);
-=======
-    return getPendingAmount(invoice.totalSales, paidAmount) > 0 && parseDate(calculateDynamicDueDate(invoice.date, tier, settings)) < startOfDay(asOfDate);
->>>>>>> Development
+    return getPendingAmount(invoice.totalSales, paidAmount) > 0 && parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings)) < startOfDay(asOfDate);
   });
 
   return hasOverdueInvoice ? 'Overdue' : 'Clear';

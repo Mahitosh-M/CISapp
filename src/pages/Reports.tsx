@@ -10,13 +10,8 @@ import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
-<<<<<<< HEAD
-import { getInvoicePaymentEffect } from '../utils/paymentUtils';
-import { getEffectiveInvoiceDueDate } from '../utils/settings';
-=======
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
-import { calculateDynamicDueDate } from '../utils/settings';
->>>>>>> Development
+import { getEffectiveInvoiceDueDate } from '../utils/settings';
 
 type ReportType = 'sales' | 'profit' | 'payments' | 'outstanding' | 'ranking' | 'tier' | 'gifts';
 
@@ -241,13 +236,8 @@ const Reports = () => {
       const newOutstanding = getPendingAmount(newSales, newPayments);
       const totalOutstanding = previousOutstanding + newOutstanding;
       const hasOverdueInvoice = customerInvoices.some((invoice) => {
-<<<<<<< HEAD
-        const invoiceOutstanding = invoice.totalSales - getPaidAmountForInvoice(invoice.id);
-        const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
-=======
         const invoiceOutstanding = getPendingAmount(invoice.totalSales, getPaidAmountForInvoice(invoice.id));
-        const effectiveDueDate = calculateDynamicDueDate(invoice.date, customer.tier, settings);
->>>>>>> Development
+        const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
         return getOutstandingStatus(effectiveDueDate, invoiceOutstanding) === 'Overdue';
       });
 

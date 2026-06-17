@@ -1,11 +1,7 @@
 import type { AppSettings, Customer, CustomerTier, Invoice, Payment, UserProfile } from '../types';
 import { getCurrentMonthRange } from './dateUtils';
-<<<<<<< HEAD
-import { getInvoicePaymentEffect } from './paymentUtils';
-import { getEffectiveInvoiceDueDate } from './settings';
-=======
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
->>>>>>> Development
+import { getEffectiveInvoiceDueDate } from './settings';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const PAID_GREEN = '#166534';

@@ -19,18 +19,13 @@ import CustomerDashboard from './pages/customer/CustomerDashboard';
 import CustomerInvoices from './pages/customer/CustomerInvoices';
 import CustomerPayments from './pages/customer/CustomerPayments';
 import CustomerOffers from './pages/customer/CustomerOffers';
-<<<<<<< HEAD
-import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
-
-const App = () => {
-  useEnterKeyNavigation();
-=======
 import CustomerProfile from './pages/customer/CustomerProfile';
+import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
 
 const App = () => {
+  useEnterKeyNavigation();
   useNumberInputZeroSelection();
->>>>>>> Development
 
   return (
     <Routes>
@@ -40,7 +35,7 @@ const App = () => {
         <Route path="invoices" element={<CustomerInvoices />} />
         <Route path="payments" element={<CustomerPayments />} />
         <Route path="offers" element={<CustomerOffers />} />
-        <Route path="profile" element={<Navigate to="/customer" replace />} />
+        <Route path="profile" element={<CustomerProfile />} />
       </Route>
       <Route path="/" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Layout /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />

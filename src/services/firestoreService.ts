@@ -89,10 +89,6 @@ const numberOrZero = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const withoutUndefined = <T extends Record<string, unknown>>(value: T) => {
-  return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)) as Partial<T>;
-};
-
 export const getPaymentTermsForTier = (tier: CustomerTier) => {
   return getPaymentTermsLabel(tier);
 };
@@ -897,11 +893,8 @@ export const getUserProfiles = async () => {
 };
 
 export const getUserProfileByUid = async (uid: string) => {
-<<<<<<< HEAD
-=======
   if (!uid) return undefined;
 
->>>>>>> Development
   const directSnapshot = await getDoc(doc(db, USERS, uid));
 
   if (directSnapshot.exists()) {
@@ -922,7 +915,6 @@ export const getUserProfileByEmail = async (email: string) => {
 };
 
 export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'createdAt' | 'updatedAt'>) => {
-<<<<<<< HEAD
   const profileRef = profile.uid ? doc(db, USERS, profile.uid) : doc(collection(db, USERS));
   const timestamp = nowIso();
 
@@ -930,14 +922,6 @@ export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'creat
     ...withoutUndefined(profile),
     createdAt: timestamp,
     updatedAt: timestamp
-=======
-  const profileRef = doc(db, USERS, profile.uid);
-
-  await setDoc(profileRef, {
-    ...withoutUndefined(profile),
-    createdAt: nowIso(),
-    updatedAt: nowIso()
->>>>>>> Development
   });
 
   return profileRef;

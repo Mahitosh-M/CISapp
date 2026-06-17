@@ -18,13 +18,8 @@ import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '.
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
-<<<<<<< HEAD
-import { getInvoicePaymentEffect } from '../utils/paymentUtils';
-import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
-=======
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
-import { DEFAULT_SETTINGS, calculateDynamicDueDate } from '../utils/settings';
->>>>>>> Development
+import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
 
 const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   customerId: '',

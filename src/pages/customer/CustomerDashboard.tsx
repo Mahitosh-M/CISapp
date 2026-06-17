@@ -1,9 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileText, ShoppingCart, WalletCards } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import CustomerInvoiceCard from '../../components/CustomerInvoiceCard';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatDate, formatMoney } from '../../utils/formatters';
-import { calculateCustomerTotalOutstanding, isCurrentMonth, sortInvoicesByUrgency } from '../../utils/customerPortal';
+import { calculateCustomerTotalOutstanding, isCurrentMonth } from '../../utils/customerPortal';
 import { sortNewestFirst } from '../../utils/listDisplay';
 
 const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; value: string; icon: JSX.Element; color?: string }) => (
@@ -20,20 +20,55 @@ const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; va
 
 const CustomerDashboard = () => {
   const { customer, invoices, payments, invoiceViews } = useCustomerPortalContext();
+  const navigate = useNavigate();
+  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
+  const hasScrolledRef = useRef(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const currentMonthInvoices = invoices.filter((invoice) => isCurrentMonth(invoice.date));
   const currentMonthPayments = payments.filter((payment) => isCurrentMonth(payment.date));
   const currentMonthPurchases = currentMonthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
   const currentMonthPaymentTotal = currentMonthPayments.reduce((sum, payment) => sum + payment.amount, 0);
-  const outstandingInvoices = sortInvoicesByUrgency(invoiceViews.filter((invoice) => invoice.outstandingAmount > 0));
   const totalOutstanding = calculateCustomerTotalOutstanding(customer, invoiceViews);
   const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
   const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
-  const latestInvoices = sortNewestFirst(invoices, ['updatedAt', 'createdAt', 'date']).slice(0, 3);
-  const latestPayments = sortNewestFirst(payments, ['updatedAt', 'createdAt', 'date']).slice(0, 3);
+  const latestInvoices = sortNewestFirst(invoices, ['updatedAt', 'createdAt', 'date']).slice(0, 1);
+  const latestPayments = sortNewestFirst(payments, ['updatedAt', 'createdAt', 'date']).slice(0, 1);
   const invoiceStatusById = new Map(invoiceViews.map((invoiceView) => [invoiceView.invoice.id, invoiceView.status]));
 
+  useEffect(() => {
+    const markScrolled = () => {
+      if (window.scrollY > 24) {
+        hasScrolledRef.current = true;
+      }
+    };
+
+    window.addEventListener('scroll', markScrolled, { passive: true });
+    return () => window.removeEventListener('scroll', markScrolled);
+  }, []);
+
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    if (!sentinel) return undefined;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || !hasScrolledRef.current || isTransitioning) return;
+
+        setIsTransitioning(true);
+        window.setTimeout(() => {
+          navigate('/customer/invoices');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }, 220);
+      },
+      { threshold: 0.9 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [isTransitioning, navigate]);
+
   return (
-    <div>
+    <div style={{ opacity: isTransitioning ? 0 : 1, transform: isTransitioning ? 'translateY(-10px)' : 'translateY(0)', transition: 'opacity 220ms ease, transform 220ms ease' }}>
       <div style={{ marginBottom: 14 }}>
         <div style={{ color: '#67738E', fontSize: 13, fontWeight: 800 }}>Welcome back</div>
       </div>
@@ -56,19 +91,7 @@ const CustomerDashboard = () => {
 
       <section style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 900 }}>Outstanding / Due Invoices</div>
-          <Link to="/customer/invoices" style={{ color: '#D4AF37', fontWeight: 900, textDecoration: 'none' }}>View All</Link>
-        </div>
-        {outstandingInvoices.length === 0 ? (
-          <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 16, color: '#166534', fontWeight: 900 }}>No due invoices right now.</div>
-        ) : (
-          outstandingInvoices.map((invoiceView) => <CustomerInvoiceCard key={invoiceView.invoice.id} invoiceView={invoiceView} />)
-        )}
-      </section>
-
-      <section style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 900 }}>Latest 3 Invoices</div>
+          <div style={{ fontWeight: 900 }}>Latest Invoice</div>
           <Link to="/customer/invoices" style={{ color: '#D4AF37', fontWeight: 900, textDecoration: 'none' }}>View All</Link>
         </div>
         {latestInvoices.map((invoice) => (
@@ -87,9 +110,9 @@ const CustomerDashboard = () => {
         ))}
       </section>
 
-      <section>
+      <section style={{ marginBottom: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 900 }}>Latest 3 Payments</div>
+          <div style={{ fontWeight: 900 }}>Latest Payment</div>
           <Link to="/customer/payments" style={{ color: '#D4AF37', fontWeight: 900, textDecoration: 'none' }}>View All</Link>
         </div>
         {latestPayments.map((payment) => (
@@ -105,6 +128,20 @@ const CustomerDashboard = () => {
           </div>
         ))}
       </section>
+
+      <div
+        ref={bottomSentinelRef}
+        style={{
+          minHeight: 80,
+          display: 'grid',
+          placeItems: 'center',
+          color: '#67738E',
+          fontSize: 12,
+          fontWeight: 900
+        }}
+      >
+        Scroll for all invoices
+      </div>
     </div>
   );
 };
