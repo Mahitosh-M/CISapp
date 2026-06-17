@@ -35,6 +35,13 @@ const Layout = () => {
     }
     return true;
   });
+  const mobilePriorityOrder = ['/invoices', '/payments', '/customers', '/'];
+  const mobileNavItems = isMobile
+    ? [
+        ...mobilePriorityOrder.flatMap((path) => visibleNavItems.filter((item) => item.to === path)),
+        ...visibleNavItems.filter((item) => !mobilePriorityOrder.includes(item.to))
+      ]
+    : visibleNavItems;
 
   const sidebarStyle = {
     width: 260,
@@ -131,7 +138,7 @@ const Layout = () => {
       {!isMobile ? (
         <aside style={sidebarStyle}>
           <div style={headerStyle}>Pharma ERP</div>
-          {visibleNavItems.map((item) => (
+          {mobileNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
