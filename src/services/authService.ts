@@ -2,6 +2,7 @@ import { deleteApp, initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
+  deleteUser,
   getAuth,
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -24,7 +25,11 @@ export const listenToAuthState = (callback: (user: User | null) => void) => onAu
 
 export const loginWithEmail = async (email: string, password: string) => {
   await setPersistence(auth, browserLocalPersistence);
+<<<<<<< HEAD
   return signInWithEmailAndPassword(auth, normalizeEmail(email), password);
+=======
+  return signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+>>>>>>> Development
 };
 
 export const logoutUser = async () => {
@@ -38,13 +43,19 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
     if (existingByUid.id !== user.uid) {
       await createUserProfile({
         uid: user.uid,
+<<<<<<< HEAD
         email: normalizeEmail(existingByUid.email || user.email || ''),
         name: existingByUid.name || user.displayName || user.email || 'ERP User',
+=======
+        email: existingByUid.email || user.email || '',
+        name: existingByUid.name,
+>>>>>>> Development
         role: existingByUid.role,
         customerId: existingByUid.customerId,
         customerName: existingByUid.customerName,
         active: existingByUid.active
       });
+<<<<<<< HEAD
 
       return {
         ...existingByUid,
@@ -52,6 +63,8 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
         uid: user.uid,
         email: normalizeEmail(existingByUid.email || user.email || '')
       };
+=======
+>>>>>>> Development
     }
 
     return existingByUid;
@@ -64,7 +77,21 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
     : undefined;
 
   if (existingByEmail) {
+<<<<<<< HEAD
     await createUserProfile({
+=======
+    const repairedProfile = {
+      uid: user.uid,
+      email: existingByEmail.email || user.email || '',
+      name: existingByEmail.name,
+      role: existingByEmail.role,
+      customerId: existingByEmail.customerId,
+      customerName: existingByEmail.customerName,
+      active: true
+    };
+
+    await updateUserProfileRecord(existingByEmail.id, {
+>>>>>>> Development
       uid: user.uid,
       email,
       name: existingByEmail.name || user.displayName || user.email || 'ERP User',
@@ -73,6 +100,7 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
       customerName: existingByEmail.customerName,
       active: true
     });
+    await createUserProfile(repairedProfile);
 
     return {
       ...existingByEmail,
@@ -107,6 +135,7 @@ export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> 
 export const createStaffAuthAccount = async (email: string, password: string, name: string, role: UserRole) => {
   // A secondary Firebase app prevents staff creation from logging out the current Admin session.
   const secondaryApp = initializeApp(firebaseConfig, `staff-admin-${Date.now()}`);
+<<<<<<< HEAD
   const normalizedEmail = normalizeEmail(email);
 
   try {
@@ -120,6 +149,26 @@ export const createStaffAuthAccount = async (email: string, password: string, na
       role,
       active: true
     });
+=======
+  const cleanEmail = email.trim().toLowerCase();
+
+  try {
+    const secondaryAuth = getAuth(secondaryApp);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password);
+
+    try {
+      await createUserProfile({
+        uid: credential.user.uid,
+        email: cleanEmail,
+        name: name.trim(),
+        role,
+        active: true
+      });
+    } catch (err) {
+      await deleteUser(credential.user);
+      throw err;
+    }
+>>>>>>> Development
 
     await signOut(secondaryAuth);
     return credential.user.uid;
@@ -136,6 +185,7 @@ export const createCustomerAuthAccount = async (
 ) => {
   // A secondary Firebase app prevents customer login creation from replacing the current Admin session.
   const secondaryApp = initializeApp(firebaseConfig, `customer-admin-${Date.now()}`);
+<<<<<<< HEAD
   const normalizedEmail = normalizeEmail(email);
 
   try {
@@ -151,6 +201,28 @@ export const createCustomerAuthAccount = async (
       customerName,
       active: true
     });
+=======
+  const cleanEmail = email.trim().toLowerCase();
+
+  try {
+    const secondaryAuth = getAuth(secondaryApp);
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password);
+
+    try {
+      await createUserProfile({
+        uid: credential.user.uid,
+        email: cleanEmail,
+        name: customerName.trim(),
+        role: 'customer',
+        customerId,
+        customerName: customerName.trim(),
+        active: true
+      });
+    } catch (err) {
+      await deleteUser(credential.user);
+      throw err;
+    }
+>>>>>>> Development
 
     await signOut(secondaryAuth);
     return credential.user.uid;

@@ -12,7 +12,7 @@ import type {
   ScoreBreakdownItem,
   TierCreditPolicy
 } from '../types';
-import { getInvoicePaymentEffect } from './paymentUtils';
+import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import {
   getEffectiveInvoiceDueDate,
   getCreditDaysForTierFromSettings,
@@ -93,6 +93,8 @@ const endOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() 
 
 const daysBetween = (start: Date, end: Date) => Math.round((startOfDay(end).getTime() - startOfDay(start).getTime()) / MS_PER_DAY);
 
+const addDays = (date: Date, days: number) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 export const capScore = (value: number) => clamp(Math.round(Number.isFinite(value) ? value : 0), 0, 100);
@@ -112,17 +114,17 @@ const formatPeriodDate = (date: Date) => {
   return formatDate(`${year}-${month}-${day}`);
 };
 
-// Current rolling window = current calendar month + previous calendar month.
-// This keeps rankings broader than a single month while staying easy to explain.
+// Current rolling window = last 60 days ending today.
+// Admin targets are monthly, so scores compare this window against a two-month average.
 const getCurrentRollingWindow = (referenceDate: Date): DateWindow => {
   const end = endOfDay(referenceDate);
-  const start = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - 1, 1);
+  const start = startOfDay(addDays(referenceDate, -59));
   return { start, end };
 };
 
 const getPreviousRollingWindow = (referenceDate: Date): DateWindow => {
-  const start = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - 3, 1);
-  const end = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - 1, 0, 23, 59, 59, 999);
+  const end = endOfDay(addDays(referenceDate, -60));
+  const start = startOfDay(addDays(referenceDate, -119));
   return { start, end };
 };
 
@@ -164,11 +166,9 @@ const getActiveMonthCount = (invoices: Invoice[]) => {
   return activeMonths.size;
 };
 
-const getMonthsInWindow = (window: DateWindow) => {
-  const start = new Date(window.start.getFullYear(), window.start.getMonth(), 1);
-  const end = new Date(window.end.getFullYear(), window.end.getMonth(), 1);
-  return (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth() + 1;
-};
+const getAverageTargetMonthCount = (window: DateWindow) => Math.max(1, (daysBetween(window.start, window.end) + 1) / 30);
+
+const getWholeOrderCount = (value: number) => Math.max(0, Math.round(value));
 
 export const calculateSalesPerformanceScore = (customerMonthlySales: number, monthlySalesTarget: number, fallbackScore: number) => {
   if (monthlySalesTarget <= 0) {
@@ -229,7 +229,7 @@ const ratePaymentDiscipline = (customerInvoices: Invoice[], payments: Payment[],
     }
 
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-    const outstanding = invoice.totalSales - paidAmount;
+    const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
 
     if (outstanding <= 0 || asOfDate <= dueDate) {
       return 0;
@@ -248,7 +248,7 @@ const rateLoyaltyConsistency = (customerInvoices: Invoice[], window: DateWindow)
     return 0;
   }
 
-  const monthsInWindow = Math.max(1, getMonthsInWindow(window));
+  const monthsInWindow = Math.max(1, Math.round(getAverageTargetMonthCount(window)));
   return clamp(Math.round((getActiveMonthCount(customerInvoices) / monthsInWindow) * 100), 30, 100);
 };
 
@@ -297,7 +297,11 @@ const getRecommendedAction = (riskLevel: RiskLevel, tier: CustomerTier, outstand
 const getOverdueStatus = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
   const hasOverdueInvoice = customerInvoices.some((invoice) => {
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
+<<<<<<< HEAD
     return invoice.totalSales - paidAmount > 0 && parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings)) < startOfDay(asOfDate);
+=======
+    return getPendingAmount(invoice.totalSales, paidAmount) > 0 && parseDate(calculateDynamicDueDate(invoice.date, tier, settings)) < startOfDay(asOfDate);
+>>>>>>> Development
   });
 
   return hasOverdueInvoice ? 'Overdue' : 'Clear';
@@ -415,9 +419,9 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
     const invoicePaymentEffect = customerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
     // previousOutstandingAmount is the customer's old opening balance before this ERP existed.
     const previousOutstandingAmount = customer.previousOutstandingAmount ?? 0;
-    const newOutstanding = totalSales - invoicePaymentEffect;
+    const newOutstanding = getPendingAmount(totalSales, invoicePaymentEffect);
     const invoiceCount = customerInvoices.length;
-    const monthsInScoringWindow = Math.max(1, getMonthsInWindow(window));
+    const monthsInScoringWindow = getAverageTargetMonthCount(window);
 
     return {
       customer,
@@ -427,13 +431,11 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
       totalPayments,
       previousOutstandingAmount,
       newOutstanding,
-      // Total outstanding includes old balance + new invoice sales - new payments.
-      // Future improvement: allow payments to be allocated specifically to previous outstanding.
       outstanding: previousOutstandingAmount + newOutstanding,
       invoiceCount,
       averageOrderValue: invoiceCount > 0 ? roundMoney(totalSales / invoiceCount) : 0,
       customerMonthlySales: roundMoney(totalSales / monthsInScoringWindow),
-      customerMonthlyOrders: invoiceCount / monthsInScoringWindow
+      customerMonthlyOrders: getWholeOrderCount(invoiceCount / monthsInScoringWindow)
     };
   });
 

@@ -25,7 +25,7 @@ import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
-import { getInvoicePaymentEffect } from '../utils/paymentUtils';
+import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const chartColors = ['#D4AF37', '#56CCF2', '#EB5757'];
 
@@ -58,7 +58,7 @@ const Dashboard = () => {
       sales,
       profit,
       collected,
-      outstanding: previousOutstanding + sales - invoicePaymentEffect
+      outstanding: previousOutstanding + getPendingAmount(sales, invoicePaymentEffect)
     };
   }, [customers, payments, periodInvoiceIds, periodInvoices, periodPayments]);
 

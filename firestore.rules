@@ -1,5 +1,6 @@
 rules_version = '2';
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -137,6 +138,113 @@ service cloud.firestore {
     match /offers/{offerId} {
       allow read: if isTeam() || (isCustomer() && resource.data.isActive == true);
       allow write: if isAdmin();
+=======
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function currentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasProfile() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentRole() {
+      return hasProfile() ? currentUser().data.role : null;
+    }
+
+    function isAdmin() {
+      return currentRole() == 'Admin';
+    }
+
+    function isStaff() {
+      return currentRole() == 'Staff';
+    }
+
+    function isAdminOrStaff() {
+      return isAdmin() || isStaff();
+    }
+
+    function linkedCustomerId() {
+      return hasProfile() ? currentUser().data.customerId : null;
+    }
+
+    function isCustomerOwner(customerId) {
+      return hasProfile() && currentRole() == 'customer' && linkedCustomerId() == customerId;
+    }
+
+    function isValidEmail(value) {
+      return value is string && value.size() > 3 && value.size() <= 254 && value.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'name', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'name', 'role', 'customerId', 'customerName', 'active', 'createdAt', 'updatedAt']) &&
+        data.uid == userId &&
+        isValidEmail(data.email) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        data.role in ['Admin', 'Staff', 'customer'] &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() <= 40 &&
+        data.updatedAt is string && data.updatedAt.size() <= 40 &&
+        (!('customerId' in data) || (data.customerId is string && data.customerId.size() > 0 && data.customerId.size() <= 120)) &&
+        (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 120));
+    }
+
+    match /users/{userId} {
+      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidUserProfile(request.resource.data, userId);
+      allow update: if isAdmin() && isValidUserProfile(request.resource.data, userId) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin() && request.auth.uid != userId;
+    }
+
+    match /customers/{customerId} {
+      allow get: if isAdminOrStaff() || isCustomerOwner(customerId);
+      allow list: if isAdminOrStaff();
+      allow create, update, delete: if isAdminOrStaff();
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isAdminOrStaff() || isCustomerOwner(resource.data.customerId);
+      allow create, update, delete: if isAdminOrStaff();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAdminOrStaff() || isCustomerOwner(resource.data.customerId);
+      allow create, update, delete: if isAdminOrStaff();
+    }
+
+    match /settings/{settingId} {
+      allow read: if hasProfile();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /giftHistory/{giftId} {
+      allow read: if isAdminOrStaff() || isCustomerOwner(resource.data.customerId);
+      allow create, update, delete: if isAdminOrStaff();
+    }
+
+    match /giftItems/{giftItemId} {
+      allow read: if hasProfile();
+      allow create, update, delete: if isAdminOrStaff();
+    }
+
+    match /alerts/{alertId} {
+      allow read, create, update, delete: if isAdminOrStaff();
+    }
+
+    match /offers/{offerId} {
+      allow read: if hasProfile();
+      allow create, update, delete: if isAdminOrStaff();
+>>>>>>> Development
     }
 
     match /{document=**} {
@@ -144,6 +252,7 @@ service cloud.firestore {
     }
   }
 }
+<<<<<<< HEAD
 =======
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -244,3 +353,5 @@ service cloud.firestore {
   }
 }
 >>>>>>> 72eb090cc6724b3950cb9d594f6cfd1fc32ff146
+=======
+>>>>>>> Development

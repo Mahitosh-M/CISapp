@@ -79,7 +79,7 @@ export interface Payment {
   date: string;
   // amount is the real money received from the customer.
   amount: number;
-  // Only this part of amount reduces the selected invoice after old balance is cleared first.
+  // Amount that reduces the selected invoice. Older documents may also track old-balance allocation separately.
   amountAppliedToInvoice: number;
   amountUsedForOldBalance: number;
   oldBalanceBeforePayment: number;

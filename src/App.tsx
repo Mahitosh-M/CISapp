@@ -19,10 +19,18 @@ import CustomerDashboard from './pages/customer/CustomerDashboard';
 import CustomerInvoices from './pages/customer/CustomerInvoices';
 import CustomerPayments from './pages/customer/CustomerPayments';
 import CustomerOffers from './pages/customer/CustomerOffers';
+<<<<<<< HEAD
 import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 
 const App = () => {
   useEnterKeyNavigation();
+=======
+import CustomerProfile from './pages/customer/CustomerProfile';
+import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
+
+const App = () => {
+  useNumberInputZeroSelection();
+>>>>>>> Development
 
   return (
     <Routes>

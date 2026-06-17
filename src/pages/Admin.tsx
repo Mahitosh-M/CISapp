@@ -194,14 +194,19 @@ const Admin = () => {
   const handleCreateStaff = async (event: FormEvent) => {
     event.preventDefault();
 
-    if (!staffName || !staffEmail || !staffPassword) {
+    const cleanName = staffName.trim();
+    const cleanEmail = staffEmail.trim().toLowerCase();
+
+    if (!cleanName || !cleanEmail || !staffPassword) {
       setAdminError('Name, email, and password are required.');
       return;
     }
 
     try {
       setSaving(true);
-      await createStaffAuthAccount(staffEmail, staffPassword, staffName, staffRole);
+      setAdminError('');
+      setMessage('');
+      await createStaffAuthAccount(cleanEmail, staffPassword, cleanName, staffRole);
       setStaffName('');
       setStaffEmail('');
       setStaffPassword('');
@@ -219,15 +224,18 @@ const Admin = () => {
     event.preventDefault();
 
     const linkedCustomer = customers.find((customer) => customer.id === customerLoginId);
+    const cleanEmail = customerLoginEmail.trim().toLowerCase();
 
-    if (!linkedCustomer || !customerLoginEmail || !customerLoginPassword) {
+    if (!linkedCustomer || !cleanEmail || !customerLoginPassword) {
       setAdminError('Customer, email, and password are required for customer login.');
       return;
     }
 
     try {
       setSaving(true);
-      await createCustomerAuthAccount(customerLoginEmail, customerLoginPassword, linkedCustomer.id, linkedCustomer.name);
+      setAdminError('');
+      setMessage('');
+      await createCustomerAuthAccount(cleanEmail, customerLoginPassword, linkedCustomer.id, linkedCustomer.name);
       setCustomerLoginId('');
       setCustomerLoginEmail('');
       setCustomerLoginPassword('');

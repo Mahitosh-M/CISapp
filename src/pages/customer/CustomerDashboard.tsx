@@ -1,4 +1,3 @@
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CheckCircle2, FileText, ShoppingCart, WalletCards } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CustomerInvoiceCard from '../../components/CustomerInvoiceCard';
@@ -32,7 +31,6 @@ const CustomerDashboard = () => {
   const latestInvoices = sortNewestFirst(invoices, ['updatedAt', 'createdAt', 'date']).slice(0, 3);
   const latestPayments = sortNewestFirst(payments, ['updatedAt', 'createdAt', 'date']).slice(0, 3);
   const invoiceStatusById = new Map(invoiceViews.map((invoiceView) => [invoiceView.invoice.id, invoiceView.status]));
-  const chartData = [{ label: 'This Month', purchases: currentMonthPurchases, payments: currentMonthPaymentTotal }];
 
   return (
     <div>
@@ -54,20 +52,6 @@ const CustomerDashboard = () => {
           <AlertTriangle size={17} />
           {overdueInvoices.length} overdue invoice(s), {formatMoney(overdueAmount)}
         </div>
-      </div>
-
-      <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 14 }}>
-        <div style={{ color: '#0B1F3A', fontWeight: 900, marginBottom: 10 }}>Purchases vs Payments</div>
-        <ResponsiveContainer width="100%" height={190}>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(value) => formatMoney(Number(value))} />
-            <Bar dataKey="purchases" fill="#D4AF37" radius={[8, 8, 0, 0]} />
-            <Bar dataKey="payments" fill="#166534" radius={[8, 8, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
       </div>
 
       <section style={{ marginBottom: 16 }}>

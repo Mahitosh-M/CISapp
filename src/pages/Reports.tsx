@@ -10,8 +10,13 @@ import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+<<<<<<< HEAD
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { getEffectiveInvoiceDueDate } from '../utils/settings';
+=======
+import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { calculateDynamicDueDate } from '../utils/settings';
+>>>>>>> Development
 
 type ReportType = 'sales' | 'profit' | 'payments' | 'outstanding' | 'ranking' | 'tier' | 'gifts';
 
@@ -193,7 +198,7 @@ const Reports = () => {
       Tier: customerById.get(invoice.customerId)?.tier ?? '-',
       Sales: formatMoney(invoice.totalSales),
       Paid: formatMoney(paid),
-      Outstanding: formatMoney(invoice.totalSales - paid)
+      Outstanding: formatMoney(getPendingAmount(invoice.totalSales, paid))
     };
   });
 
@@ -233,11 +238,16 @@ const Reports = () => {
       const newPayments = linkedPayments + unallocatedPeriodPayments;
       // Previous outstanding is the opening balance from before this ERP; reports add it to new invoice outstanding.
       const previousOutstanding = customer.previousOutstandingAmount ?? 0;
-      const newOutstanding = newSales - newPayments;
+      const newOutstanding = getPendingAmount(newSales, newPayments);
       const totalOutstanding = previousOutstanding + newOutstanding;
       const hasOverdueInvoice = customerInvoices.some((invoice) => {
+<<<<<<< HEAD
         const invoiceOutstanding = invoice.totalSales - getPaidAmountForInvoice(invoice.id);
         const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
+=======
+        const invoiceOutstanding = getPendingAmount(invoice.totalSales, getPaidAmountForInvoice(invoice.id));
+        const effectiveDueDate = calculateDynamicDueDate(invoice.date, customer.tier, settings);
+>>>>>>> Development
         return getOutstandingStatus(effectiveDueDate, invoiceOutstanding) === 'Overdue';
       });
 

@@ -18,8 +18,13 @@ import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '.
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+<<<<<<< HEAD
 import { getInvoicePaymentEffect } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
+=======
+import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { DEFAULT_SETTINGS, calculateDynamicDueDate } from '../utils/settings';
+>>>>>>> Development
 
 const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   customerId: '',
@@ -38,7 +43,7 @@ const buildEmptyInvoiceForm = (): InvoiceFormData => ({
 const LIST_PAGE_SIZE = 50;
 
 const getInvoiceStatus = (dueDate: string, totalSales: number, paidAmount: number) => {
-  const outstanding = totalSales - paidAmount;
+  const outstanding = getPendingAmount(totalSales, paidAmount);
   const today = getTodayDateString();
 
   if (outstanding <= 0) return { label: 'Paid', color: '#27AE60' };
@@ -118,7 +123,7 @@ const Invoices = () => {
     const rows = invoices
       .map((invoice) => {
         const paidAmount = getPaidAmount(invoice.id);
-        const outstanding = invoice.totalSales - paidAmount;
+        const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
         const customer = customers.find((item) => item.id === invoice.customerId);
         const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 3', settings);
         const status = getInvoiceStatus(effectiveDueDate, invoice.totalSales, paidAmount);
@@ -283,7 +288,7 @@ const Invoices = () => {
 
   const handlePrint = (invoice: Invoice) => {
     const paidAmount = getPaidAmount(invoice.id);
-    const outstanding = invoice.totalSales - paidAmount;
+    const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
     const printWindow = window.open('', '_blank', 'width=900,height=700');
 
     if (!printWindow) return;

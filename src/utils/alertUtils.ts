@@ -2,6 +2,7 @@ import type { Alert, AppSettings, Customer, Invoice, Payment } from '../types';
 import { buildCustomerScores } from './customerAnalytics';
 import { getTodayDateString } from './dateUtils';
 import { buildCustomerOutstandingRows, buildOverdueInvoiceAlerts, getPaidAmountForInvoice } from './overdueUtils';
+import { getPendingAmount } from './paymentUtils';
 
 const parseDate = (dateString: string) => {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -161,7 +162,7 @@ export const buildOperationalAlerts = (
   invoices.forEach((invoice) => {
     const customer = customerById.get(invoice.customerId);
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments);
-    const outstanding = invoice.totalSales - paidAmount;
+    const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
 
     if (customer?.tier === 'Tier 3' && outstanding > 0) {
       alerts.push(
