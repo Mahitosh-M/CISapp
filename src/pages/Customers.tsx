@@ -8,7 +8,6 @@ import {
   getAppSettings,
   getCustomers,
   getInvoices,
-  getInvoicesByCustomerId,
   getPayments,
   getPaymentTermsForTier,
   updateCustomerRecord
@@ -221,7 +220,7 @@ const Customers = () => {
         return;
       }
 
-      const linkedInvoices = await getInvoicesByCustomerId(customer.id);
+      const linkedInvoices = invoices.filter((invoice) => invoice.customerId === customer.id);
       const extraWarning = linkedInvoices.length > 0 ? ` This customer has ${linkedInvoices.length} invoice(s). Invoice history will remain with stored customer name.` : '';
       const confirmed = window.confirm(`Delete ${customer.name}?${extraWarning}`);
 
