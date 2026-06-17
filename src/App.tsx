@@ -22,6 +22,15 @@ import CustomerOffers from './pages/customer/CustomerOffers';
 import CustomerProfile from './pages/customer/CustomerProfile';
 import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
+import { useIsMobile } from './hooks/useIsMobile';
+
+const AdminStaffLanding = () => {
+  const isMobile = useIsMobile();
+
+  if (isMobile) return <Navigate to="/invoices" replace />;
+
+  return <Dashboard />;
+};
 
 const App = () => {
   useEnterKeyNavigation();
@@ -38,7 +47,7 @@ const App = () => {
         <Route path="profile" element={<CustomerProfile />} />
       </Route>
       <Route path="/" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Layout /></ProtectedRoute>}>
-        <Route index element={<Dashboard />} />
+        <Route index element={<AdminStaffLanding />} />
         <Route path="customers" element={<Customers />} />
         <Route path="invoices" element={<Invoices />} />
         <Route path="payments" element={<Payments />} />
