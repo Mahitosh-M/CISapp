@@ -174,7 +174,7 @@ const Layout = () => {
       </main>
       {isMobile ? (
         <nav style={mobileNavStyle}>
-          {visibleNavItems.map((item) => (
+          {mobileNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
