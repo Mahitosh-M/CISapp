@@ -13,10 +13,6 @@
       }
     ]
   },
-<<<<<<< HEAD
-=======
-
->>>>>>> Development
   "firestore": {
     "rules": "firestore.rules"
   }
