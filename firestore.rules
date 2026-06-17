@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getCurrentUserProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserRole() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? getCurrentUserProfile().data.role
+        : null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getCurrentUserProfile().data.role == 'Admin';
+    }
+
+    function isStaff() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getCurrentUserProfile().data.role == 'Staff';
+    }
+
+    function isCustomer() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getCurrentUserProfile().data.role == 'customer';
+    }
+
+    function customerOwnsDoc(docCustomerId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getCurrentUserProfile().data.role == 'customer'
+        && getCurrentUserProfile().data.customerId == docCustomerId;
+    }
+
+    match /customers/{customerId} {
+      allow read: if isAdmin() || (isCustomer() && getCurrentUserProfile().data.customerId == customerId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isAdmin()
+        || isStaff()
+        || (isCustomer() && resource.data.customerId == getCurrentUserProfile().data.customerId);
+      allow create, update, delete: if isAdmin() || isStaff();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAdmin()
+        || isStaff()
+        || (isCustomer() && resource.data.customerId == getCurrentUserProfile().data.customerId);
+      allow create, update, delete: if isAdmin() || isStaff();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /giftHistory/{giftId} {
+      allow read: if isAdmin() || isStaff() || (isCustomer() && resource.data.customerId == getCurrentUserProfile().data.customerId);
+      allow create, update, delete: if isAdmin() || isStaff();
+    }
+
+    match /giftItems/{giftItemId} {
+      allow read: if isAdmin() || isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.email == request.auth.token.email));
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role in ['Admin', 'Staff', 'customer'];
+      allow update: if isAdmin()
+        || (isSignedIn()
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.email == request.auth.token.email);
+      allow delete: if isAdmin();
+    }
+
+    match /alerts/{alertId} {
+      allow read: if isAdmin() || isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /offers/{offerId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
