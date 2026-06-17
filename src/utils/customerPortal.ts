@@ -1,6 +1,6 @@
 import type { Customer, Invoice, Payment, UserProfile } from '../types';
 import { getCurrentMonthRange } from './dateUtils';
-import { getInvoicePaymentEffect } from './paymentUtils';
+import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -53,7 +53,7 @@ export const calculateInvoiceOutstanding = (invoice: Invoice, payments: Payment[
   return {
     invoiceAmount,
     paidAmount,
-    outstandingAmount: invoiceAmount - paidAmount
+    outstandingAmount: getPendingAmount(invoiceAmount, paidAmount)
   };
 };
 

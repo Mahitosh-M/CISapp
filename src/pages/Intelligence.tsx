@@ -21,6 +21,7 @@ const Intelligence = () => {
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
   const monthlyRankings = useMemo(() => buildMonthlyRankings(customers, invoices, payments, new Date(), settings), [customers, invoices, payments, settings]);
   const scoreWeights = normalizeScoreWeights(settings);
+  const formatWholeOrders = (value: number) => String(Math.round(value));
 
   const topCustomers = customerScores;
   const riskCustomers = customerScores
@@ -152,7 +153,7 @@ const Intelligence = () => {
                 renderCustomerRow(
                   customer,
                   `#${customer.rank}`,
-                  `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${customer.customerMonthlyOrders.toFixed(1)} / ${customer.monthlyOrderTarget}`
+                  `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${formatWholeOrders(customer.customerMonthlyOrders)} / ${formatWholeOrders(customer.monthlyOrderTarget)}`
                 )
               )}
             </div>

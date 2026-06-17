@@ -15,6 +15,8 @@ const getMovementColor = (movement: CustomerScore['movement']) => {
 };
 
 const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
+  const formatWholeOrders = (value: number) => String(Math.round(value));
+
   const cardStyle = {
     background: '#0F2748',
     borderRadius: 16,
@@ -93,7 +95,7 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
         </div>
         <div style={targetBoxStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800 }}>Order Target</div>
-          <div style={{ fontWeight: 800 }}>{customer.customerMonthlyOrders.toFixed(1)} / {customer.monthlyOrderTarget}</div>
+          <div style={{ fontWeight: 800 }}>{formatWholeOrders(customer.customerMonthlyOrders)} / {formatWholeOrders(customer.monthlyOrderTarget)}</div>
           <div style={metaStyle}>{customer.orderTargetAchievement}% achievement</div>
         </div>
       </div>

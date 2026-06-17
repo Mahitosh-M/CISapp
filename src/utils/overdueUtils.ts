@@ -1,5 +1,5 @@
 import type { AppSettings, Customer, Invoice, OverdueInvoiceAlert, Payment } from '../types';
-import { getInvoicePaymentEffect } from './paymentUtils';
+import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import { calculateDynamicDueDate } from './settings';
 
 const parseDate = (dateString: string) => {
@@ -34,7 +34,7 @@ export const buildOverdueInvoiceAlerts = (
       const customer = customerById.get(invoice.customerId);
       const tier = customer?.tier ?? 'Tier 3';
       const paidAmount = getPaidAmountForInvoice(invoice.id, payments);
-      const overdueAmount = invoice.totalSales - paidAmount;
+      const overdueAmount = getPendingAmount(invoice.totalSales, paidAmount);
       const effectiveDueDate = calculateDynamicDueDate(invoice.date, tier, settings);
       const overdueDays = effectiveDueDate < today && overdueAmount > 0 ? daysBetween(effectiveDueDate, today) : 0;
       const severity: OverdueInvoiceAlert['severity'] = overdueAmount <= 0 ? 'green' : overdueDays > 7 ? 'red' : overdueDays > 0 ? 'yellow' : 'green';
@@ -75,7 +75,7 @@ export const buildCustomerOutstandingRows = (
     const invoicePaymentEffect = customerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
     // Previous outstanding is the opening balance from old records before this ERP started.
     const previousOutstanding = customer.previousOutstandingAmount ?? 0;
-    const newOutstanding = totalSales - invoicePaymentEffect;
+    const newOutstanding = getPendingAmount(totalSales, invoicePaymentEffect);
     const customerAlerts = overdueAlerts.filter((alert) => alert.customerId === customer.id);
     const overdueAmount = customerAlerts.reduce((sum, alert) => sum + alert.overdueAmount, 0);
     const overdueDays = customerAlerts.reduce((highest, alert) => Math.max(highest, alert.overdueDays), 0);

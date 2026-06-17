@@ -162,7 +162,7 @@ const Settings = () => {
         [tierKey]: {
           ...current.targetSettings[tierKey],
           // Empty target fields intentionally become NaN so validation blocks saving instead of silently storing zero.
-          [field]: value.trim() === '' ? Number.NaN : Number(value)
+          [field]: value.trim() === '' ? Number.NaN : field === 'monthlyOrderTarget' ? Math.trunc(Number(value)) : Number(value)
         }
       }
     }));
@@ -357,9 +357,14 @@ const Settings = () => {
                   style={inputStyle}
                   type="number"
                   min="0"
-                  step="0.1"
+                  step="1"
                   value={Number.isNaN(settings.targetSettings[tierKey].monthlyOrderTarget) ? '' : settings.targetSettings[tierKey].monthlyOrderTarget}
                   onChange={(event) => handleTargetSettingChange(tierKey, 'monthlyOrderTarget', event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === '.' || event.key === ',') {
+                      event.preventDefault();
+                    }
+                  }}
                 />
               </label>
             </div>

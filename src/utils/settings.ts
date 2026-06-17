@@ -63,6 +63,17 @@ const numberOrZero = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const wholeNumberOrNaN = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : Number.NaN;
+};
+
+const mergeTierTargetSettings = (targetSettings: Partial<TierTargetSetting> | undefined, fallback: TierTargetSetting): TierTargetSetting => ({
+  ...fallback,
+  ...targetSettings,
+  monthlyOrderTarget: wholeNumberOrNaN(targetSettings?.monthlyOrderTarget ?? fallback.monthlyOrderTarget)
+});
+
 export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSettings => ({
   ...DEFAULT_SETTINGS,
   ...settings,
@@ -93,18 +104,9 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   },
   showCustomerTierToCustomer: settings?.showCustomerTierToCustomer ?? DEFAULT_SETTINGS.showCustomerTierToCustomer,
   targetSettings: {
-    tier1: {
-      ...DEFAULT_SETTINGS.targetSettings.tier1,
-      ...settings?.targetSettings?.tier1
-    },
-    tier2: {
-      ...DEFAULT_SETTINGS.targetSettings.tier2,
-      ...settings?.targetSettings?.tier2
-    },
-    tier3: {
-      ...DEFAULT_SETTINGS.targetSettings.tier3,
-      ...settings?.targetSettings?.tier3
-    }
+    tier1: mergeTierTargetSettings(settings?.targetSettings?.tier1, DEFAULT_SETTINGS.targetSettings.tier1),
+    tier2: mergeTierTargetSettings(settings?.targetSettings?.tier2, DEFAULT_SETTINGS.targetSettings.tier2),
+    tier3: mergeTierTargetSettings(settings?.targetSettings?.tier3, DEFAULT_SETTINGS.targetSettings.tier3)
   }
 });
 
@@ -206,6 +208,8 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
       errors.push(`${readableTier} monthly order target must be a valid number.`);
     } else if (Number(target.monthlyOrderTarget) < 0) {
       errors.push(`${readableTier} monthly order target cannot be negative.`);
+    } else if (!Number.isInteger(Number(target.monthlyOrderTarget))) {
+      errors.push(`${readableTier} monthly order target must be a whole number.`);
     }
   });
 

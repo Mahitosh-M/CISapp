@@ -20,8 +20,11 @@ import CustomerInvoices from './pages/customer/CustomerInvoices';
 import CustomerPayments from './pages/customer/CustomerPayments';
 import CustomerOffers from './pages/customer/CustomerOffers';
 import CustomerProfile from './pages/customer/CustomerProfile';
+import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
 
 const App = () => {
+  useNumberInputZeroSelection();
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

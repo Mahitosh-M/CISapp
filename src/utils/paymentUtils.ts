@@ -6,6 +6,10 @@ export const getAmountAppliedToInvoice = (payment: Payment) => {
 };
 
 export const getInvoicePaymentEffect = (payment: Payment) => {
-  // Invoice outstanding should only reduce by the amount left after clearing old balance, plus cash discount.
+  // Invoice outstanding reduces by the invoice-applied amount plus cash discount.
   return getAmountAppliedToInvoice(payment) + Math.max(0, payment.cashDiscount ?? 0);
+};
+
+export const getPendingAmount = (invoiceAmount: number, paidAmount: number) => {
+  return Math.max(0, invoiceAmount - paidAmount);
 };

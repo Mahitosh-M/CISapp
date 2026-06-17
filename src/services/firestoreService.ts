@@ -66,6 +66,10 @@ const numberOrZero = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const withoutUndefined = <T extends Record<string, unknown>>(value: T) => {
+  return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)) as Partial<T>;
+};
+
 export const getPaymentTermsForTier = (tier: CustomerTier) => {
   return getPaymentTermsLabel(tier);
 };
@@ -452,15 +456,15 @@ const sanitizePaymentPayload = (payment: PaymentFormData): PaymentFormData => ({
 const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstandingAmount: number) => {
   const cleanPayment = sanitizePaymentPayload(payment);
   const oldBalanceBeforePayment = Math.max(0, numberOrZero(previousOutstandingAmount));
-  const amountUsedForOldBalance = Math.min(cleanPayment.amount, oldBalanceBeforePayment);
-  const amountAppliedToInvoice = Math.max(0, cleanPayment.amount - amountUsedForOldBalance);
-  const oldBalanceAfterPayment = Math.max(0, oldBalanceBeforePayment - amountUsedForOldBalance);
+  const amountUsedForOldBalance = 0;
+  const amountAppliedToInvoice = cleanPayment.amount;
+  const oldBalanceAfterPayment = oldBalanceBeforePayment;
 
   return {
     payload: {
       ...cleanPayment,
-      // previousOutstandingAmount is an old opening balance from before this ERP started.
-      // Cash received clears that old balance first; only the remaining amount is applied to the selected invoice.
+      // Payments entered against an invoice reduce that selected invoice directly.
+      // Legacy old-balance allocations are still preserved on older payment documents.
       amountAppliedToInvoice,
       amountUsedForOldBalance,
       oldBalanceBeforePayment,
@@ -482,13 +486,6 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     const allocation = buildAllocatedPaymentPayload(payment, previousOutstandingAmount);
 
     allocatedPayment = allocation.payload;
-
-    if (customerSnapshot.exists() && allocation.payload.amountUsedForOldBalance > 0) {
-      transaction.update(customerRef, {
-        previousOutstandingAmount: allocation.oldBalanceAfterPayment,
-        updatedAt: timestamp
-      });
-    }
 
     transaction.set(paymentRef, {
       ...allocatedPayment,
@@ -705,6 +702,14 @@ export const getUserProfiles = async () => {
 };
 
 export const getUserProfileByUid = async (uid: string) => {
+  if (!uid) return undefined;
+
+  const directSnapshot = await getDoc(doc(db, USERS, uid));
+
+  if (directSnapshot.exists()) {
+    return mapUserProfileDoc(directSnapshot.id, directSnapshot.data());
+  }
+
   const userQuery = query(collection(db, USERS), where('uid', '==', uid));
   const snapshot = await getDocs(userQuery);
   const userDoc = snapshot.docs[0];
@@ -719,11 +724,15 @@ export const getUserProfileByEmail = async (email: string) => {
 };
 
 export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'createdAt' | 'updatedAt'>) => {
-  return addDoc(collection(db, USERS), {
-    ...profile,
+  const profileRef = doc(db, USERS, profile.uid);
+
+  await setDoc(profileRef, {
+    ...withoutUndefined(profile),
     createdAt: nowIso(),
     updatedAt: nowIso()
   });
+
+  return profileRef;
 };
 
 export const updateUserProfileRecord = async (profileId: string, profile: Partial<UserProfile>, auditUser?: AuditUser) => {
