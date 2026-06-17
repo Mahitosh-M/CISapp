@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getAppSettings, getCustomers, getInvoices, getPayments } from '../services/firestoreService';
-import type { AppSettings, Customer, Invoice, Payment } from '../types';
+import type { AppSettings, Customer, CustomerScore, Invoice, Payment } from '../types';
+import { buildCustomerScores } from '../utils/customerAnalytics';
+import { applyScoresToCustomerTiers } from '../utils/customerTiering';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
 interface UseErpDataOptions {
@@ -15,6 +17,7 @@ export const useErpData = (options: UseErpDataOptions = {}) => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [customerScores, setCustomerScores] = useState<CustomerScore[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -23,19 +26,25 @@ export const useErpData = (options: UseErpDataOptions = {}) => {
       setLoading(true);
       setError('');
 
-      // Firestore reads are kept together so dashboard, reports, and intelligence use the same data snapshot.
-      // Free-tier safety: callers can pass date ranges and limits so large screens do not fetch all history by default.
+      // Scoped pages keep their visible invoice/payment rows filtered, but tiers are always calculated
+      // from the same full rolling data used by the Intelligence page.
+      const hasScopedRecords = Boolean(options.fromDate || options.toDate || options.invoiceLimit || options.paymentLimit);
       const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
         getCustomers(),
         getInvoices({ fromDate: options.fromDate, toDate: options.toDate, limitCount: options.invoiceLimit }),
         getPayments({ fromDate: options.fromDate, toDate: options.toDate, limitCount: options.paymentLimit }),
         getAppSettings()
       ]);
+      const [scoringInvoices, scoringPayments] = hasScopedRecords
+        ? await Promise.all([getInvoices(), getPayments()])
+        : [invoiceRows, paymentRows];
+      const intelligenceScores = buildCustomerScores(customerRows, scoringInvoices, scoringPayments, new Date(), appSettings);
 
-      setCustomers(customerRows);
+      setCustomers(applyScoresToCustomerTiers(customerRows, intelligenceScores));
       setInvoices(invoiceRows);
       setPayments(paymentRows);
       setSettings(appSettings);
+      setCustomerScores(intelligenceScores);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load Firestore data.');
     } finally {
@@ -52,6 +61,7 @@ export const useErpData = (options: UseErpDataOptions = {}) => {
     invoices,
     payments,
     settings,
+    customerScores,
     loading,
     error,
     refreshData

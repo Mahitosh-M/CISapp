@@ -1,38 +1,35 @@
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from 'recharts';
+import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
 import { useErpData } from '../hooks/useErpData';
-import { buildCustomerScores } from '../utils/customerAnalytics';
-import { getPrevious30DaysRange, isDateInRange } from '../utils/dateUtils';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
+import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
-import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
+import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
-const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#F2994A'];
+type AnalysisView = 'business' | 'data';
+type FocusMetric = 'profit' | 'collection' | 'customers' | 'risk';
+
+const formatPercent = (value: number) => `${Math.round(Number.isFinite(value) ? value : 0)}%`;
+
+const getSignalColor = (tone: 'good' | 'watch' | 'risk') => {
+  if (tone === 'good') return '#1B7F3A';
+  if (tone === 'watch') return '#B7791F';
+  return '#B42318';
+};
 
 const Analytics = () => {
-  const defaultRange = useMemo(() => getPrevious30DaysRange(), []);
+  const defaultRange = useMemo(() => getCurrentMonthRange(), []);
   const [fromDate, setFromDate] = useState(defaultRange.fromDate);
   const [toDate, setToDate] = useState(defaultRange.toDate);
   const [activeFromDate, setActiveFromDate] = useState(defaultRange.fromDate);
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
-  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
+  const [activeView, setActiveView] = useState<AnalysisView>('business');
+  const [focusMetric, setFocusMetric] = useState<FocusMetric>('profit');
+  const { customers, invoices, payments, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
+  const isMobile = useIsMobile();
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
@@ -42,61 +39,156 @@ const Analytics = () => {
     return payments.filter((payment) => isDateInRange(payment.date, activeFromDate, activeToDate));
   }, [activeFromDate, activeToDate, payments]);
 
-  const customerScores = useMemo(() => buildCustomerScores(customers, invoices, payments, new Date(), settings), [customers, invoices, payments, settings]);
-  const outstandingRows = useMemo(() => buildCustomerOutstandingRows(customers, invoices, payments, settings), [customers, invoices, payments, settings]);
+  const invoiceIds = useMemo(() => new Set(filteredInvoices.map((invoice) => invoice.id)), [filteredInvoices]);
 
-  const salesTrend = useMemo(() => {
-    const dailySales = new Map<string, number>();
-    filteredInvoices.forEach((invoice) => dailySales.set(invoice.date, (dailySales.get(invoice.date) || 0) + invoice.totalSales));
-    return [...dailySales.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, sales]) => ({ date, sales }));
-  }, [filteredInvoices]);
+  const analysis = useMemo(() => {
+    const sales = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+    const profit = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+    const collected = filteredPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    const invoicePaymentEffect = filteredPayments
+      .filter((payment) => invoiceIds.has(payment.invoiceId))
+      .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+    const outstanding = getPendingAmount(sales, invoicePaymentEffect);
+    const activeCustomerIds = new Set(filteredInvoices.map((invoice) => invoice.customerId));
+    const negativeProfitInvoices = filteredInvoices.filter((invoice) => invoice.totalProfit < 0);
+    const avgInvoiceValue = filteredInvoices.length > 0 ? Math.round(sales / filteredInvoices.length) : 0;
+    const margin = sales > 0 ? (profit / sales) * 100 : 0;
+    const collectionRate = sales > 0 ? (collected / sales) * 100 : 0;
+    const activeCustomerRate = customers.length > 0 ? (activeCustomerIds.size / customers.length) * 100 : 0;
 
-  const profitTrend = useMemo(() => {
-    const monthlyProfit = new Map<string, number>();
-    invoices.forEach((invoice) => {
-      const month = invoice.date.slice(0, 7);
-      monthlyProfit.set(month, (monthlyProfit.get(month) || 0) + invoice.totalProfit);
+    return {
+      sales,
+      profit,
+      collected,
+      outstanding,
+      invoiceCount: filteredInvoices.length,
+      paymentCount: filteredPayments.length,
+      activeCustomers: activeCustomerIds.size,
+      avgInvoiceValue,
+      margin,
+      collectionRate,
+      activeCustomerRate,
+      negativeProfitCount: negativeProfitInvoices.length,
+      negativeProfitAmount: negativeProfitInvoices.reduce((sum, invoice) => sum + Math.abs(invoice.totalProfit), 0)
+    };
+  }, [customers.length, filteredInvoices, filteredPayments, invoiceIds]);
+
+  const customerAnalysis = useMemo(() => {
+    const rows = new Map<string, { customer: string; sales: number; profit: number; invoices: number }>();
+
+    filteredInvoices.forEach((invoice) => {
+      const customerName = customers.find((customer) => customer.id === invoice.customerId)?.name || invoice.customerName;
+      const current = rows.get(invoice.customerId) || { customer: customerName, sales: 0, profit: 0, invoices: 0 };
+      rows.set(invoice.customerId, {
+        customer: current.customer,
+        sales: current.sales + invoice.totalSales,
+        profit: current.profit + invoice.totalProfit,
+        invoices: current.invoices + 1
+      });
     });
-    return [...monthlyProfit.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([month, profit]) => ({ month, profit }));
-  }, [invoices]);
 
-  const tierDistribution = useMemo(() => {
-    return (['Tier 1', 'Tier 2', 'Tier 3'] as const).map((tier) => ({
-      name: tier,
-      value: customers.filter((customer) => customer.tier === tier).length
-    }));
-  }, [customers]);
+    return [...rows.values()].sort((a, b) => b.sales - a.sales);
+  }, [customers, filteredInvoices]);
 
-  const outstandingChart = useMemo(() => {
-    return outstandingRows
-      .filter((row) => row.outstanding > 0)
-      .sort((a, b) => b.outstanding - a.outstanding)
-      .slice(0, 10)
-      .map((row) => ({
-        customer: customers.find((customer) => customer.id === row.customerId)?.name || row.customerId,
-        outstanding: row.outstanding
-      }));
-  }, [customers, outstandingRows]);
+  const dailyAnalysis = useMemo(() => {
+    const rows = new Map<string, { date: string; sales: number; profit: number; collected: number; invoices: number }>();
 
-  const paymentCollectionTrend = useMemo(() => {
-    const dailyPayments = new Map<string, number>();
-    filteredPayments.forEach((payment) => dailyPayments.set(payment.date, (dailyPayments.get(payment.date) || 0) + payment.amount));
-    return [...dailyPayments.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, collected]) => ({ date, collected }));
-  }, [filteredPayments]);
+    filteredInvoices.forEach((invoice) => {
+      const current = rows.get(invoice.date) || { date: invoice.date, sales: 0, profit: 0, collected: 0, invoices: 0 };
+      rows.set(invoice.date, {
+        ...current,
+        sales: current.sales + invoice.totalSales,
+        profit: current.profit + invoice.totalProfit,
+        invoices: current.invoices + 1
+      });
+    });
 
-  const topProfitCustomers = useMemo(() => {
-    return [...customerScores]
-      .sort((a, b) => b.totalProfit - a.totalProfit)
-      .slice(0, 10)
-      .map((customer) => ({
-        customer: customer.customerName,
-        profit: customer.totalProfit
-      }));
-  }, [customerScores]);
+    filteredPayments.forEach((payment) => {
+      const current = rows.get(payment.date) || { date: payment.date, sales: 0, profit: 0, collected: 0, invoices: 0 };
+      rows.set(payment.date, {
+        ...current,
+        collected: current.collected + payment.amount
+      });
+    });
+
+    return [...rows.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [filteredInvoices, filteredPayments]);
+
+  const insightCards = useMemo(() => {
+    const concentration = analysis.sales > 0 && customerAnalysis.length > 0 ? (customerAnalysis[0].sales / analysis.sales) * 100 : 0;
+
+    return [
+      {
+        title: 'Profit Health',
+        value: formatPercent(analysis.margin),
+        detail: analysis.profit >= 0 ? `${formatMoney(analysis.profit)} profit from selected sales.` : `${formatMoney(Math.abs(analysis.profit))} loss in this range.`,
+        tone: analysis.margin >= 15 ? 'good' : analysis.margin >= 5 ? 'watch' : 'risk'
+      },
+      {
+        title: 'Collection Strength',
+        value: formatPercent(analysis.collectionRate),
+        detail: `${formatMoney(analysis.collected)} collected against ${formatMoney(analysis.sales)} sales.`,
+        tone: analysis.collectionRate >= 80 ? 'good' : analysis.collectionRate >= 50 ? 'watch' : 'risk'
+      },
+      {
+        title: 'Customer Activity',
+        value: formatPercent(analysis.activeCustomerRate),
+        detail: `${analysis.activeCustomers} of ${customers.length} customers bought in this period.`,
+        tone: analysis.activeCustomerRate >= 45 ? 'good' : analysis.activeCustomerRate >= 20 ? 'watch' : 'risk'
+      },
+      {
+        title: 'Sales Concentration',
+        value: formatPercent(concentration),
+        detail: customerAnalysis[0] ? `${customerAnalysis[0].customer} is the largest contributor.` : 'No customer sales in this period.',
+        tone: concentration <= 25 ? 'good' : concentration <= 45 ? 'watch' : 'risk'
+      }
+    ] as { title: string; value: string; detail: string; tone: 'good' | 'watch' | 'risk' }[];
+  }, [analysis, customerAnalysis, customers.length]);
+
+  const focusItems = useMemo(() => {
+    if (focusMetric === 'profit') {
+      return [
+        `Gross margin is ${formatPercent(analysis.margin)} on ${formatMoney(analysis.sales)} sales.`,
+        analysis.negativeProfitCount > 0
+          ? `${analysis.negativeProfitCount} invoice(s) reduced profit by ${formatMoney(analysis.negativeProfitAmount)}.`
+          : 'No negative-profit invoices found in this range.',
+        `Average invoice value is ${formatMoney(analysis.avgInvoiceValue)}.`
+      ];
+    }
+
+    if (focusMetric === 'collection') {
+      return [
+        `Collection rate is ${formatPercent(analysis.collectionRate)} for the selected period.`,
+        `${formatMoney(analysis.outstanding)} remains unpaid against selected invoices and payments.`,
+        `${analysis.paymentCount} payment record(s) were captured in this range.`
+      ];
+    }
+
+    if (focusMetric === 'customers') {
+      return [
+        `${analysis.activeCustomers} customer(s) placed orders in this period.`,
+        `${Math.max(0, customers.length - analysis.activeCustomers)} customer(s) had no invoice activity.`,
+        customerAnalysis[0] ? `${customerAnalysis[0].customer} contributed ${formatMoney(customerAnalysis[0].sales)} sales.` : 'No customer contribution to rank yet.'
+      ];
+    }
+
+    return [
+      analysis.margin < 5 ? 'Profit margin needs review before increasing discounts or credit.' : 'Profit margin is not currently the main risk signal.',
+      analysis.collectionRate < 50 ? 'Collections are weak for the selected period.' : 'Collections are within a manageable range.',
+      analysis.negativeProfitCount > 0 ? 'Negative-profit invoices need product or pricing review.' : 'No negative-profit invoice risk found.'
+    ];
+  }, [analysis, customerAnalysis, customers.length, focusMetric]);
+
+  const applyDateRange = (range: DateRange) => {
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
+    setActiveFromDate(range.fromDate);
+    setActiveToDate(range.toDate);
+  };
 
   const cardStyle: CSSProperties = {
     background: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 18,
     color: '#0B1F3A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
@@ -104,8 +196,9 @@ const Analytics = () => {
 
   const gridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-    gap: 18
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: isMobile ? 10 : 16,
+    marginBottom: 18
   };
 
   const inputStyle: CSSProperties = {
@@ -115,12 +208,24 @@ const Analytics = () => {
     color: '#0B1F3A'
   };
 
-  const renderChartTitle = (title: string, helper: string) => (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ color: '#D4AF37', fontWeight: 900 }}>{title}</div>
-      <div style={{ color: '#67738E', fontSize: 13, marginTop: 4 }}>{helper}</div>
-    </div>
-  );
+  const buttonStyle: CSSProperties = {
+    border: 0,
+    borderRadius: 10,
+    padding: '10px 14px',
+    fontWeight: 900,
+    cursor: 'pointer'
+  };
+
+  const tableStyle: CSSProperties = {
+    width: '100%',
+    minWidth: isMobile ? 620 : 760,
+    borderCollapse: 'collapse'
+  };
+
+  const cellStyle: CSSProperties = {
+    padding: isMobile ? '9px 10px' : '12px 14px',
+    borderBottom: '1px solid #E8EDF4'
+  };
 
   if (loading) {
     return <SectionHeader title="Analytics" description="Loading Firestore analytics..." />;
@@ -129,8 +234,8 @@ const Analytics = () => {
   return (
     <div>
       <SectionHeader
-        title="Advanced Analytics"
-        description="Responsive Recharts analytics using only live Firestore customers, invoices, and payments."
+        title="Business Analytics"
+        description={`Business and data analysis for ${formatDate(activeFromDate)} to ${formatDate(activeToDate)}.`}
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
@@ -151,94 +256,115 @@ const Analytics = () => {
               setActiveFromDate(fromDate);
               setActiveToDate(toDate);
             }}
-            style={{ border: 0, borderRadius: 10, padding: '11px 14px', background: '#D4AF37', color: '#0B1F3A', fontWeight: 900, cursor: 'pointer' }}
+            style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}
           >
             Apply Filter
           </button>
+          <DateRangeShortcuts selectedRange={{ fromDate: activeFromDate, toDate: activeToDate }} onSelect={applyDateRange} />
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {(['business', 'data'] as AnalysisView[]).map((view) => (
+              <button
+                key={view}
+                type="button"
+                style={{ ...buttonStyle, background: activeView === view ? '#0B1F3A' : '#E8EDF4', color: activeView === view ? '#FFFFFF' : '#0B1F3A' }}
+                onClick={() => setActiveView(view)}
+              >
+                {view === 'business' ? 'Business Analysis' : 'Data Analysis'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div style={gridStyle}>
-        <div style={cardStyle}>
-          {renderChartTitle('Sales Trend', 'Line chart is used because sales are time-series data.')}
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={salesTrend}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="date" tickFormatter={formatDate} />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(String(label))} />
-              <Line type="monotone" dataKey="sales" stroke="#D4AF37" strokeWidth={3} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+      {activeView === 'business' ? (
+        <>
+          <div style={gridStyle}>
+            <div style={cardStyle}>
+              <div style={{ color: '#67738E', fontWeight: 800 }}>Sales</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.sales)}</div>
+              <div style={{ color: '#67738E', marginTop: 6 }}>{analysis.invoiceCount} invoice(s)</div>
+            </div>
+            <div style={cardStyle}>
+              <div style={{ color: '#67738E', fontWeight: 800 }}>Profit</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.profit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(analysis.profit)}</div>
+              <div style={{ color: '#67738E', marginTop: 6 }}>{formatPercent(analysis.margin)} margin</div>
+            </div>
+            <div style={cardStyle}>
+              <div style={{ color: '#67738E', fontWeight: 800 }}>Collected</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.collected)}</div>
+              <div style={{ color: '#67738E', marginTop: 6 }}>{formatPercent(analysis.collectionRate)} of sales</div>
+            </div>
+            <div style={cardStyle}>
+              <div style={{ color: '#67738E', fontWeight: 800 }}>Outstanding</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
+              <div style={{ color: '#67738E', marginTop: 6 }}>Selected range balance</div>
+            </div>
+          </div>
 
-        <div style={cardStyle}>
-          {renderChartTitle('Profit Trend', 'Area chart highlights growth across monthly profit.')}
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={profitTrend}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="month" tickFormatter={(value) => formatDate(`${value}-01`)} />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(`${String(label)}-01`)} />
-              <Area type="monotone" dataKey="profit" stroke="#0B1F3A" fill="#D4AF37" fillOpacity={0.35} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+          <div style={gridStyle}>
+            {insightCards.map((insight) => (
+              <div key={insight.title} style={{ ...cardStyle, borderTop: `4px solid ${getSignalColor(insight.tone)}` }}>
+                <div style={{ color: '#67738E', fontWeight: 800 }}>{insight.title}</div>
+                <div style={{ color: getSignalColor(insight.tone), fontSize: 28, fontWeight: 900, marginTop: 8 }}>{insight.value}</div>
+                <div style={{ color: '#0B1F3A', marginTop: 8, lineHeight: 1.45 }}>{insight.detail}</div>
+              </div>
+            ))}
+          </div>
 
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div>
+                <div style={{ color: '#D4AF37', fontWeight: 900 }}>Insight Focus</div>
+                <div style={{ color: '#67738E', marginTop: 4 }}>Selected range signals for the business.</div>
+              </div>
+              <select style={inputStyle} value={focusMetric} onChange={(event) => setFocusMetric(event.target.value as FocusMetric)}>
+                <option value="profit">Profit</option>
+                <option value="collection">Collection</option>
+                <option value="customers">Customers</option>
+                <option value="risk">Risk</option>
+              </select>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {focusItems.map((item) => (
+                <div key={item} style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, fontWeight: 700 }}>
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
         <div style={cardStyle}>
-          {renderChartTitle('Tier Distribution', 'Pie chart is best for customer percentage split.')}
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie data={tierDistribution} dataKey="value" nameKey="name" innerRadius={55} outerRadius={95} label>
-                {tierDistribution.map((entry, index) => (
-                  <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Date Range Data Breakdown</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  {['Date', 'Invoices', 'Sales', 'Profit', 'Collected', 'Margin'].map((header) => (
+                    <th key={header} style={{ ...cellStyle, background: '#F8F9FB', textAlign: 'left' }}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {dailyAnalysis.length === 0 ? (
+                  <tr><td style={cellStyle} colSpan={6}>No business data found for this date range.</td></tr>
+                ) : (
+                  dailyAnalysis.map((row) => (
+                    <tr key={row.date}>
+                      <td style={cellStyle}>{formatDate(row.date)}</td>
+                      <td style={cellStyle}>{row.invoices}</td>
+                      <td style={cellStyle}>{formatMoney(row.sales)}</td>
+                      <td style={{ ...cellStyle, color: row.profit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 800 }}>{formatMoney(row.profit)}</td>
+                      <td style={cellStyle}>{formatMoney(row.collected)}</td>
+                      <td style={cellStyle}>{row.sales > 0 ? formatPercent((row.profit / row.sales) * 100) : '-'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-
-        <div style={cardStyle}>
-          {renderChartTitle('Highest Outstanding Customers', 'Bar chart ranks the largest outstanding balances.')}
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={outstandingChart}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="customer" />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
-              <Bar dataKey="outstanding" fill="#EB5757" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div style={cardStyle}>
-          {renderChartTitle('Payment Collection', 'Line chart tracks cash collection over the selected period.')}
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={paymentCollectionTrend}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="date" tickFormatter={formatDate} />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} labelFormatter={(label) => formatDate(String(label))} />
-              <Line type="monotone" dataKey="collected" stroke="#56CCF2" strokeWidth={3} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div style={cardStyle}>
-          {renderChartTitle('Top Profit Customers', 'Horizontal comparison uses bars for fast ranking.')}
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={topProfitCustomers}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="customer" />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
-              <Bar dataKey="profit" fill="#D4AF37" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

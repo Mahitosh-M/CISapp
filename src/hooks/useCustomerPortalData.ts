@@ -9,6 +9,7 @@ import {
   getPaymentsForCustomerViewer
 } from '../services/firestoreService';
 import type { AppSettings, Customer, Invoice, Offer, Payment } from '../types';
+import { buildCustomerScores } from '../utils/customerAnalytics';
 import { calculateDueStatus, filterCustomerRecords } from '../utils/customerPortal';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
@@ -47,9 +48,14 @@ export const useCustomerPortalData = () => {
         getActiveOffers()
       ]);
 
-      setCustomer(linkedCustomer);
-      setInvoices(filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName }));
-      setPayments(filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName }));
+      const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
+      const scopedPayments = filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
+      const intelligenceScore = linkedCustomer ? buildCustomerScores([linkedCustomer], scopedInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
+      const customerWithIntelligenceTier = linkedCustomer && intelligenceScore ? { ...linkedCustomer, tier: intelligenceScore.tier } : linkedCustomer;
+
+      setCustomer(customerWithIntelligenceTier);
+      setInvoices(scopedInvoices);
+      setPayments(scopedPayments);
       setSettings(appSettings);
       setOffers(activeOffers);
     } catch (err) {

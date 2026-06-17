@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import StatCard from '../components/StatCard';
+import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import { useErpData } from '../hooks/useErpData';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { getGiftHistory } from '../services/firestoreService';
 import type { CustomerTier, GiftHistory } from '../types';
 import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
-import { getCurrentMonthRange, getMonthValue, getYearValue, isDateInRange } from '../utils/dateUtils';
+import { getMonthValue, getTodayDateString, getYearValue, isDateInRange } from '../utils/dateUtils';
+import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
-import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { getEffectiveInvoiceDueDate } from '../utils/settings';
 
@@ -105,7 +107,10 @@ const Reports = () => {
   const { userProfile } = useAuth();
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [giftError, setGiftError] = useState('');
-  const defaultRange = useMemo(() => getCurrentMonthRange(), []);
+  const defaultRange = useMemo(() => {
+    const today = getTodayDateString();
+    return { fromDate: `${today.slice(0, 8)}01`, toDate: today };
+  }, []);
   const defaultFilters: ReportFilters = {
     fromDate: defaultRange.fromDate,
     toDate: defaultRange.toDate,
@@ -119,7 +124,26 @@ const Reports = () => {
   const [reportType, setReportType] = useState<ReportType>('sales');
   const [draftFilters, setDraftFilters] = useState<ReportFilters>(defaultFilters);
   const [activeFilters, setActiveFilters] = useState<ReportFilters>(defaultFilters);
+  const [showReportTable, setShowReportTable] = useState(false);
   const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFilters.fromDate, toDate: activeFilters.toDate });
+  const isMobile = useIsMobile();
+
+  const applyDateRange = (range: DateRange) => {
+    setDraftFilters((current) => ({
+      ...current,
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+      month: 'all',
+      year: 'all'
+    }));
+    setActiveFilters((current) => ({
+      ...current,
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+      month: 'all',
+      year: 'all'
+    }));
+  };
 
   useEffect(() => {
     getGiftHistory({ fromDate: activeFilters.fromDate, toDate: activeFilters.toDate, limitCount: 100 })
@@ -177,11 +201,15 @@ const Reports = () => {
 
   const filteredScores = useMemo(() => {
     return buildCustomerScoresForDateRange(customers, invoices, payments, activeFilters.fromDate, activeFilters.toDate, settings)
+      .map((score) => ({
+        ...score,
+        tier: customerById.get(score.customerId)?.tier ?? score.tier
+      }))
       .filter((score) => activeFilters.customerId === 'all' || score.customerId === activeFilters.customerId)
       .filter((score) => activeFilters.tier === 'all' || score.tier === activeFilters.tier)
       .filter((score) => activeFilters.area === 'all' || score.customerArea === activeFilters.area)
       .filter((score) => score.totalSales > 0 || score.totalPayments > 0 || score.outstanding !== 0);
-  }, [activeFilters, customers, invoices, payments, settings]);
+  }, [activeFilters, customerById, customers, invoices, payments, settings]);
 
   const salesRows = filteredInvoices.map((invoice) => {
     const paid = getPaidAmountForInvoice(invoice.id);
@@ -329,20 +357,13 @@ const Reports = () => {
   const activeHeaders = headersByReport[reportType];
   const activeTitle = reportOptions.find((option) => option.value === reportType)?.label ?? 'Report';
 
-  const summary = {
-    sales: filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0),
-    profit: filteredInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0),
-    payments: filteredPayments.reduce((sum, payment) => sum + payment.amount, 0),
-    outstanding: outstandingRowsData.reduce((sum, row) => sum + row.totalOutstanding, 0),
-    gifts: filteredGiftHistory.reduce((sum, gift) => sum + gift.actualGiftAmount, 0)
-  };
-
   const handleFilterChange = (field: keyof ReportFilters, value: string) => {
     setDraftFilters((current) => ({ ...current, [field]: value }));
   };
 
   const handleApplyFilters = () => {
     setActiveFilters(draftFilters);
+    setShowReportTable(false);
   };
 
   const areaOptions = useMemo(() => {
@@ -376,8 +397,8 @@ const Reports = () => {
 
   const gridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-    gap: 14
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(190px, 1fr))',
+    gap: isMobile ? 10 : 14
   };
 
   const inputStyle: CSSProperties = {
@@ -406,22 +427,22 @@ const Reports = () => {
 
   const tableStyle: CSSProperties = {
     width: '100%',
-    minWidth: 880,
+    minWidth: isMobile ? 680 : 880,
     borderCollapse: 'collapse'
   };
 
   const headerCellStyle: CSSProperties = {
-    padding: '14px 16px',
+    padding: isMobile ? '9px 10px' : '14px 16px',
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
     color: '#0B1F3A',
-    fontSize: 13,
+    fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
 
   const cellStyle: CSSProperties = {
-    padding: '14px 16px',
+    padding: isMobile ? '9px 10px' : '14px 16px',
     borderBottom: '1px solid #E8EDF4',
     color: '#0B1F3A'
   };
@@ -443,19 +464,11 @@ const Reports = () => {
     <div>
       <SectionHeader
         title="Reports"
-        description="Default range is the current month. Use filters to review historical customer, month, year, tier, and gift data."
+        description="Use filters to review historical customer, month, year, tier, and gift data."
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {giftError ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{giftError}</div> : null}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 18, marginBottom: 24 }}>
-        <StatCard title="Sales" value={formatMoney(summary.sales)} subtitle="Filtered invoice sales" />
-        <StatCard title="Profit" value={formatMoney(summary.profit)} subtitle="Filtered estimated profit" />
-        <StatCard title="Payments" value={formatMoney(summary.payments)} subtitle="Filtered payment receipts" />
-        <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Previous + filtered new outstanding" color="#EB5757" />
-        <StatCard title="Gifts" value={formatMoney(summary.gifts)} subtitle="Filtered gift history" />
-      </div>
 
       <div style={cardStyle}>
         <div style={gridStyle}>
@@ -533,6 +546,10 @@ const Reports = () => {
           <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={handleApplyFilters}>
             Apply Filter
           </button>
+          <DateRangeShortcuts selectedRange={{ fromDate: activeFilters.fromDate, toDate: activeFilters.toDate }} onSelect={applyDateRange} />
+          <button type="button" style={{ ...buttonStyle, background: showReportTable ? '#E8EDF4' : '#0B1F3A', color: showReportTable ? '#0B1F3A' : '#FFFFFF' }} onClick={() => setShowReportTable((current) => !current)}>
+            {showReportTable ? 'Hide View' : 'View'}
+          </button>
           <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={handleExportPdf}>
             Export PDF
           </button>
@@ -542,34 +559,35 @@ const Reports = () => {
         </div>
       </div>
 
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 12 }}>{activeTitle}</div>
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                {activeHeaders.map((header) => (
-                  <th key={header} style={headerCellStyle}>{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {activeRows.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={activeHeaders.length}>No report rows found for the selected filters.</td></tr>
-              ) : (
-                activeRows.map((row, index) => (
-                  <tr key={`${reportType}-${index}`}>
-                    {activeHeaders.map((header) => (
-                      <td key={header} style={cellStyle}>{row[header]}</td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {showReportTable ? (
+        <div style={cardStyle}>
+          <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 12 }}>{activeTitle}</div>
+          <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  {activeHeaders.map((header) => (
+                    <th key={header} style={headerCellStyle}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activeRows.length === 0 ? (
+                  <tr><td style={cellStyle} colSpan={activeHeaders.length}>No report rows found for the selected filters.</td></tr>
+                ) : (
+                  activeRows.map((row, index) => (
+                    <tr key={`${reportType}-${index}`}>
+                      {activeHeaders.map((header) => (
+                        <td key={header} style={cellStyle}>{row[header]}</td>
+                      ))}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 };

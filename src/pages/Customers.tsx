@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
-import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import {
   createCustomer,
@@ -15,10 +14,12 @@ import {
   updateCustomerRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
+import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
 import { formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
+import TierBadge from '../components/TierBadge';
 
 const emptyCustomerForm: CustomerFormData = {
   name: '',
@@ -41,6 +42,9 @@ const Customers = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [formData, setFormData] = useState<CustomerFormData>(emptyCustomerForm);
   const [editingCustomerId, setEditingCustomerId] = useState('');
+  const [showCustomerForm, setShowCustomerForm] = useState(false);
+  const [showFullTable, setShowFullTable] = useState(false);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,7 +71,7 @@ const Customers = () => {
         getAppSettings()
       ]);
 
-      setCustomers(customerRows);
+      setCustomers(applyIntelligenceTiersToCustomers(customerRows, invoiceRows, paymentRows, appSettings));
       setInvoices(invoiceRows);
       setPayments(paymentRows);
       setSettings(appSettings);
@@ -114,7 +118,6 @@ const Customers = () => {
           .reduce((sum, invoice) => sum + invoice.totalProfit, 0);
         const giftPercentage = getGiftPercentageForTier(customer.tier, settings);
 
-        // Gift budget is shown from real invoice profit and the tier percentage saved in Settings.
         return [customer.id, Math.max(0, Math.round(totalProfit * (giftPercentage / 100)))];
       })
     );
@@ -150,6 +153,7 @@ const Customers = () => {
   const resetForm = () => {
     setFormData({ ...emptyCustomerForm });
     setEditingCustomerId('');
+    setShowCustomerForm(false);
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -204,6 +208,7 @@ const Customers = () => {
       tierOverride: Boolean(customer.tierOverride),
       status: customer.status || 'Active'
     });
+    setShowCustomerForm(true);
     setMessage('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -232,7 +237,7 @@ const Customers = () => {
 
   const pageGridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'minmax(280px, 360px) 1fr',
+    gridTemplateColumns: '1fr',
     gap: 20,
     alignItems: 'start'
   };
@@ -270,27 +275,42 @@ const Customers = () => {
     cursor: 'pointer'
   };
 
-  const tableStyle: CSSProperties = {
+  const compactTableStyle: CSSProperties = {
     width: '100%',
-    minWidth: 1520,
-    borderCollapse: 'collapse'
+    minWidth: 0,
+    borderCollapse: 'collapse',
+    tableLayout: 'fixed'
   };
 
   const headerCellStyle: CSSProperties = {
-    padding: '14px 16px',
+    padding: '8px 7px',
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
     color: '#0B1F3A',
-    fontSize: 13,
-    fontWeight: 800
+    fontSize: 10,
+    fontWeight: 800,
+    lineHeight: 1.2,
+    wordBreak: 'break-word'
   };
 
   const cellStyle: CSSProperties = {
-    padding: '14px 16px',
+    padding: '9px 7px',
     borderBottom: '1px solid #E8EDF4',
     color: '#0B1F3A',
-    verticalAlign: 'top'
+    verticalAlign: 'top',
+    fontSize: 11,
+    lineHeight: 1.25,
+    wordBreak: 'break-word'
+  };
+
+  const compactActionButtonStyle: CSSProperties = {
+    ...buttonStyle,
+    width: '100%',
+    padding: '7px 8px',
+    fontSize: 11,
+    borderRadius: 8,
+    marginBottom: 6
   };
 
   return (
@@ -301,10 +321,27 @@ const Customers = () => {
       />
 
       <div style={pageGridStyle}>
-        <form style={cardStyle} onSubmit={handleSubmit}>
-          <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 14 }}>
-            {editingCustomerId ? 'Edit Customer' : 'Add Customer'}
-          </div>
+        <div style={cardStyle}>
+          <button
+            type="button"
+            style={{ ...buttonStyle, width: '100%', background: '#D4AF37', color: '#0B1F3A', marginBottom: showCustomerForm ? 16 : 0 }}
+            onClick={() => {
+              if (showCustomerForm && !editingCustomerId) {
+                resetForm();
+                return;
+              }
+
+              setShowCustomerForm(true);
+            }}
+          >
+            {showCustomerForm && !editingCustomerId ? 'Hide Customer Form' : 'Add New Customer'}
+          </button>
+
+          {showCustomerForm ? (
+            <form onSubmit={handleSubmit}>
+              <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 14 }}>
+                {editingCustomerId ? 'Edit Customer' : 'Add Customer'}
+              </div>
 
           <label style={labelStyle}>
             Customer Name
@@ -400,6 +437,8 @@ const Customers = () => {
             ) : null}
           </div>
         </form>
+          ) : null}
+        </div>
 
         <div style={cardStyle}>
           <div style={{ position: 'relative', marginBottom: 16 }}>
@@ -408,19 +447,26 @@ const Customers = () => {
               <input
                 style={inputStyle}
                 value={searchText}
-                onChange={(event) => setSearchText(event.target.value)}
+                onFocus={() => setShowSearchSuggestions(true)}
+                onChange={(event) => {
+                  setSearchText(event.target.value);
+                  setShowSearchSuggestions(true);
+                }}
                 placeholder="Type at least 2 letters, e.g. ab"
               />
             </label>
 
-            {suggestions.length > 0 ? (
+            {showSearchSuggestions && suggestions.length > 0 ? (
               <div style={{ position: 'absolute', zIndex: 2, left: 0, right: 0, top: 72, background: '#FFFFFF', border: '1px solid #D8DEE9', borderRadius: 12, overflow: 'hidden' }}>
                 {suggestions.map((customer) => (
                   <button
                     key={customer.id}
                     type="button"
                     style={{ display: 'block', width: '100%', padding: 12, textAlign: 'left', background: '#FFFFFF', border: 0, borderBottom: '1px solid #EEF2F6', cursor: 'pointer' }}
-                    onClick={() => setSearchText(customer.name)}
+                    onClick={() => {
+                      setSearchText(customer.name);
+                      setShowSearchSuggestions(false);
+                    }}
                   >
                     <strong>{customer.name}</strong>
                     <div style={{ color: '#67738E', fontSize: 12 }}>{customer.mobile} | {customer.area}</div>
@@ -430,30 +476,83 @@ const Customers = () => {
             ) : null}
           </div>
 
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button
+              type="button"
+              style={{ ...buttonStyle, background: showFullTable ? '#0B1F3A' : '#E8EDF4', color: showFullTable ? '#FFFFFF' : '#0B1F3A' }}
+              onClick={() => setShowFullTable((current) => !current)}
+            >
+              {showFullTable ? 'Compact View' : 'View Full'}
+            </button>
+          </div>
           <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
-          <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4' }}>
-            <table style={tableStyle}>
+          {showFullTable ? (
+            <div style={{ ...latestFiveScrollStyle, display: 'grid', gap: 12 }}>
+              {loading ? (
+                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>Loading customers...</div>
+              ) : filteredCustomers.length === 0 ? (
+                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>No customers found.</div>
+              ) : (
+                filteredCustomers.map((customer) => {
+                  const outstanding = outstandingByCustomerId.get(customer.id);
+                  const giftBudget = giftBudgetByCustomerId.get(customer.id) ?? 0;
+
+                  return (
+                    <div key={customer.id} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 12, background: '#FFFFFF' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontWeight: 900 }}>{customer.name}</div>
+                          <div style={{ color: '#67738E', fontSize: 12 }}>{customer.mobile}</div>
+                          {customer.area ? <div style={{ color: '#0B1F3A', fontSize: 12, fontWeight: 800 }}>Area: {customer.area}</div> : null}
+                          {customer.status ? <div style={{ color: '#67738E', fontSize: 12 }}>Status: {customer.status}</div> : null}
+                        </div>
+                        <TierBadge tier={customer.tier} />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 10 }}>
+                        <div><strong>Invoice Sales</strong><div>{formatMoney(outstanding?.totalSales ?? 0)}</div></div>
+                        <div><strong>Payments</strong><div>{formatMoney(outstanding?.totalPayments ?? 0)}</div></div>
+                        <div><strong>Previous Outstanding</strong><div>{formatMoney(outstanding?.previousOutstanding ?? 0)}</div></div>
+                        <div><strong>Invoice Outstanding</strong><div>{formatMoney(outstanding?.newOutstanding ?? 0)}</div></div>
+                        <div><strong>Total Outstanding</strong><div>{formatMoney(outstanding?.outstanding ?? 0)}</div></div>
+                        <div><strong>Overdue</strong><div>{formatMoney(outstanding?.overdueAmount ?? 0)} | {outstanding?.overdueDays ?? 0} day(s)</div></div>
+                        <div><strong>Gift Budget</strong><div>{formatMoney(giftBudget)}</div></div>
+                        <div><strong>Gift Status</strong><div>{giftBudget > 0 ? 'Gift eligible' : 'No gift budget yet'}</div></div>
+                        <div><strong>Payment Terms</strong><div>{customer.paymentTerms || '-'}</div></div>
+                        <div><strong>Notes</strong><div>{customer.notes || '-'}</div></div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                        <button type="button" style={{ ...buttonStyle, padding: '8px 11px', background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => handleEdit(customer)}>
+                          Edit
+                        </button>
+                        {canDeleteRecords ? (
+                          <button type="button" style={{ ...buttonStyle, padding: '8px 11px', background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(customer)}>
+                            Delete
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+          <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
+            <table style={compactTableStyle}>
               <thead>
-                <tr>
-                  <th style={headerCellStyle}>Customer</th>
-                  <th style={headerCellStyle}>Area</th>
-                  <th style={headerCellStyle}>Tier</th>
-                  <th style={headerCellStyle}>Invoice Sales</th>
-                  <th style={headerCellStyle}>Payments</th>
-                  <th style={headerCellStyle}>Previous Outstanding</th>
-                  <th style={headerCellStyle}>Invoice Outstanding</th>
-                  <th style={headerCellStyle}>Total Outstanding</th>
-                  <th style={headerCellStyle}>Overdue</th>
-                  <th style={headerCellStyle}>Payment Terms</th>
-                  <th style={headerCellStyle}>Notes</th>
-                  <th style={headerCellStyle}>Actions</th>
-                </tr>
+                  <tr>
+                    <th style={{ ...headerCellStyle, width: '42%' }}>Customer</th>
+                    <th style={{ ...headerCellStyle, width: '22%' }}>Total</th>
+                    <th style={{ ...headerCellStyle, width: '18%' }}>Overdue</th>
+                    <th style={{ ...headerCellStyle, width: '18%' }}>Action</th>
+                  </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td style={cellStyle} colSpan={12}>Loading customers...</td></tr>
+                  <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
                 ) : filteredCustomers.length === 0 ? (
-                  <tr><td style={cellStyle} colSpan={12}>No customers found.</td></tr>
+                  <tr><td style={cellStyle} colSpan={4}>No customers found.</td></tr>
                 ) : (
                   filteredCustomers.map((customer) => (
                     <tr key={customer.id}>
@@ -461,48 +560,43 @@ const Customers = () => {
                         Business totals are calculated from invoices/payments so the customer master record stays clean.
                         Future edit point: add credit-limit logic beside these indicators.
                       */}
-                      <td style={cellStyle}>
-                        <strong>{customer.name}</strong>
-                        <div style={{ color: '#0B1F3A', fontSize: 12, fontWeight: 800, marginTop: 4 }}>
-                          Gift Budget: <span style={{ color: '#D4AF37' }}>{formatMoney(giftBudgetByCustomerId.get(customer.id) ?? 0)}</span>
-                        </div>
-                        <div style={{ color: (giftBudgetByCustomerId.get(customer.id) ?? 0) > 0 ? '#1B7F3A' : '#67738E', fontSize: 12, fontWeight: 700 }}>
-                          {(giftBudgetByCustomerId.get(customer.id) ?? 0) > 0 ? 'Gift eligible' : 'No gift budget yet'}
-                        </div>
-                        <div style={{ color: '#67738E', fontSize: 12 }}>{customer.mobile}</div>
-                        {customer.status ? <div style={{ color: '#67738E', fontSize: 12 }}>Status: {customer.status}</div> : null}
-                      </td>
-                      <td style={cellStyle}>{customer.area}</td>
-                      <td style={cellStyle}><TierBadge tier={customer.tier} /></td>
-                      <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.totalSales ?? 0)}</td>
-                      <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.totalPayments ?? 0)}</td>
-                      <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.previousOutstanding ?? 0)}</td>
-                      <td style={cellStyle}>{formatMoney(outstandingByCustomerId.get(customer.id)?.newOutstanding ?? 0)}</td>
-                      <td style={{ ...cellStyle, color: outstandingByCustomerId.get(customer.id)?.indicator === 'green' ? '#1B7F3A' : outstandingByCustomerId.get(customer.id)?.indicator === 'yellow' ? '#B7791F' : '#B42318', fontWeight: 800 }}>
-                        {formatMoney(outstandingByCustomerId.get(customer.id)?.outstanding ?? 0)}
-                      </td>
-                      <td style={{ ...cellStyle, color: (outstandingByCustomerId.get(customer.id)?.overdueAmount ?? 0) > 0 ? '#B42318' : '#1B7F3A', fontWeight: 800 }}>
-                        {formatMoney(outstandingByCustomerId.get(customer.id)?.overdueAmount ?? 0)}
-                        <div style={{ color: '#67738E', fontSize: 12 }}>{outstandingByCustomerId.get(customer.id)?.overdueDays ?? 0} day(s)</div>
-                      </td>
-                      <td style={cellStyle}>{customer.paymentTerms}</td>
-                      <td style={cellStyle}>{customer.notes || '-'}</td>
-                      <td style={cellStyle}>
-                        <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(customer)}>
-                          Edit
-                        </button>
-                        {canDeleteRecords ? (
-                          <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(customer)}>
-                            Delete
-                          </button>
-                        ) : null}
-                      </td>
+                        <>
+                          <td style={cellStyle}>
+                            <strong>{customer.name}</strong>
+                            {customer.area ? (
+                              <div style={{ marginTop: 4 }}>
+                                <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
+                                <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                              </div>
+                            ) : null}
+                            <div style={{ color: '#67738E', fontSize: 11 }}>{customer.mobile}</div>
+                            {customer.status ? <div style={{ color: '#67738E', fontSize: 11 }}>Status: {customer.status}</div> : null}
+                          </td>
+                          <td style={{ ...cellStyle, color: outstandingByCustomerId.get(customer.id)?.indicator === 'green' ? '#1B7F3A' : outstandingByCustomerId.get(customer.id)?.indicator === 'yellow' ? '#B7791F' : '#B42318', fontWeight: 800 }}>
+                            {formatMoney(outstandingByCustomerId.get(customer.id)?.outstanding ?? 0)}
+                          </td>
+                          <td style={{ ...cellStyle, color: (outstandingByCustomerId.get(customer.id)?.overdueAmount ?? 0) > 0 ? '#B42318' : '#1B7F3A', fontWeight: 800 }}>
+                            {formatMoney(outstandingByCustomerId.get(customer.id)?.overdueAmount ?? 0)}
+                            <div style={{ color: '#67738E', fontSize: 11 }}>{outstandingByCustomerId.get(customer.id)?.overdueDays ?? 0} day(s)</div>
+                          </td>
+                          <td style={cellStyle}>
+                            <button type="button" style={{ ...compactActionButtonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => handleEdit(customer)}>
+                              Edit
+                            </button>
+                            {canDeleteRecords ? (
+                              <button type="button" style={{ ...compactActionButtonStyle, background: '#FDECEC', color: '#B42318', marginBottom: 0 }} onClick={() => handleDelete(customer)}>
+                                Delete
+                              </button>
+                            ) : null}
+                          </td>
+                        </>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
           </div>
+          )}
         </div>
       </div>
     </div>

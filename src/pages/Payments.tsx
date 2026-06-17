@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import {
   createPayment,
   deletePaymentRecord,
@@ -48,6 +49,7 @@ const Payments = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const { canDeleteRecords, canEditRecords, userProfile } = useAuth();
+  const isMobile = useIsMobile();
   const auditUser = {
     userId: userProfile?.uid,
     userEmail: userProfile?.email,
@@ -348,8 +350,8 @@ const Payments = () => {
 
   const cardStyle: CSSProperties = {
     background: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 12,
+    padding: isMobile ? 14 : 20,
     color: '#0B1F3A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
@@ -357,8 +359,8 @@ const Payments = () => {
 
   const formGridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-    gap: 14
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(190px, 1fr))',
+    gap: isMobile ? 10 : 14
   };
 
   const inputStyle: CSSProperties = {
@@ -387,22 +389,22 @@ const Payments = () => {
 
   const tableStyle: CSSProperties = {
     width: '100%',
-    minWidth: 940,
+    minWidth: isMobile ? 720 : 940,
     borderCollapse: 'collapse'
   };
 
   const headerCellStyle: CSSProperties = {
-    padding: '14px 16px',
+    padding: isMobile ? '9px 10px' : '14px 16px',
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
     color: '#0B1F3A',
-    fontSize: 13,
+    fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
 
   const cellStyle: CSSProperties = {
-    padding: '14px 16px',
+    padding: isMobile ? '9px 10px' : '14px 16px',
     borderBottom: '1px solid #E8EDF4',
     color: '#0B1F3A',
     verticalAlign: 'top'

@@ -12,14 +12,14 @@ const SectionHeader = ({ title, description }: SectionHeaderProps) => {
 
   const titleStyle = {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 'clamp(18px, 4vw, 20px)',
     fontWeight: 700,
     marginBottom: 6
   };
 
   const descriptionStyle = {
     color: '#BFC8D9',
-    fontSize: 14,
+    fontSize: 'clamp(12px, 3vw, 14px)',
     lineHeight: 1.5
   };
 

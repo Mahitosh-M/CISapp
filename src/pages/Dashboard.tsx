@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Legend,
@@ -18,10 +16,13 @@ import {
 import SectionHeader from '../components/SectionHeader';
 import StatCard from '../components/StatCard';
 import TierBadge from '../components/TierBadge';
+import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
-import { buildCustomerScores, buildIntelligenceSummary } from '../utils/customerAnalytics';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { buildIntelligenceSummary } from '../utils/customerAnalytics';
 import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
+import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
@@ -35,8 +36,9 @@ const Dashboard = () => {
   const [toDate, setToDate] = useState(defaultRange.toDate);
   const [activeFromDate, setActiveFromDate] = useState(defaultRange.fromDate);
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
-  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
+  const { customers, invoices, payments, settings, customerScores, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
   const { userProfile } = useAuth();
+  const isMobile = useIsMobile();
 
   const periodInvoices = useMemo(() => {
     return invoices.filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
@@ -62,7 +64,6 @@ const Dashboard = () => {
     };
   }, [customers, payments, periodInvoiceIds, periodInvoices, periodPayments]);
 
-  const customerScores = useMemo(() => buildCustomerScores(customers, invoices, payments, new Date(), settings), [customers, invoices, payments, settings]);
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
   const overdueAlerts = useMemo(
     () => sortNewestFirst(buildOverdueInvoiceAlerts(customers, invoices, payments, settings), ['effectiveDueDate', 'dueDate', 'invoiceDate']),
@@ -70,13 +71,6 @@ const Dashboard = () => {
   );
   const overdueAmount = overdueAlerts.reduce((sum, alert) => sum + alert.overdueAmount, 0);
   const topCustomers = customerScores;
-  const topCustomersForCharts = customerScores.slice(0, 5);
-  const outstandingRows = useMemo(() => {
-    return [...customerScores]
-      .filter((customer) => customer.outstanding > 0)
-      .sort((a, b) => b.outstanding - a.outstanding)
-      .slice(0, 8);
-  }, [customerScores]);
   const salesTrend = useMemo(() => {
     const dailySales = new Map<string, { date: string; sales: number; profit: number }>();
     periodInvoices.forEach((invoice) => {
@@ -100,39 +94,43 @@ const Dashboard = () => {
       value: customerScores.filter((customer) => customer.tier === tier).length
     }));
   }, [customerScores]);
-  const giftBudgetChart = useMemo(() => {
-    return topCustomersForCharts.map((customer) => ({ customer: customer.customerName, giftBudget: customer.giftBudget }));
-  }, [topCustomersForCharts]);
   const riskCustomers = customerScores
     .filter((customer) => customer.riskLevel === 'High' || customer.overdueStatus === 'Overdue' || customer.outstanding > 0)
     .sort((a, b) => b.outstanding - a.outstanding);
 
+  const applyDateRange = (range: DateRange) => {
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
+    setActiveFromDate(range.fromDate);
+    setActiveToDate(range.toDate);
+  };
+
   const gridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-    gap: 18,
-    marginBottom: 24
+    gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(210px, 1fr))',
+    gap: isMobile ? 10 : 18,
+    marginBottom: isMobile ? 16 : 24
   };
 
   const panelGridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: 18,
-    marginBottom: 24
+    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: isMobile ? 12 : 18,
+    marginBottom: isMobile ? 16 : 24
   };
 
   const panelStyle: CSSProperties = {
     background: '#102645',
-    borderRadius: 18,
-    padding: 20,
+    borderRadius: 12,
+    padding: isMobile ? 14 : 20,
     color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.16)'
   };
 
   const rowStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: '1fr auto',
-    gap: 14,
+    gridTemplateColumns: isMobile ? '1fr' : '1fr auto',
+    gap: isMobile ? 6 : 14,
     alignItems: 'center',
     borderBottom: '1px solid rgba(255,255,255,0.08)',
     padding: '12px 0'
@@ -153,8 +151,8 @@ const Dashboard = () => {
 
   const chartCardStyle: CSSProperties = {
     background: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: 12,
+    padding: isMobile ? 12 : 18,
     color: '#0B1F3A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
@@ -200,6 +198,7 @@ const Dashboard = () => {
           >
             Apply Filter
           </button>
+          <DateRangeShortcuts selectedRange={{ fromDate: activeFromDate, toDate: activeToDate }} onSelect={applyDateRange} />
         </div>
       </div>
 
@@ -216,7 +215,7 @@ const Dashboard = () => {
       <div style={panelGridStyle}>
         <div style={chartCardStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Sales & Profit Trend</div>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
             <LineChart data={salesTrend}>
               <CartesianGrid stroke="#E8EDF4" />
               <XAxis dataKey="date" tickFormatter={formatDate} />
@@ -231,7 +230,7 @@ const Dashboard = () => {
 
         <div style={chartCardStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Payment Collection</div>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
             <LineChart data={paymentTrend}>
               <CartesianGrid stroke="#E8EDF4" />
               <XAxis dataKey="date" tickFormatter={formatDate} />
@@ -244,7 +243,7 @@ const Dashboard = () => {
 
         <div style={chartCardStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Tier Distribution</div>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
             <PieChart>
               <Pie data={tierDistribution} dataKey="value" nameKey="name" innerRadius={55} outerRadius={92} label>
                 {tierDistribution.map((entry, index) => (
@@ -257,51 +256,6 @@ const Dashboard = () => {
           </ResponsiveContainer>
         </div>
 
-        <div style={chartCardStyle}>
-          <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Top Outstanding Customers</div>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={outstandingRows.map((customer) => ({ customer: customer.customerName, outstanding: customer.outstanding }))}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="customer" />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
-              <Bar dataKey="outstanding" fill="#EB5757" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div style={chartCardStyle}>
-          <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Top Customers</div>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={topCustomers.map((customer) => ({ customer: customer.customerName, sales: customer.totalSales }))}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="customer" />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
-              <Bar dataKey="sales" fill="#D4AF37" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div style={chartCardStyle}>
-          <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Gift Budget</div>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={giftBudgetChart}>
-              <CartesianGrid stroke="#E8EDF4" />
-              <XAxis dataKey="customer" />
-              <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-              <Tooltip formatter={(value) => formatMoney(Number(value))} />
-              <Bar dataKey="giftBudget" fill="#0B1F3A" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div style={gridStyle}>
-        <StatCard title="Tier 1" value={`${summary.tier1Count}`} subtitle="Strategic accounts" />
-        <StatCard title="Tier 2" value={`${summary.tier2Count}`} subtitle="Loyal medium accounts" />
-        <StatCard title="Tier 3" value={`${summary.tier3Count}`} subtitle="No-credit accounts" color="#EB5757" />
-        <StatCard title="Gift Budget" value={formatMoney(summary.giftBudget)} subtitle="Tier-based setting" />
       </div>
 
       <div style={panelGridStyle}>

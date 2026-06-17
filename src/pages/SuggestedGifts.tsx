@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
 import { createGiftHistoryRecord, deleteGiftHistoryRecord, getGiftHistory, getGiftItems, updateGiftHistoryRecord } from '../services/firestoreService';
 import type { GiftHistory, GiftItem, GiftPeriod } from '../types';
+import type { DateRange } from '../utils/dateUtils';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDateRange, formatMoney } from '../utils/formatters';
 import { buildSuggestedGiftRows, calculateGiftDifference, getGiftPeriodLabel, getGiftPeriodStart, getMonthEndDateString } from '../utils/giftUtils';
@@ -58,6 +60,12 @@ const SuggestedGifts = () => {
     const minimumPeriodStart = getGiftPeriodStart('1_month', periodEnd);
     // Custom ranges must still cover at least one full month ending on month-end.
     setCustomPeriodStart(value > minimumPeriodStart ? minimumPeriodStart : value);
+  };
+
+  const applyDateRange = (range: DateRange) => {
+    setPeriodType('custom');
+    setCustomPeriodStart(range.fromDate);
+    setPeriodEnd(range.toDate);
   };
 
   const suggestedRows = useMemo(() => {
@@ -329,6 +337,9 @@ const SuggestedGifts = () => {
           <div style={{ fontWeight: 900, color: '#0B1F3A', alignSelf: 'end' }}>
             Eligible: {eligibleCount} | Approved/Gifted: {blockedCount}
           </div>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <DateRangeShortcuts selectedRange={{ fromDate: periodStart, toDate: periodEnd }} onSelect={applyDateRange} />
         </div>
       </div>
 
