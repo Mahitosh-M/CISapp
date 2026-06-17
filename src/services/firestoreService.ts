@@ -416,9 +416,15 @@ export const getInvoices = async (options?: DateRangeQueryOptions) => {
 };
 
 export const getInvoicesByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
-  const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints({ ...options, customerId }));
+  const invoicesQuery = query(collection(db, INVOICES), where('customerId', '==', customerId));
   const snapshot = await getDocs(invoicesQuery);
-  return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
+  const rows = snapshot.docs
+    .map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()))
+    .filter((invoice) => !options?.fromDate || invoice.date >= options.fromDate)
+    .filter((invoice) => !options?.toDate || invoice.date <= options.toDate)
+    .sort((left, right) => right.date.localeCompare(left.date));
+
+  return options?.limitCount && options.limitCount > 0 ? rows.slice(0, options.limitCount) : rows;
 };
 
 export const getInvoicesForCustomerViewer = async (customerId?: string, customerName?: string) => {
