@@ -5,13 +5,14 @@ import { useIsMobile } from '../hooks/useIsMobile';
 
 interface NavItem {
   to: string;
+  mobileTo?: string;
   label: string;
   adminOnly?: boolean;
   staffPermission?: 'canViewReports';
 }
 
 const navItems: NavItem[] = [
-  { to: '/', label: 'Dashboard' },
+  { to: '/', mobileTo: '/dashboard', label: 'Dashboard' },
   { to: '/customers', label: 'Customers' },
   { to: '/invoices', label: 'Invoices' },
   { to: '/payments', label: 'Payments' },
@@ -42,6 +43,7 @@ const Layout = () => {
         ...visibleNavItems.filter((item) => !mobilePriorityOrder.includes(item.to))
       ]
     : visibleNavItems;
+  const getNavPath = (item: NavItem) => (isMobile && item.mobileTo ? item.mobileTo : item.to);
 
   const sidebarStyle = {
     width: 260,
@@ -140,8 +142,8 @@ const Layout = () => {
           <div style={headerStyle}>Pharma ERP</div>
           {mobileNavItems.map((item) => (
             <NavLink
-              key={item.to}
-              to={item.to}
+              key={getNavPath(item)}
+              to={getNavPath(item)}
               end={item.to === '/'}
               style={({ isActive }) => ({
                 ...linkStyle,
@@ -176,9 +178,9 @@ const Layout = () => {
         <nav style={mobileNavStyle}>
           {mobileNavItems.map((item) => (
             <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
+              key={getNavPath(item)}
+              to={getNavPath(item)}
+              end={getNavPath(item) === '/'}
               style={({ isActive }) => ({
                 ...mobileLinkStyle,
                 ...(isActive ? activeMobileLinkStyle : {})
