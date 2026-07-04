@@ -6,7 +6,7 @@ import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { getGiftHistory } from '../services/firestoreService';
-import type { CustomerTier, GiftHistory } from '../types';
+import type { GiftHistory } from '../types';
 import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
 import { getMonthValue, getTodayDateString, getYearValue, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
@@ -14,6 +14,7 @@ import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { sortNewestFirst } from '../utils/listDisplay';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { getEffectiveInvoiceDueDate } from '../utils/settings';
+import { CUSTOMER_TIERS, getTierDisplayName, getTierWithCodeLabel } from '../utils/tiers';
 
 type ReportType = 'sales' | 'profit' | 'payments' | 'outstanding' | 'ranking' | 'tier' | 'gifts';
 
@@ -35,7 +36,7 @@ const reportOptions: { value: ReportType; label: string }[] = [
   { value: 'payments', label: 'Payment Report' },
   { value: 'outstanding', label: 'Outstanding Report' },
   { value: 'ranking', label: 'Customer Ranking Report' },
-  { value: 'tier', label: 'Tier Report' },
+  { value: 'tier', label: 'Partner Level Report' },
   { value: 'gifts', label: 'Gift Report' }
 ];
 
@@ -218,7 +219,7 @@ const Reports = () => {
       Date: formatDate(invoice.date),
       SortDate: invoice.date,
       Customer: invoice.customerName,
-      Tier: customerById.get(invoice.customerId)?.tier ?? '-',
+      'Partner Level': getTierDisplayName(customerById.get(invoice.customerId)?.tier),
       Sales: formatMoney(invoice.totalSales),
       Paid: formatMoney(paid),
       Outstanding: formatMoney(getPendingAmount(invoice.totalSales, paid))
@@ -284,7 +285,7 @@ const Reports = () => {
   const outstandingRows = outstandingRowsData.map((row) => ({
     SortDate: row.customer.updatedAt || row.customer.createdAt,
     Customer: row.customer.name,
-    Tier: row.customer.tier,
+    'Partner Level': getTierDisplayName(row.customer.tier),
     Area: row.customer.area || '-',
     'Previous Outstanding': formatMoney(row.previousOutstanding),
     'New Sales': formatMoney(row.newSales),
@@ -297,24 +298,24 @@ const Reports = () => {
   const rankingRows = filteredScores.map((score) => ({
     Rank: score.rank,
     Customer: score.customerName,
-    Tier: score.tier,
+    'Partner Level': getTierDisplayName(score.tier),
     Score: score.intelligenceScore,
     Sales: formatMoney(score.totalSales),
     Profit: formatMoney(score.totalProfit),
     Outstanding: formatMoney(score.outstanding),
-    'Gift Budget': formatMoney(score.giftBudget),
+    'APC Points': formatMoney(score.giftBudget),
     Overdue: score.overdueStatus
   }));
 
-  const tierRows = (['Tier 1', 'Tier 2', 'Tier 3'] as CustomerTier[]).map((tier) => {
+  const tierRows = CUSTOMER_TIERS.map((tier) => {
     const tierScores = filteredScores.filter((score) => score.tier === tier);
     return {
-      Tier: tier,
+      'Partner Level': getTierDisplayName(tier),
       Customers: tierScores.length,
       Sales: formatMoney(tierScores.reduce((sum, score) => sum + score.totalSales, 0)),
       Profit: formatMoney(tierScores.reduce((sum, score) => sum + score.totalProfit, 0)),
       Outstanding: formatMoney(tierScores.reduce((sum, score) => sum + score.outstanding, 0)),
-      'Gift Budget': formatMoney(tierScores.reduce((sum, score) => sum + score.giftBudget, 0))
+      'APC Points': formatMoney(tierScores.reduce((sum, score) => sum + score.giftBudget, 0))
     };
   });
 
@@ -322,12 +323,12 @@ const Reports = () => {
     Date: formatDate(gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10)),
     SortDate: gift.giftGivenDate || gift.giftedDate || gift.createdAt.slice(0, 10),
     Customer: gift.customerName,
-    Tier: gift.tier,
+    'Partner Level': getTierDisplayName(gift.tier),
     Period: formatDateRange(gift.periodStart, gift.periodEnd),
     Profit: formatMoney(gift.profitConsidered),
     Percentage: `${gift.giftPercentage}%`,
     Status: gift.status,
-    'Suggested Budget': formatMoney(gift.suggestedGiftBudget),
+    'Suggested APC Points': formatMoney(gift.suggestedGiftBudget),
     'Gift Amount': formatMoney(gift.actualGiftAmount),
     'Gifted By': gift.giftedBy || gift.approvedBy,
     Notes: gift.notes || '-'
@@ -344,13 +345,13 @@ const Reports = () => {
   };
 
   const headersByReport: Record<ReportType, string[]> = {
-    sales: ['Invoice', 'Date', 'Customer', 'Tier', 'Sales', 'Paid', 'Outstanding'],
+    sales: ['Invoice', 'Date', 'Customer', 'Partner Level', 'Sales', 'Paid', 'Outstanding'],
     profit: ['Invoice', 'Date', 'Customer', 'Sales', 'Cost', 'Transport', 'Profit'],
     payments: ['Date', 'Customer', 'Invoice', 'Amount', 'Cash Discount', 'Mode', 'Notes'],
-    outstanding: ['Customer', 'Tier', 'Area', 'Previous Outstanding', 'New Sales', 'New Payments', 'Invoice Outstanding', 'Total Outstanding', 'Status'],
-    ranking: ['Rank', 'Customer', 'Tier', 'Score', 'Sales', 'Profit', 'Outstanding', 'Gift Budget', 'Overdue'],
-    tier: ['Tier', 'Customers', 'Sales', 'Profit', 'Outstanding', 'Gift Budget'],
-    gifts: ['Date', 'Customer', 'Tier', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested Budget', 'Gift Amount', 'Gifted By', 'Notes']
+    outstanding: ['Customer', 'Partner Level', 'Area', 'Previous Outstanding', 'New Sales', 'New Payments', 'Invoice Outstanding', 'Total Outstanding', 'Status'],
+    ranking: ['Rank', 'Customer', 'Partner Level', 'Score', 'Sales', 'Profit', 'Outstanding', 'APC Points', 'Overdue'],
+    tier: ['Partner Level', 'Customers', 'Sales', 'Profit', 'Outstanding', 'APC Points'],
+    gifts: ['Date', 'Customer', 'Partner Level', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested APC Points', 'Gift Amount', 'Gifted By', 'Notes']
   };
 
   const activeRows = sortNewestFirst(rowsByReport[reportType], ['SortDate', 'Date', 'Due', 'Period']);
@@ -464,7 +465,7 @@ const Reports = () => {
     <div>
       <SectionHeader
         title="Reports"
-        description="Use filters to review historical customer, month, year, tier, and gift data."
+        description="Use filters to review historical customer, month, year, partner level, and gift data."
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
@@ -522,12 +523,12 @@ const Reports = () => {
           </label>
 
           <label style={labelStyle}>
-            Tier
+            Partner Level
             <select style={inputStyle} value={draftFilters.tier} onChange={(event) => handleFilterChange('tier', event.target.value)}>
-              <option value="all">All tiers</option>
-              <option value="Tier 1">Tier 1</option>
-              <option value="Tier 2">Tier 2</option>
-              <option value="Tier 3">Tier 3</option>
+              <option value="all">All partner levels</option>
+              {CUSTOMER_TIERS.map((tier) => (
+                <option key={tier} value={tier}>{getTierWithCodeLabel(tier)}</option>
+              ))}
             </select>
           </label>
 

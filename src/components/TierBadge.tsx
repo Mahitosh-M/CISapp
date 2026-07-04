@@ -1,4 +1,5 @@
 import type { CustomerTier } from '../types';
+import { getTierDisplayName } from '../utils/tiers';
 
 interface TierBadgeProps {
   tier: CustomerTier;
@@ -10,10 +11,14 @@ const getTierColors = (tier: CustomerTier) => {
   }
 
   if (tier === 'Tier 2') {
+    return { background: '#FFF7D6', color: '#7A5A00', border: '#D4AF37' };
+  }
+
+  if (tier === 'Tier 3') {
     return { background: '#E8EDF5', color: '#0B1F3A', border: '#BFC8D9' };
   }
 
-  return { background: '#FDECEC', color: '#B42318', border: '#F5B5B5' };
+  return { background: '#EAF8EE', color: '#166534', border: '#ABEFC6' };
 };
 
 const TierBadge = ({ tier }: TierBadgeProps) => {
@@ -32,7 +37,7 @@ const TierBadge = ({ tier }: TierBadgeProps) => {
     whiteSpace: 'nowrap' as const
   };
 
-  return <span style={badgeStyle}>{tier}</span>;
+  return <span style={badgeStyle}>{getTierDisplayName(tier)}</span>;
 };
 
 export default TierBadge;

@@ -183,7 +183,7 @@ const Intelligence = () => {
     <div>
       <SectionHeader
         title="Customer Intelligence"
-        description="Rolling 2-month customer ranking, tier assignment, overdue status, and gift budget from Firestore."
+        description="Rolling 2-month customer ranking, partner level assignment, overdue status, and APC points from Firestore."
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
@@ -195,7 +195,7 @@ const Intelligence = () => {
           <StatCard title="Total Payments" value={formatMoney(summary.totalPayments)} subtitle="Collected against scored invoices" />
           <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Previous + invoice outstanding" color="#EB5757" />
           <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Weighted score" />
-          <StatCard title="Gift Budget" value={formatMoney(summary.giftBudget)} subtitle="3% of sales" />
+          <StatCard title="APC Points" value={formatMoney(summary.giftBudget)} subtitle="Calculated from current rules" />
         </div>
       ) : null}
 
@@ -307,7 +307,7 @@ const Intelligence = () => {
         <>
           <SectionHeader
             title="Score Breakdown"
-            description="Each card shows the weighted score used for ranking, tiering, and gift budget decisions."
+            description="Each card shows the weighted score used for ranking, partner level, and APC point decisions."
           />
           <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
           <div style={{ ...latestFiveScrollStyle, maxHeight: 520 }}>
@@ -346,7 +346,7 @@ const Intelligence = () => {
                         <div>
                           <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
                           <div style={mutedTextStyle}>
-                            {formatMoney(ranking.totalSales)} sales | Gift {formatMoney(ranking.giftBudget)}
+                            {formatMoney(ranking.totalSales)} sales | APC {formatMoney(ranking.giftBudget)}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>

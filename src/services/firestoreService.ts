@@ -49,7 +49,7 @@ import {
   validateAppSettings
 } from '../utils/settings';
 import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
-import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getLevelProgressPercent, getMonthlyStatsId, getPartnerLevelForPoints } from '../utils/loyalty';
+import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
 
 const CUSTOMERS = 'customers';
 const INVOICES = 'invoices';
@@ -114,7 +114,7 @@ export const calculateDueDate = (invoiceDate: string, tier: CustomerTier, settin
 };
 
 const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => {
-  const tier = (data.tier as CustomerTier) || 'Tier 3';
+  const tier = (data.tier as CustomerTier) || 'Tier 4';
 
   return {
     id,
@@ -196,6 +196,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     defaultReportPeriod: data.defaultReportPeriod as AppSettings['defaultReportPeriod'],
     giftPeriodOptions: data.giftPeriodOptions as AppSettings['giftPeriodOptions'],
     staffPermissions: data.staffPermissions as AppSettings['staffPermissions'],
+    loyaltySettings: data.loyaltySettings as AppSettings['loyaltySettings'],
     targetSettings: data.targetSettings as AppSettings['targetSettings'],
     showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
@@ -206,8 +207,8 @@ const mapGiftHistoryDoc = (id: string, data: Record<string, unknown>): GiftHisto
   id,
   customerId: String(data.customerId || ''),
   customerName: String(data.customerName || ''),
-  tier: (data.tier || data.tierAtGiftTime || 'Tier 3') as CustomerTier,
-  tierAtGiftTime: (data.tierAtGiftTime || data.tier || 'Tier 3') as CustomerTier,
+  tier: (data.tier || data.tierAtGiftTime || 'Tier 4') as CustomerTier,
+  tierAtGiftTime: (data.tierAtGiftTime || data.tier || 'Tier 4') as CustomerTier,
   periodType: (data.periodType as GiftHistory['periodType']) || '3_months',
   periodStart: String(data.periodStart || ''),
   periodEnd: String(data.periodEnd || ''),
@@ -239,7 +240,7 @@ const mapGiftItemDoc = (id: string, data: Record<string, unknown>): GiftItem => 
   minBudget: numberOrZero(data.minBudget),
   maxBudget: numberOrZero(data.maxBudget),
   eligibleTier:
-    data.eligibleTier === 'Tier 1' || data.eligibleTier === 'Tier 2' || data.eligibleTier === 'Tier 3'
+    data.eligibleTier === 'Tier 1' || data.eligibleTier === 'Tier 2' || data.eligibleTier === 'Tier 3' || data.eligibleTier === 'Tier 4'
       ? data.eligibleTier
       : 'All',
   notes: String(data.notes || ''),
@@ -250,7 +251,7 @@ const mapGiftItemDoc = (id: string, data: Record<string, unknown>): GiftItem => 
 
 const sanitizeGiftItemPayload = (giftItem: GiftItemFormData): GiftItemFormData => ({
   giftItemName: giftItem.giftItemName.trim(),
-  // Simplified gift item settings now use only targetValue as the budget threshold.
+  // Simplified gift item settings now use only targetValue as the APC points threshold.
   // Legacy targetType/minBudget/maxBudget/eligibleTier fields may still exist on old docs,
   // but new saves intentionally leave those untouched/unused.
   targetValue: Math.max(0, numberOrZero(giftItem.targetValue)),
@@ -331,6 +332,7 @@ const mapOfferDoc = (id: string, data: Record<string, unknown>): Offer => ({
   description: data.description ? String(data.description) : '',
   imageUrl: String(data.imageUrl || ''),
   imagePath: data.imagePath ? String(data.imagePath) : undefined,
+  levelRequired: (data.levelRequired as Offer['levelRequired']) || 'Active Partner',
   startDate: String(data.startDate || ''),
   endDate: String(data.endDate || ''),
   isActive: data.isActive === true,
@@ -361,6 +363,8 @@ const mapRewardItemDoc = (id: string, data: Record<string, unknown>): RewardItem
   levelRequired: (data.levelRequired as RewardItem['levelRequired']) || 'Active Partner',
   isActive: data.isActive !== false,
   description: data.description ? String(data.description) : '',
+  imageUrl: data.imageUrl ? String(data.imageUrl) : '',
+  imagePath: data.imagePath ? String(data.imagePath) : undefined,
   createdAt: String(data.createdAt || ''),
   updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
 });
@@ -384,15 +388,17 @@ const sanitizeRewardPayload = (reward: RewardFormData): RewardFormData => ({
   requiredPoints: Math.max(0, Math.round(numberOrZero(reward.requiredPoints))),
   levelRequired: reward.levelRequired,
   isActive: reward.isActive,
-  description: reward.description.trim()
+  description: reward.description.trim(),
+  imageUrl: reward.imageUrl.trim(),
+  imagePath: reward.imagePath || ''
 });
 
 const sanitizeOfferPayload = (offer: OfferFormData): OfferFormData => ({
   title: offer.title.trim(),
   description: offer.description.trim(),
-  // Uploaded offer images save their Firebase Storage download URL here; manual imageUrl remains a fallback.
   imageUrl: offer.imageUrl.trim(),
   imagePath: offer.imagePath || '',
+  levelRequired: offer.levelRequired || 'Active Partner',
   startDate: offer.startDate,
   endDate: offer.endDate,
   isActive: offer.isActive
@@ -1120,13 +1126,10 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
       const existingStats = existingStatsSnapshot.exists() ? mapMonthlyCustomerStatsDoc(existingStatsSnapshot.id, existingStatsSnapshot.data()) : undefined;
       const approvedRedemptions = existingStats ? Math.max(0, stats.pointsEarned - existingStats.pointsEarned) : 0;
       const adjustedPoints = Math.max(0, stats.pointsEarned - approvedRedemptions);
-      const adjustedLevel = getPartnerLevelForPoints(adjustedPoints, appSettings);
 
       await setDoc(statsRef, {
         ...stats,
         pointsEarned: adjustedPoints,
-        currentLevel: adjustedLevel,
-        progressPercent: getLevelProgressPercent(adjustedPoints, adjustedLevel, appSettings),
         updatedAt: timestamp
       }, { merge: true });
 
@@ -1210,7 +1213,9 @@ export const deleteRewardItemRecord = async (rewardId: string, auditUser?: Audit
 export const getRedemptionRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
   const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), orderBy('requestedAt', 'desc'), firestoreLimit(limitCount));
   const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()));
+  return snapshot.docs
+    .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
+    .filter((request) => request.status !== 'Rejected');
 };
 
 export const getRedemptionRequestsForCustomer = async (customerId: string, limitCount = 20) => {
@@ -1219,6 +1224,7 @@ export const getRedemptionRequestsForCustomer = async (customerId: string, limit
   const snapshot = await getDocs(requestsQuery);
   return snapshot.docs
     .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
+    .filter((request) => request.status !== 'Rejected')
     .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt));
 };
 
@@ -1227,37 +1233,25 @@ export const createRedemptionRequest = async (customer: Customer, reward: Reward
   const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
   const timestamp = nowIso();
 
-  await runTransaction(db, async (transaction) => {
-    const existingRequest = await transaction.get(requestRef);
-
-    if (existingRequest.exists()) {
-      const existing = mapRedemptionRequestDoc(existingRequest.id, existingRequest.data());
-      if (existing.status === 'Pending' || existing.status === 'Approved') {
-        throw new Error('This reward request is already recorded.');
-      }
-    }
-
-    transaction.set(requestRef, {
-      customerId: customer.id,
-      customerName: customer.name,
-      rewardId: reward.id,
-      rewardName: reward.name,
-      points: reward.requiredPoints,
-      status: 'Pending',
-      requestedAt: timestamp
-    });
+  await setDoc(requestRef, {
+    customerId: customer.id,
+    customerName: customer.name,
+    rewardId: reward.id,
+    rewardName: reward.name,
+    points: reward.requiredPoints,
+    status: 'Pending',
+    requestedAt: timestamp
   });
 };
 
 export const reviewRedemptionRequest = async (
   requestId: string,
-  status: Exclude<RedemptionStatus, 'Pending'>,
+  status: 'Approved' | 'Rejected',
   auditUser?: AuditUser,
   notes = ''
 ) => {
   const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
   const timestamp = nowIso();
-  const settings = await getAppSettings();
 
   await runTransaction(db, async (transaction) => {
     const requestSnapshot = await transaction.get(requestRef);
@@ -1272,25 +1266,9 @@ export const reviewRedemptionRequest = async (
       throw new Error('Only pending redemption requests can be reviewed.');
     }
 
-    let stats:
-      | {
-          ref: ReturnType<typeof doc>;
-          data: MonthlyCustomerStats;
-        }
-      | undefined;
-    if (status === 'Approved') {
-      const month = getCurrentMonthKey();
-      const statsRef = doc(db, MONTHLY_CUSTOMER_STATS, getMonthlyStatsId(redemption.customerId, month));
-      const statsSnapshot = await transaction.get(statsRef);
-
-      if (!statsSnapshot.exists()) {
-        throw new Error('Monthly loyalty summary is missing. Rebuild loyalty stats before approval.');
-      }
-
-      stats = {
-        ref: statsRef,
-        data: mapMonthlyCustomerStatsDoc(statsSnapshot.id, statsSnapshot.data())
-      };
+    if (status === 'Rejected') {
+      transaction.delete(requestRef);
+      return;
     }
 
     transaction.update(requestRef, {
@@ -1299,28 +1277,101 @@ export const reviewRedemptionRequest = async (
       reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
       notes
     });
+  });
+};
 
-    if (status === 'Approved' && stats) {
-      const month = getCurrentMonthKey();
-      const nextPoints = Math.max(0, stats.data.pointsEarned - redemption.points);
-      const nextLevel = getPartnerLevelForPoints(nextPoints, settings);
+export const removeRedemptionApproval = async (requestId: string, auditUser?: AuditUser) => {
+  const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
 
-      transaction.update(stats.ref, {
-        pointsEarned: nextPoints,
-        currentLevel: nextLevel,
-        progressPercent: getLevelProgressPercent(nextPoints, nextLevel, settings),
-        updatedAt: timestamp
-      });
+  await runTransaction(db, async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
 
-      transaction.set(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`), {
-        customerId: redemption.customerId,
-        type: 'redemption',
-        points: -Math.abs(redemption.points),
-        reason: `Reward approved: ${redemption.rewardName}`,
-        referenceId: requestId,
-        month,
-        createdAt: timestamp
-      });
+    if (!requestSnapshot.exists()) {
+      throw new Error('Redemption request no longer exists.');
     }
+
+    const redemption = mapRedemptionRequestDoc(requestSnapshot.id, requestSnapshot.data());
+
+    if (redemption.status !== 'Approved') {
+      throw new Error('Only approved redemption requests can have approval removed.');
+    }
+
+    transaction.update(requestRef, {
+      status: 'Pending',
+      reviewedAt: '',
+      reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
+      notes: 'Approval removed'
+    });
+
+    transaction.delete(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`));
+  });
+};
+
+export const markRedemptionRequestGifted = async (requestId: string, auditUser?: AuditUser) => {
+  const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
+  const timestamp = nowIso();
+  const today = getTodayDateString();
+
+  await runTransaction(db, async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
+
+    if (!requestSnapshot.exists()) {
+      throw new Error('Redemption request no longer exists.');
+    }
+
+    const redemption = mapRedemptionRequestDoc(requestSnapshot.id, requestSnapshot.data());
+
+    if (redemption.status !== 'Approved') {
+      throw new Error('Approve the redemption request before marking it gifted.');
+    }
+
+    const customerSnapshot = redemption.customerId ? await transaction.get(doc(db, CUSTOMERS, redemption.customerId)) : undefined;
+    const customerTier = (customerSnapshot?.data()?.tier as CustomerTier | undefined) || 'Tier 4';
+    const giftRef = doc(collection(db, GIFT_HISTORY));
+
+    transaction.set(giftRef, {
+      customerId: redemption.customerId,
+      customerName: redemption.customerName,
+      tier: customerTier,
+      tierAtGiftTime: customerTier,
+      periodType: 'custom',
+      periodStart: '2000-01-01',
+      periodEnd: today,
+      salesAmount: 0,
+      profitConsidered: 0,
+      giftPercentage: 0,
+      giftAmount: redemption.points,
+      suggestedGiftBudget: redemption.points,
+      actualGiftAmount: redemption.points,
+      giftItem: redemption.rewardName,
+      selectedGiftItemName: redemption.rewardName,
+      suggestedGiftOptions: [redemption.rewardName],
+      giftBudget: redemption.points,
+      giftedDate: today,
+      giftGivenDate: today,
+      giftedBy: auditUser?.userEmail || auditUser?.userId || 'Admin',
+      approvedBy: redemption.reviewedBy || auditUser?.userEmail || auditUser?.userId || 'Admin',
+      status: 'Given',
+      notes: 'Gifted from redemption request',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+
+    transaction.update(requestRef, {
+      status: 'Gifted',
+      reviewedAt: timestamp,
+      reviewedBy: redemption.reviewedBy || auditUser?.userEmail || auditUser?.userId || '',
+      notes: 'Gifted'
+    });
+
+    transaction.set(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`), {
+      customerId: redemption.customerId,
+      type: 'redemption',
+      points: -Math.abs(redemption.points),
+      reason: `Reward gifted: ${redemption.rewardName}`,
+      referenceId: requestId,
+      month: getCurrentMonthKey(),
+      createdAt: timestamp
+    });
   });
 };

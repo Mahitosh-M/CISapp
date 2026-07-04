@@ -12,9 +12,9 @@ import {
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerApcSummary, Invoice, Offer, Payment, RedemptionRequest, RewardItem } from '../types';
 import { buildCustomerScores } from '../utils/customerAnalytics';
-import { calculateDueStatus, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
-import { calculateCustomerGiftBudget } from '../utils/giftUtils';
-import { canViewRewardAtLevel, getLevelProgressPercent, getNextPartnerLevel, getPartnerLevelForPoints, getPartnerLevelThreshold } from '../utils/loyalty';
+import { calculateDueStatus, calculateInvoiceApcInfo, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
+import { calculateCustomerApcBonuses } from '../utils/giftUtils';
+import { canViewRewardAtLevel, getIntelligenceScoreProgressPercent, getNextPartnerLevel, getPartnerLevelForTier, getScoreNeededForNextPartnerLevel } from '../utils/loyalty';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
 const isPermissionError = (err: unknown) => {
@@ -76,25 +76,36 @@ export const useCustomerPortalData = () => {
 
       const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
       const scopedPayments = filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
-      const intelligenceScore = linkedCustomer ? buildCustomerScores([linkedCustomer], scopedInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
-      const customerWithIntelligenceTier = linkedCustomer && intelligenceScore ? { ...linkedCustomer, tier: intelligenceScore.tier } : linkedCustomer;
-      const apcBalance = Math.max(0, Math.round(intelligenceScore?.giftBudget ?? 0));
-      const monthlyProfit = scopedInvoices.filter((invoice) => isCurrentMonth(invoice.date)).reduce((sum, invoice) => sum + invoice.totalProfit, 0);
-      const monthlyApcEarned = customerWithIntelligenceTier ? Math.max(0, calculateCustomerGiftBudget(monthlyProfit, customerWithIntelligenceTier, appSettings)) : 0;
-      const currentLevel = getPartnerLevelForPoints(apcBalance, appSettings);
+      const intelligenceResult = linkedCustomer ? buildCustomerScores([linkedCustomer], scopedInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
+      const customerWithIntelligenceTier = linkedCustomer && intelligenceResult ? { ...linkedCustomer, tier: intelligenceResult.tier } : linkedCustomer;
+      const baseApcEarned = customerWithIntelligenceTier
+        ? scopedInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, scopedPayments, customerWithIntelligenceTier.tier, appSettings).earnedApc, 0)
+        : 0;
+      const bonusApcEarned = customerWithIntelligenceTier ? calculateCustomerApcBonuses(customerWithIntelligenceTier, scopedInvoices, scopedPayments, appSettings).totalBonus : 0;
+      const redeemedApc = redemptions
+        .filter((request) => request.status === 'Gifted')
+        .reduce((sum, request) => sum + request.points, 0);
+      const apcBalance = Math.max(0, Math.round(baseApcEarned + bonusApcEarned - redeemedApc));
+      const monthlyApcEarned = customerWithIntelligenceTier
+        ? scopedInvoices
+            .filter((invoice) => isCurrentMonth(invoice.date))
+            .reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, scopedPayments, customerWithIntelligenceTier.tier, appSettings).earnedApc, 0)
+        : 0;
+      const currentLevel = getPartnerLevelForTier(customerWithIntelligenceTier?.tier);
       const nextLevel = getNextPartnerLevel(currentLevel);
-      const nextLevelThreshold = nextLevel ? getPartnerLevelThreshold(nextLevel, appSettings) : undefined;
       const eligibleRewards = activeRewards.filter((reward) => reward.requiredPoints <= apcBalance && canViewRewardAtLevel(currentLevel, reward.levelRequired));
+      const eligibleOffers = activeOffers.filter((offer) => canViewRewardAtLevel(currentLevel, offer.levelRequired || 'Active Partner'));
       const nextReward = activeRewards.find((reward) => reward.requiredPoints > apcBalance && canViewRewardAtLevel(currentLevel, reward.levelRequired));
-      const pointsNeededForNextLevel = nextLevelThreshold === undefined ? 0 : Math.max(0, Math.round(nextLevelThreshold - apcBalance));
+      const intelligenceScore = Math.round(intelligenceResult?.intelligenceScore ?? 0);
+      const pointsNeededForNextLevel = nextLevel ? getScoreNeededForNextPartnerLevel(intelligenceScore, currentLevel) : 0;
       const apcData: CustomerApcSummary = {
         currentLevel,
         apcBalance,
         monthlyApcEarned,
-        progressPercent: getLevelProgressPercent(apcBalance, currentLevel, appSettings),
+        progressPercent: getIntelligenceScoreProgressPercent(intelligenceScore, currentLevel),
         nextLevel,
         pointsNeededForNextLevel,
-        pointsNeededForNextReward: nextReward ? Math.max(0, Math.round(nextReward.requiredPoints - apcBalance)) : pointsNeededForNextLevel,
+        pointsNeededForNextReward: nextReward ? Math.max(0, Math.round(nextReward.requiredPoints - apcBalance)) : 0,
         rewardAvailable: eligibleRewards.length > 0
       };
 
@@ -102,7 +113,7 @@ export const useCustomerPortalData = () => {
       setInvoices(scopedInvoices);
       setPayments(scopedPayments);
       setSettings(appSettings);
-      setOffers(activeOffers);
+      setOffers(eligibleOffers);
       setApcSummary(apcData);
       setAvailableRewards(eligibleRewards);
       setRedemptionRequests(redemptions);

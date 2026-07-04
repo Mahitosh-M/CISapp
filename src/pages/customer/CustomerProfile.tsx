@@ -1,5 +1,6 @@
 import { User } from 'lucide-react';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
+import { getTierDisplayName } from '../../utils/tiers';
 
 const CustomerProfile = () => {
   const { customer, userProfile, settings } = useCustomerPortalContext();
@@ -16,7 +17,7 @@ const CustomerProfile = () => {
 
         {settings.showCustomerTierToCustomer && customer ? (
           <div style={{ background: '#0B1F3A', color: '#D4AF37', borderRadius: 16, padding: 12, fontWeight: 900, marginTop: 16 }}>
-            Customer Category: {customer.tier}
+            Customer Category: {getTierDisplayName(customer.tier)}
           </div>
         ) : null}
 

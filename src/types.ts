@@ -1,4 +1,4 @@
-export type CustomerTier = 'Tier 1' | 'Tier 2' | 'Tier 3';
+export type CustomerTier = 'Tier 1' | 'Tier 2' | 'Tier 3' | 'Tier 4';
 
 export type CustomerMovement = 'Promoted' | 'Demoted' | 'Stable' | 'New';
 
@@ -22,7 +22,7 @@ export type AlertSeverity = 'Low' | 'Medium' | 'High';
 
 export type PartnerLevel = 'Active Partner' | 'Silver Partner' | 'Gold Partner' | 'Platinum Partner';
 
-export type RedemptionStatus = 'Pending' | 'Approved' | 'Rejected';
+export type RedemptionStatus = 'Pending' | 'Approved' | 'Rejected' | 'Gifted';
 
 export type AlertType =
   | 'overdue_payment'
@@ -34,7 +34,7 @@ export type AlertType =
   | 'automatic_tier_change'
   | 'tier3_credit_warning';
 
-export type TargetTierKey = 'tier1' | 'tier2' | 'tier3';
+export type TargetTierKey = 'tier1' | 'tier2' | 'tier3' | 'tier4';
 
 export interface TierTargetSetting {
   monthlySalesTarget: number;
@@ -151,6 +151,7 @@ export interface Offer {
   description?: string;
   imageUrl: string;
   imagePath?: string;
+  levelRequired?: PartnerLevel;
   startDate: string;
   endDate: string;
   isActive: boolean;
@@ -164,6 +165,7 @@ export interface OfferFormData {
   description: string;
   imageUrl: string;
   imagePath?: string;
+  levelRequired: PartnerLevel;
   startDate: string;
   endDate: string;
   isActive: boolean;
@@ -172,7 +174,7 @@ export interface OfferFormData {
 export interface GiftItem {
   id: string;
   giftItemName: string;
-  // Current simplified gift rule: targetValue is the maximum gift budget needed
+  // Current simplified gift rule: targetValue is the maximum APC points needed
   // before this item can be suggested. Legacy fields remain optional for old docs.
   targetType?: GiftItemTargetType;
   targetValue: number;
@@ -181,6 +183,8 @@ export interface GiftItem {
   eligibleTier?: GiftEligibleTier;
   notes: string;
   isActive: boolean;
+  imageUrl?: string;
+  imagePath?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -442,6 +446,8 @@ export interface RewardItem {
   levelRequired: PartnerLevel;
   isActive: boolean;
   description?: string;
+  imageUrl?: string;
+  imagePath?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -452,6 +458,8 @@ export interface RewardFormData {
   levelRequired: PartnerLevel;
   isActive: boolean;
   description: string;
+  imageUrl: string;
+  imagePath?: string;
 }
 
 export interface RedemptionRequest {
@@ -479,5 +487,6 @@ export interface IntelligenceSummary {
   tier1Count: number;
   tier2Count: number;
   tier3Count: number;
+  tier4Count: number;
   riskCustomerCount: number;
 }

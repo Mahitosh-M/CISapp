@@ -3,6 +3,7 @@ import { buildCustomerScores } from './customerAnalytics';
 import { getTodayDateString } from './dateUtils';
 import { buildCustomerOutstandingRows, buildOverdueInvoiceAlerts, getPaidAmountForInvoice } from './overdueUtils';
 import { getPendingAmount } from './paymentUtils';
+import { getTierDisplayName } from './tiers';
 
 const parseDate = (dateString: string) => {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -117,11 +118,11 @@ export const buildOperationalAlerts = (
           customerId: score.customerId,
           customerName: score.customerName,
           alertType: 'automatic_tier_change',
-          severity: score.tier === 'Tier 3' ? 'High' : 'Medium',
+          severity: score.tier === 'Tier 4' ? 'High' : 'Medium',
           date: today,
           status: 'Open',
           actionRequired: 'Admin should review the automatic tier movement.',
-          message: `${score.customerName} changed from ${score.storedTier} to ${score.tier}. Score ${score.intelligenceScore}, payment discipline ${score.paymentDisciplineScore}.`
+          message: `${score.customerName} changed from ${getTierDisplayName(score.storedTier)} to ${getTierDisplayName(score.tier)}. Score ${score.intelligenceScore}, payment discipline ${score.paymentDisciplineScore}.`
         })
       );
     }
@@ -137,12 +138,12 @@ export const buildOperationalAlerts = (
           date: today,
           status: 'Open',
           actionRequired: 'Admin should review the tier movement reason.',
-          message: `${score.customerName} moved from ${score.previousTier} to ${score.tier}. ${score.movementReason}`
+          message: `${score.customerName} moved from ${getTierDisplayName(score.previousTier)} to ${getTierDisplayName(score.tier)}. ${score.movementReason}`
         })
       );
     }
 
-    if (score.tier === 'Tier 2' && score.paymentDisciplineScore < 55) {
+    if ((score.tier === 'Tier 2' || score.tier === 'Tier 3') && score.paymentDisciplineScore < 55) {
       alerts.push(
         makeAlert({
           uniqueKey: `tier_downgrade_risk:${score.customerId}`,
@@ -164,7 +165,7 @@ export const buildOperationalAlerts = (
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments);
     const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
 
-    if (customer?.tier === 'Tier 3' && outstanding > 0) {
+    if ((customer?.tier === 'Tier 3' || customer?.tier === 'Tier 4') && outstanding > 0) {
       alerts.push(
         makeAlert({
           uniqueKey: `tier3_credit_warning:${invoice.id}`,
@@ -177,7 +178,7 @@ export const buildOperationalAlerts = (
           date: today,
           status: 'Open',
           actionRequired: 'Collect same-day payment or approve exception.',
-          message: `${customer.name} is Tier 3 but has unpaid credit on ${invoice.invoiceNumber}.`
+          message: `${customer.name} is ${getTierDisplayName(customer.tier)} but has unpaid credit on ${invoice.invoiceNumber}.`
         })
       );
     }
