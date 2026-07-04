@@ -1,33 +1,46 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import DateRangeShortcuts from '../components/DateRangeShortcuts';
-import SectionHeader from '../components/SectionHeader';
-import TierBadge from '../components/TierBadge';
+import TierBadge from './TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
-import { createGiftHistoryRecord, deleteGiftHistoryRecord, getGiftHistory, getGiftItems, updateGiftHistoryRecord } from '../services/firestoreService';
-import type { GiftHistory, GiftItem, GiftPeriod } from '../types';
-import type { DateRange } from '../utils/dateUtils';
+import { createGiftHistoryRecord, deleteGiftHistoryRecord, getGiftHistory, getRewardItems, updateGiftHistoryRecord } from '../services/firestoreService';
+import type { GiftHistory, GiftItem, GiftPeriod, RewardItem } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatDateRange, formatMoney } from '../utils/formatters';
-import { buildSuggestedGiftRows, calculateGiftDifference, getGiftPeriodLabel, getGiftPeriodStart, getMonthEndDateString } from '../utils/giftUtils';
-import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
+import { formatMoney } from '../utils/formatters';
+import { buildSuggestedGiftRows, calculateGiftDifference } from '../utils/giftUtils';
+import { latestFiveScrollStyle } from '../utils/listDisplay';
 
-const SuggestedGifts = () => {
-  const { customers, invoices, settings, loading, error } = useErpData();
+const REWARD_LEDGER_PERIOD_TYPE: GiftPeriod = 'custom';
+const REWARD_LEDGER_PERIOD_START = '2000-01-01';
+
+const SuggestedGiftManager = () => {
+  const { customers, invoices, payments, settings, loading, error } = useErpData();
   const { userProfile, canApproveGifts } = useAuth();
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [giftItems, setGiftItems] = useState<GiftItem[]>([]);
-  const defaultPeriodEnd = getMonthEndDateString(getTodayDateString());
-  const [periodType, setPeriodType] = useState<GiftPeriod>('1_month');
-  const [periodEnd, setPeriodEnd] = useState(defaultPeriodEnd);
-  const [customPeriodStart, setCustomPeriodStart] = useState(getGiftPeriodStart('1_month', defaultPeriodEnd));
   const [selectedGiftByCustomer, setSelectedGiftByCustomer] = useState<Record<string, string>>({});
   const [notesByCustomer, setNotesByCustomer] = useState<Record<string, string>>({});
+  const [customerSearchText, setCustomerSearchText] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [giftError, setGiftError] = useState('');
   const [message, setMessage] = useState('');
 
-  const periodStart = useMemo(() => (periodType === 'custom' ? customPeriodStart : getGiftPeriodStart(periodType, periodEnd)), [customPeriodStart, periodEnd, periodType]);
+  const mapRewardToGiftItem = (reward: RewardItem): GiftItem => ({
+    id: reward.id,
+    giftItemName: reward.name,
+    targetType: 'score',
+    targetValue: reward.requiredPoints,
+    minBudget: 0,
+    maxBudget: reward.requiredPoints,
+    eligibleTier: 'All',
+    notes: reward.description || '',
+    isActive: reward.isActive,
+    imageUrl: reward.imageUrl,
+    imagePath: reward.imagePath,
+    createdAt: reward.createdAt,
+    updatedAt: reward.updatedAt
+  });
+
   const auditUser = {
     userId: userProfile?.uid,
     userEmail: userProfile?.email,
@@ -37,11 +50,11 @@ const SuggestedGifts = () => {
   const loadGiftData = async () => {
     try {
       setGiftError('');
-      const [historyRows, itemRows] = await Promise.all([getGiftHistory(), getGiftItems()]);
+      const [historyRows, rewardRows] = await Promise.all([getGiftHistory(), getRewardItems()]);
       setGiftHistory(historyRows);
-      setGiftItems(itemRows);
+      setGiftItems(rewardRows.map(mapRewardToGiftItem));
     } catch (err) {
-      setGiftError(err instanceof Error ? err.message : 'Unable to load suggested gifts.');
+      setGiftError(err instanceof Error ? err.message : 'Unable to load reward suggestions.');
     }
   };
 
@@ -49,37 +62,30 @@ const SuggestedGifts = () => {
     loadGiftData();
   }, []);
 
-  const handlePeriodEndChange = (value: string) => {
-    const normalizedMonthEnd = getMonthEndDateString(value);
-    const minimumPeriodStart = getGiftPeriodStart('1_month', normalizedMonthEnd);
-    setPeriodEnd(normalizedMonthEnd);
-    setCustomPeriodStart((current) => (current > minimumPeriodStart ? minimumPeriodStart : current));
-  };
-
-  const handleCustomPeriodStartChange = (value: string) => {
-    const minimumPeriodStart = getGiftPeriodStart('1_month', periodEnd);
-    // Custom ranges must still cover at least one full month ending on month-end.
-    setCustomPeriodStart(value > minimumPeriodStart ? minimumPeriodStart : value);
-  };
-
-  const applyDateRange = (range: DateRange) => {
-    setPeriodType('custom');
-    setCustomPeriodStart(range.fromDate);
-    setPeriodEnd(range.toDate);
-  };
-
   const suggestedRows = useMemo(() => {
-    return buildSuggestedGiftRows(customers, invoices, giftHistory, giftItems, settings, periodType, periodStart, periodEnd);
-  }, [customers, giftHistory, giftItems, invoices, periodEnd, periodStart, periodType, settings]);
+    return buildSuggestedGiftRows(customers, invoices, giftHistory, giftItems, settings, payments);
+  }, [customers, giftHistory, giftItems, invoices, payments, settings]);
 
   const sortedSuggestedRows = useMemo(() => {
-    // Customer gift suggestions are sorted by gift budget from high to low so Admin
-    // can review the highest-value rewards first. Name is the stable fallback.
     return [...suggestedRows].sort((a, b) => b.giftBudget - a.giftBudget || a.customer.name.localeCompare(b.customer.name));
   }, [suggestedRows]);
 
+  const searchedCustomerRows = useMemo(() => {
+    const searchTerm = customerSearchText.trim().toLowerCase();
+    if (!searchTerm) return sortedSuggestedRows;
+
+    return sortedSuggestedRows.filter((row) =>
+      [row.customer.name, row.customer.mobile, row.customer.area].some((value) => value.toLowerCase().includes(searchTerm))
+    );
+  }, [customerSearchText, sortedSuggestedRows]);
+
+  const visibleSuggestedRows = useMemo(() => {
+    if (!selectedCustomerId) return [];
+    return sortedSuggestedRows.filter((row) => row.customer.id === selectedCustomerId);
+  }, [selectedCustomerId, sortedSuggestedRows]);
+
   const eligibleCount = sortedSuggestedRows.filter((row) => row.status === 'Eligible').length;
-  const blockedCount = sortedSuggestedRows.filter((row) => row.status === 'Approved' || row.status === 'Already Gifted').length;
+  const blockedCount = sortedSuggestedRows.filter((row) => row.status === 'Approved').length;
 
   const getSelectedGiftName = (row: (typeof suggestedRows)[number]) => {
     return selectedGiftByCustomer[row.customer.id] || row.pendingApproval?.selectedGiftItemName || row.pendingApproval?.giftItem || '';
@@ -99,45 +105,36 @@ const SuggestedGifts = () => {
     return row.matchedGiftItems.find((giftItem) => giftItem.giftItemName === selectedGiftName) || giftItems.find((giftItem) => giftItem.giftItemName === selectedGiftName);
   };
 
-  const getSelectedGiftTargetValue = (row: (typeof suggestedRows)[number]) => {
-    return getSelectedGiftItem(row)?.targetValue ?? 0;
-  };
-
-  const getAvailableGiftBudgetAfterSelection = (row: (typeof suggestedRows)[number]) => {
-    // Available Gift Budget = Gifts page gift budget - selected gift item target value.
-    // If no gift is selected yet, the full budget remains available.
-    return Math.max(0, row.giftBudget - getSelectedGiftTargetValue(row));
-  };
+  const getSelectedRewardCost = (row: (typeof suggestedRows)[number]) => getSelectedGiftItem(row)?.targetValue ?? 0;
 
   const getDisplayStatus = (row: (typeof suggestedRows)[number]) => {
     if (row.status === 'Eligible' && getSelectedGiftName(row)) return 'Selected';
-    if (row.status === 'Already Gifted') return 'Already Gifted';
+    if (row.status === 'Already Gifted') return 'Already Redeemed';
     return row.status;
   };
 
   const handleSelectGift = (customerId: string, giftItemName: string) => {
-    // Selection is local until Admin approves. This lets staff view options without changing Firestore.
     setSelectedGiftByCustomer((current) => ({ ...current, [customerId]: giftItemName }));
   };
 
   const buildGiftPayload = (row: (typeof suggestedRows)[number], status: 'Approved' | 'Given') => {
     const selectedGiftItemName = getSelectedGiftName(row);
-    const selectedGiftTargetValue = getSelectedGiftTargetValue(row);
+    const selectedRewardCost = getSelectedRewardCost(row);
 
     return {
       customerId: row.customer.id,
       customerName: row.customer.name,
       tier: row.customer.tier,
       tierAtGiftTime: row.customer.tier,
-      periodType,
-      periodStart,
-      periodEnd,
+      periodType: REWARD_LEDGER_PERIOD_TYPE,
+      periodStart: REWARD_LEDGER_PERIOD_START,
+      periodEnd: getTodayDateString(),
       salesAmount: row.salesAmount,
       profitConsidered: row.profitConsidered,
       giftPercentage: settings.giftPercentages[row.customer.tier],
-      giftAmount: status === 'Given' ? selectedGiftTargetValue : 0,
+      giftAmount: status === 'Given' ? selectedRewardCost : 0,
       suggestedGiftBudget: row.giftBudget,
-      actualGiftAmount: status === 'Given' ? selectedGiftTargetValue : 0,
+      actualGiftAmount: status === 'Given' ? selectedRewardCost : 0,
       giftItem: selectedGiftItemName,
       selectedGiftItemName,
       suggestedGiftOptions: row.suggestedGiftNames.length > 0 ? row.suggestedGiftNames : row.pendingApproval?.suggestedGiftOptions ?? [],
@@ -153,85 +150,81 @@ const SuggestedGifts = () => {
 
   const handleApproveGift = async (row: (typeof suggestedRows)[number]) => {
     if (!canApproveGifts) {
-      setGiftError('Only Admin users can approve gifts.');
+      setGiftError('Only Admin users can approve rewards.');
       return;
     }
 
     if (row.status !== 'Eligible') {
-      setGiftError('This customer is not eligible for a new gift approval for the selected period.');
+      setGiftError('This customer is not eligible for a new reward approval.');
       return;
     }
 
     if (!getSelectedGiftName(row)) {
-      setGiftError('Select a gift option before approving.');
+      setGiftError('Select a reward option before approving.');
       return;
     }
 
     await createGiftHistoryRecord(buildGiftPayload(row, 'Approved'), auditUser);
-    setMessage('Suggested gift approved.');
+    setMessage('Suggested reward approved.');
     setSelectedGiftByCustomer((current) => ({ ...current, [row.customer.id]: '' }));
     await loadGiftData();
   };
 
   const handleUpdateApprovedGift = async (row: (typeof suggestedRows)[number]) => {
     if (!canApproveGifts) {
-      setGiftError('Only Admin users can change approved gifts.');
+      setGiftError('Only Admin users can change approved rewards.');
       return;
     }
 
     if (!row.pendingApproval) {
-      setGiftError('Approve a gift before changing the approved selection.');
+      setGiftError('Approve a reward before changing the approved selection.');
       return;
     }
 
     if (!getSelectedGiftName(row)) {
-      setGiftError('Select a gift option before updating the approved gift.');
+      setGiftError('Select a reward option before updating the approved reward.');
       return;
     }
 
-    // Approved gifts can be changed until they are marked Given. The same giftHistory
-    // record is updated so duplicate period prevention remains intact.
     await updateGiftHistoryRecord(row.pendingApproval.id, buildGiftPayload(row, 'Approved'), auditUser);
-    setMessage('Approved gift changed.');
+    setMessage('Approved reward changed.');
     setSelectedGiftByCustomer((current) => ({ ...current, [row.customer.id]: '' }));
     await loadGiftData();
   };
 
   const handleMarkGiven = async (row: (typeof suggestedRows)[number]) => {
     if (!canApproveGifts) {
-      setGiftError('Only Admin users can mark gifts as given.');
+      setGiftError('Only Admin users can mark rewards as redeemed.');
       return;
     }
 
     if (!row.pendingApproval) {
-      setGiftError('Approve the selected gift before marking it as gifted.');
+      setGiftError('Approve the selected reward before marking it as redeemed.');
       return;
     }
 
     await updateGiftHistoryRecord(row.pendingApproval.id, buildGiftPayload(row, 'Given'), auditUser);
-    setMessage('Gift marked as gifted.');
+    setMessage('Reward marked as redeemed.');
     await loadGiftData();
   };
 
   const handleRemoveApproval = async (row: (typeof suggestedRows)[number]) => {
     if (!canApproveGifts) {
-      setGiftError('Only Admin users can remove gift approval.');
+      setGiftError('Only Admin users can remove reward approval.');
       return;
     }
 
     if (!row.pendingApproval) {
-      setGiftError('There is no approved gift to remove for this customer and period.');
+      setGiftError('There is no approved reward to remove for this customer.');
       return;
     }
 
-    const confirmed = window.confirm(`Remove approved gift for ${row.customer.name}? This will allow a new gift selection for the same period.`);
+    const confirmed = window.confirm(`Remove approved reward for ${row.customer.name}? This will allow a new reward selection.`);
     if (!confirmed) return;
 
-    // Removing approval deletes only the pending Approved history row. Given rows are
-    // not exposed here, so completed gift history remains protected.
     await deleteGiftHistoryRecord(row.pendingApproval.id, auditUser);
     setSelectedGiftByCustomer((current) => ({ ...current, [row.customer.id]: '' }));
-    setMessage('Gift approval removed.');
+    setMessage('Reward approval removed.');
     await loadGiftData();
   };
 
@@ -267,7 +260,7 @@ const SuggestedGifts = () => {
         ? '#EAF8EE'
         : status === 'Approved'
           ? '#FFF7D6'
-          : status === 'Already Gifted'
+          : status === 'Already Gifted' || status === 'Already Redeemed'
             ? '#FDECEC'
             : '#E8EDF4';
     const color =
@@ -275,7 +268,7 @@ const SuggestedGifts = () => {
         ? '#1B7F3A'
         : status === 'Approved'
           ? '#8A6D00'
-          : status === 'Already Gifted'
+          : status === 'Already Gifted' || status === 'Already Redeemed'
             ? '#B42318'
             : '#67738E';
 
@@ -298,62 +291,83 @@ const SuggestedGifts = () => {
   };
 
   if (loading) {
-    return <SectionHeader title="Suggested Gifts" description="Loading gift suggestions..." />;
+    return <div style={cardStyle}>Loading reward suggestions...</div>;
   }
 
   return (
-    <div>
-      <SectionHeader
-        title="Suggested Gifts"
-        description="Suggest gift items from the existing profit-based gift budget and prevent repeat rewards for the same period."
-      />
-
+    <>
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {giftError ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{giftError}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
 
       <div style={cardStyle}>
+        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Customer Reward Suggestions</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-          <label style={{ fontWeight: 800 }}>
-            Gift Period
-            <select style={{ ...inputStyle, marginTop: 6 }} value={periodType} onChange={(event) => setPeriodType(event.target.value as GiftPeriod)}>
-              <option value="1_month">1 month</option>
-              <option value="3_months">3 months</option>
-              <option value="6_months">6 months</option>
-              <option value="1_year">1 year</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          {periodType === 'custom' ? (
-            <label style={{ fontWeight: 800 }}>
-              Period Start
-              <input style={{ ...inputStyle, marginTop: 6 }} type="date" value={customPeriodStart} onChange={(event) => handleCustomPeriodStartChange(event.target.value)} />
-            </label>
-          ) : null}
-          <label style={{ fontWeight: 800 }}>
-            Period End
-            <input style={{ ...inputStyle, marginTop: 6 }} type="date" value={periodEnd} onChange={(event) => handlePeriodEndChange(event.target.value)} />
-          </label>
           <div style={{ fontWeight: 900, color: '#0B1F3A', alignSelf: 'end' }}>
-            Eligible: {eligibleCount} | Approved/Gifted: {blockedCount}
+            Eligible: {eligibleCount} | Pending Approval: {blockedCount}
           </div>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <DateRangeShortcuts selectedRange={{ fromDate: periodStart, toDate: periodEnd }} onSelect={applyDateRange} />
+          <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>
+            Available APC points are lifetime earned points plus bonuses, reduced only when rewards are redeemed.
+          </div>
         </div>
       </div>
 
       <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Customer Gift Suggestions</div>
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
+          Select a customer to view reward suggestions. Search filters the dropdown list.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 }}>
+          <label style={{ fontWeight: 800 }}>
+            Search Customer
+            <input
+              style={{ ...inputStyle, marginTop: 6 }}
+              value={customerSearchText}
+              onChange={(event) => setCustomerSearchText(event.target.value)}
+              placeholder="Name, mobile, or area"
+            />
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            Customer
+            <select
+              style={{ ...inputStyle, marginTop: 6 }}
+              value={selectedCustomerId}
+              onChange={(event) => setSelectedCustomerId(event.target.value)}
+            >
+              <option value="">Select customer</option>
+              {searchedCustomerRows.map((row) => (
+                <option key={row.customer.id} value={row.customer.id}>
+                  {row.customer.name} - {formatMoney(row.giftBudget)} APC
+                </option>
+              ))}
+            </select>
+          </label>
+          <div style={{ alignSelf: 'end', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }}
+              onClick={() => {
+                setSelectedCustomerId('');
+                setCustomerSearchText('');
+              }}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        {customerSearchText && searchedCustomerRows.length === 0 ? (
+          <div style={{ color: '#B42318', fontWeight: 800, marginBottom: 12 }}>No customer matches your search.</div>
+        ) : null}
         <div style={{ ...latestFiveScrollStyle, maxHeight: 520, paddingRight: 6 }}>
-          {sortedSuggestedRows.length === 0 ? (
-            <div style={{ color: '#67738E' }}>No customers found.</div>
+          {!selectedCustomerId ? (
+            <div style={{ color: '#67738E', border: '1px solid #E8EDF4', borderRadius: 14, padding: 16 }}>
+              Choose a customer from the dropdown to show reward eligibility, available APC points, and approval actions.
+            </div>
+          ) : visibleSuggestedRows.length === 0 ? (
+            <div style={{ color: '#67738E' }}>No reward suggestion found for the selected customer.</div>
           ) : (
-            sortedSuggestedRows.map((row) => {
+            visibleSuggestedRows.map((row) => {
               const selectedGiftName = getSelectedGiftName(row);
-              const selectedGiftTargetValue = getSelectedGiftTargetValue(row);
-              const availableGiftBudget = getAvailableGiftBudgetAfterSelection(row);
+              const selectedRewardCost = getSelectedRewardCost(row);
               const displayStatus = getDisplayStatus(row);
 
               return (
@@ -368,11 +382,10 @@ const SuggestedGifts = () => {
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
                     <div><strong>Profit Considered</strong><div>{formatMoney(row.profitConsidered)}</div></div>
-                    <div><strong>Gift Budget</strong><div>{formatMoney(row.giftBudget)}</div></div>
-                    <div><strong>Gift Item Target</strong><div>{selectedGiftName ? formatMoney(selectedGiftTargetValue) : '-'}</div></div>
-                    <div><strong>Available Gift Budget</strong><div>{formatMoney(availableGiftBudget)}</div></div>
-                    <div><strong>Already Gifted</strong><div>{formatMoney(row.alreadyGiftedAmount)}</div></div>
-                    <div><strong>Selected Gift</strong><div>{selectedGiftName || '-'}</div></div>
+                    <div><strong>Available APC Points</strong><div>{formatMoney(row.giftBudget)}</div></div>
+                    <div><strong>Redeemed APC Points</strong><div>{formatMoney(row.alreadyGiftedAmount)}</div></div>
+                    <div><strong>Selected Reward</strong><div>{selectedGiftName || '-'}</div></div>
+                    <div><strong>Selected Reward Cost</strong><div>{selectedGiftName ? formatMoney(selectedRewardCost) : '-'}</div></div>
                   </div>
 
                   <div style={{ color: '#67738E', marginBottom: 10 }}>{row.eligibilityReason}</div>
@@ -396,10 +409,18 @@ const SuggestedGifts = () => {
                             }}
                             onClick={() => handleSelectGift(row.customer.id, giftItem.giftItemName)}
                           >
+                            {giftItem.imageUrl ? (
+                              <img
+                                loading="lazy"
+                                src={giftItem.imageUrl}
+                                alt={giftItem.giftItemName}
+                                style={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 10, display: 'block', marginBottom: 8 }}
+                              />
+                            ) : null}
                             <div style={{ fontWeight: 900 }}>{giftItem.giftItemName}</div>
-                            <div style={{ marginTop: 5 }}>{formatMoney(giftItem.targetValue)}</div>
+                            <div style={{ marginTop: 5 }}>{formatMoney(giftItem.targetValue)} APC</div>
                             <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
-                              {difference === 0 ? 'Exact budget match' : `${formatMoney(difference)} under budget`}
+                              {difference === 0 ? 'Exact APC match' : `${formatMoney(difference)} APC below limit`}
                             </div>
                             {giftItem.notes ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{giftItem.notes}</div> : null}
                           </button>
@@ -408,7 +429,7 @@ const SuggestedGifts = () => {
                     </div>
                   ) : (
                     <div style={{ color: '#67738E', marginBottom: 14 }}>
-                      {row.pendingApproval ? `Approved gift: ${selectedGiftName || '-'}` : 'No selectable gift option for this budget.'}
+                      {row.pendingApproval ? `Approved reward: ${selectedGiftName || '-'}` : 'No selectable reward option for these available APC points.'}
                     </div>
                   )}
 
@@ -420,7 +441,7 @@ const SuggestedGifts = () => {
                         value={notesByCustomer[row.customer.id] ?? row.pendingApproval?.notes ?? ''}
                         disabled={!canApproveGifts}
                         onChange={(event) => setNotesByCustomer((current) => ({ ...current, [row.customer.id]: event.target.value }))}
-                        placeholder="Gift notes"
+                        placeholder="Reward notes"
                       />
                     </label>
                     {!canApproveGifts ? (
@@ -433,13 +454,13 @@ const SuggestedGifts = () => {
                           style={{ ...buttonStyle, background: hasChangedApprovedGift(row) ? '#0B1F3A' : '#E8EDF4', color: hasChangedApprovedGift(row) ? '#FFFFFF' : '#67738E' }}
                           onClick={() => handleUpdateApprovedGift(row)}
                         >
-                          Update Approved Gift
+                          Update Approved Reward
                         </button>
                         <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleRemoveApproval(row)}>
                           Remove Approval
                         </button>
                         <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={() => handleMarkGiven(row)}>
-                          Mark as Gifted
+                          Mark as Redeemed
                         </button>
                       </div>
                     ) : (
@@ -449,7 +470,7 @@ const SuggestedGifts = () => {
                         style={{ ...buttonStyle, background: row.status === 'Eligible' && selectedGiftName ? '#D4AF37' : '#E8EDF4', color: '#0B1F3A' }}
                         onClick={() => handleApproveGift(row)}
                       >
-                        Approve Gift
+                        Approve Reward
                       </button>
                     )}
                   </div>
@@ -459,12 +480,11 @@ const SuggestedGifts = () => {
           )}
         </div>
         <div style={{ color: '#67738E', fontSize: 12, marginTop: 12 }}>
-          {getGiftPeriodLabel(periodType)} period: {formatDateRange(periodStart, periodEnd)}. Period end is always month-end. Earlier gifted amounts inside this range are deducted from available gift budget.
+          Available APC points do not expire. Redeemed rewards are deducted from the customer balance.
         </div>
       </div>
-
-    </div>
+    </>
   );
 };
 
-export default SuggestedGifts;
+export default SuggestedGiftManager;

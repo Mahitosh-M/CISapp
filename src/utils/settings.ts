@@ -1,5 +1,6 @@
 import type { AppSettings, CustomerTier, TargetTierKey, TierTargetSetting } from '../types';
 import { addDaysToDateString } from './dateUtils';
+import { getTierDisplayName } from './tiers';
 
 export type ScoringWeightKey = keyof AppSettings['scoringWeights'];
 
@@ -10,17 +11,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   giftPercentages: {
     'Tier 1': 3,
     'Tier 2': 2,
-    'Tier 3': 1
+    'Tier 3': 1,
+    'Tier 4': 0
   },
   creditDays: {
     'Tier 1': 15,
     'Tier 2': 10,
-    'Tier 3': 0
+    'Tier 3': 0,
+    'Tier 4': 0
   },
   paymentBuffers: {
     'Tier 1': 3,
     'Tier 2': 0,
-    'Tier 3': 0
+    'Tier 3': 0,
+    'Tier 4': 0
   },
   scoringWeights: {
     profit: 35,
@@ -39,17 +43,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
     canViewDashboard: true
   },
   loyaltySettings: {
-    pointsPerThousand: 10,
-    onTimePaymentBonus: 25,
-    monthlyTargetBonus: 50,
-    orderFrequencyBonus: 25,
+    pointsPerThousand: 0,
+    onTimePaymentBonus: 0,
+    monthlyTargetBonus: 0,
+    orderFrequencyBonus: 0,
     partnerLevelThresholds: {
       'Active Partner': 0,
-      'Silver Partner': 500,
-      'Gold Partner': 1500,
-      'Platinum Partner': 3000
+      'Silver Partner': 0,
+      'Gold Partner': 0,
+      'Platinum Partner': 0
     },
-    rewardBudgetCap: 5000
+    rewardBudgetCap: 0
   },
   targetSettings: {
     tier1: {
@@ -63,6 +67,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     tier3: {
       monthlySalesTarget: 20000,
       monthlyOrderTarget: 2
+    },
+    tier4: {
+      monthlySalesTarget: 10000,
+      monthlyOrderTarget: 1
     }
   },
   // Customer portal privacy flag. Default false hides tier/category until Admin explicitly allows it.
@@ -127,14 +135,16 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   targetSettings: {
     tier1: mergeTierTargetSettings(settings?.targetSettings?.tier1, DEFAULT_SETTINGS.targetSettings.tier1),
     tier2: mergeTierTargetSettings(settings?.targetSettings?.tier2, DEFAULT_SETTINGS.targetSettings.tier2),
-    tier3: mergeTierTargetSettings(settings?.targetSettings?.tier3, DEFAULT_SETTINGS.targetSettings.tier3)
+    tier3: mergeTierTargetSettings(settings?.targetSettings?.tier3, DEFAULT_SETTINGS.targetSettings.tier3),
+    tier4: mergeTierTargetSettings(settings?.targetSettings?.tier4, DEFAULT_SETTINGS.targetSettings.tier4)
   }
 });
 
 export const getTargetTierKey = (tier?: CustomerTier): TargetTierKey => {
   if (tier === 'Tier 1') return 'tier1';
   if (tier === 'Tier 2') return 'tier2';
-  return 'tier3';
+  if (tier === 'Tier 3') return 'tier3';
+  return 'tier4';
 };
 
 export const getTierTargetSettings = (tier: CustomerTier | undefined, settings?: AppSettings): TierTargetSetting => {
@@ -218,26 +228,23 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
 
   const loyaltySettings = activeSettings.loyaltySettings;
   [
-    ['Points per purchase slab', loyaltySettings.pointsPerThousand],
     ['On-time payment bonus', loyaltySettings.onTimePaymentBonus],
     ['Monthly target bonus', loyaltySettings.monthlyTargetBonus],
-    ['Order frequency bonus', loyaltySettings.orderFrequencyBonus],
-    ['Reward budget cap', loyaltySettings.rewardBudgetCap]
+    ['Order frequency bonus', loyaltySettings.orderFrequencyBonus]
   ].forEach(([label, value]) => {
     if (!Number.isFinite(Number(value)) || Number(value) < 0) {
       errors.push(`${label} must be a non-negative number.`);
     }
   });
 
-  (['Active Partner', 'Silver Partner', 'Gold Partner', 'Platinum Partner'] as const).forEach((level) => {
-    const threshold = loyaltySettings.partnerLevelThresholds[level];
-    if (!Number.isFinite(Number(threshold)) || Number(threshold) < 0) {
-      errors.push(`${level} threshold must be a non-negative number.`);
-    }
-  });
-
   (Object.entries(activeSettings.targetSettings) as [TargetTierKey, TierTargetSetting][]).forEach(([tierKey, target]) => {
-    const readableTier = tierKey === 'tier1' ? 'Tier 1' : tierKey === 'tier2' ? 'Tier 2' : 'Tier 3';
+    const tierByKey: Record<TargetTierKey, CustomerTier> = {
+      tier1: 'Tier 1',
+      tier2: 'Tier 2',
+      tier3: 'Tier 3',
+      tier4: 'Tier 4'
+    };
+    const readableTier = getTierDisplayName(tierByKey[tierKey]);
 
     if (!Number.isFinite(Number(target.monthlySalesTarget))) {
       errors.push(`${readableTier} monthly sales target must be a valid number.`);

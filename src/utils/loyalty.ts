@@ -1,5 +1,5 @@
-import type { AppSettings, Customer, Invoice, MonthlyCustomerStats, PartnerLevel, Payment } from '../types';
-import { calculateDueStatus } from './customerPortal';
+import type { AppSettings, Customer, CustomerTier, Invoice, MonthlyCustomerStats, PartnerLevel, Payment } from '../types';
+import { calculateDueStatus, calculateInvoiceApcInfo } from './customerPortal';
 import { getCurrentMonthRange } from './dateUtils';
 import { getTierTargetSettings, mergeWithDefaultSettings } from './settings';
 
@@ -19,12 +19,11 @@ export const getMonthlyStatsId = (customerId: string, month: string) => `${custo
 
 export const formatApc = (value: unknown) => `${Math.max(0, Math.round(numberOrZero(value)))}`;
 
-export const getPartnerLevelForPoints = (points: number, settings?: AppSettings): PartnerLevel => {
-  const thresholds = mergeWithDefaultSettings(settings).loyaltySettings.partnerLevelThresholds;
-
-  return PARTNER_LEVELS.reduce<PartnerLevel>((currentLevel, level) => {
-    return points >= numberOrZero(thresholds[level]) ? level : currentLevel;
-  }, 'Active Partner');
+export const getPartnerLevelForTier = (tier?: CustomerTier): PartnerLevel => {
+  if (tier === 'Tier 1') return 'Platinum Partner';
+  if (tier === 'Tier 2') return 'Gold Partner';
+  if (tier === 'Tier 3') return 'Silver Partner';
+  return 'Active Partner';
 };
 
 export const getNextPartnerLevel = (level: PartnerLevel) => {
@@ -32,20 +31,24 @@ export const getNextPartnerLevel = (level: PartnerLevel) => {
   return index >= 0 && index < PARTNER_LEVELS.length - 1 ? PARTNER_LEVELS[index + 1] : undefined;
 };
 
-export const getPartnerLevelThreshold = (level: PartnerLevel, settings?: AppSettings) => {
-  return numberOrZero(mergeWithDefaultSettings(settings).loyaltySettings.partnerLevelThresholds[level]);
+export const getScoreNeededForNextPartnerLevel = (score: number, level: PartnerLevel) => {
+  if (level === 'Active Partner') return Math.max(0, 41 - score);
+  if (level === 'Silver Partner') return Math.max(0, 61 - score);
+  if (level === 'Gold Partner') return Math.max(0, 81 - score);
+  return 0;
 };
 
-export const getLevelProgressPercent = (points: number, level: PartnerLevel, settings?: AppSettings) => {
-  const thresholds = mergeWithDefaultSettings(settings).loyaltySettings.partnerLevelThresholds;
-  const nextLevel = getNextPartnerLevel(level);
+export const getIntelligenceScoreProgressPercent = (score: number, level: PartnerLevel) => {
+  if (level === 'Platinum Partner') return 100;
 
-  if (!nextLevel) return 100;
+  const ranges: Record<Exclude<PartnerLevel, 'Platinum Partner'>, { min: number; next: number }> = {
+    'Active Partner': { min: 0, next: 41 },
+    'Silver Partner': { min: 41, next: 61 },
+    'Gold Partner': { min: 61, next: 81 }
+  };
+  const range = ranges[level];
 
-  const currentThreshold = numberOrZero(thresholds[level]);
-  const nextThreshold = Math.max(currentThreshold + 1, numberOrZero(thresholds[nextLevel]));
-
-  return Math.min(100, Math.max(0, Math.round(((points - currentThreshold) / (nextThreshold - currentThreshold)) * 100)));
+  return Math.min(100, Math.max(0, Math.round(((score - range.min) / (range.next - range.min)) * 100)));
 };
 
 export const canViewRewardAtLevel = (customerLevel: PartnerLevel, rewardLevel: PartnerLevel) => {
@@ -70,12 +73,13 @@ export const buildMonthlyCustomerStats = (
     .map((invoice) => calculateDueStatus(invoice, payments, undefined, customer.tier, activeSettings))
     .filter((view) => view.outstandingAmount > 0 && view.daysRemaining < 0)
     .reduce((sum, view) => sum + view.outstandingAmount, 0);
-  const purchasePoints = Math.floor(totalSales / 1000) * activeSettings.loyaltySettings.pointsPerThousand;
-  const targetBonus = totalSales >= targetSettings.monthlySalesTarget && targetSettings.monthlySalesTarget > 0 ? activeSettings.loyaltySettings.monthlyTargetBonus : 0;
-  const frequencyBonus = monthlyInvoices.length >= targetSettings.monthlyOrderTarget && targetSettings.monthlyOrderTarget > 0 ? activeSettings.loyaltySettings.orderFrequencyBonus : 0;
-  const onTimeBonus = overdueAmount <= 0 && monthlyPayments.length > 0 ? activeSettings.loyaltySettings.onTimePaymentBonus : 0;
-  const pointsEarned = Math.round(Math.max(0, purchasePoints + targetBonus + frequencyBonus + onTimeBonus));
-  const currentLevel = getPartnerLevelForPoints(pointsEarned, activeSettings);
+  const apcEligibleInvoices = monthlyInvoices.filter((invoice) => calculateInvoiceApcInfo(invoice, payments, customer.tier, activeSettings).earnedApc > 0);
+  const apcEligibleSales = apcEligibleInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
+  const invoiceApc = apcEligibleInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, payments, customer.tier, activeSettings).earnedApc, 0);
+  const targetBonus = apcEligibleSales >= targetSettings.monthlySalesTarget && targetSettings.monthlySalesTarget > 0 ? activeSettings.loyaltySettings.monthlyTargetBonus : 0;
+  const frequencyBonus = apcEligibleInvoices.length >= targetSettings.monthlyOrderTarget && targetSettings.monthlyOrderTarget > 0 ? activeSettings.loyaltySettings.orderFrequencyBonus : 0;
+  const pointsEarned = Math.round(Math.max(0, invoiceApc + targetBonus + frequencyBonus));
+  const currentLevel = getPartnerLevelForTier(customer.tier);
 
   return {
     id: getMonthlyStatsId(customer.id, month),
@@ -88,7 +92,7 @@ export const buildMonthlyCustomerStats = (
     target: targetSettings.monthlySalesTarget,
     pointsEarned,
     currentLevel,
-    progressPercent: getLevelProgressPercent(pointsEarned, currentLevel, activeSettings),
+    progressPercent: 100,
     updatedAt: new Date().toISOString()
   };
 };

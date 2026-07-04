@@ -19,13 +19,14 @@ import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
 import TierBadge from '../components/TierBadge';
+import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
 
 const emptyCustomerForm: CustomerFormData = {
   name: '',
   mobile: '',
   area: '',
-  tier: 'Tier 3',
-  paymentTerms: getPaymentTermsForTier('Tier 3'),
+  tier: 'Tier 4',
+  paymentTerms: getPaymentTermsForTier('Tier 4'),
   notes: '',
   previousOutstandingAmount: 0,
   tierOverride: false,
@@ -358,11 +359,11 @@ const Customers = () => {
           </label>
 
           <label style={labelStyle}>
-            Tier
+            Partner Level
             <select style={inputStyle} value={formData.tier} onChange={(event) => handleFieldChange('tier', event.target.value)}>
-              <option value="Tier 1">Tier 1</option>
-              <option value="Tier 2">Tier 2</option>
-              <option value="Tier 3">Tier 3</option>
+              {CUSTOMER_TIERS.map((tier) => (
+                <option key={tier} value={tier}>{getTierWithCodeLabel(tier)}</option>
+              ))}
             </select>
           </label>
 
@@ -399,7 +400,7 @@ const Customers = () => {
                   checked={Boolean(formData.tierOverride)}
                   onChange={(event) => setFormData((current) => ({ ...current, tierOverride: event.target.checked }))}
                 />
-                Admin tier override
+                Admin partner level override
               </label>
             </>
           ) : null}
@@ -515,8 +516,8 @@ const Customers = () => {
                         <div><strong>Invoice Outstanding</strong><div>{formatMoney(outstanding?.newOutstanding ?? 0)}</div></div>
                         <div><strong>Total Outstanding</strong><div>{formatMoney(outstanding?.outstanding ?? 0)}</div></div>
                         <div><strong>Overdue</strong><div>{formatMoney(outstanding?.overdueAmount ?? 0)} | {outstanding?.overdueDays ?? 0} day(s)</div></div>
-                        <div><strong>Gift Budget</strong><div>{formatMoney(giftBudget)}</div></div>
-                        <div><strong>Gift Status</strong><div>{giftBudget > 0 ? 'Gift eligible' : 'No gift budget yet'}</div></div>
+                        <div><strong>APC Points</strong><div>{formatMoney(giftBudget)}</div></div>
+                        <div><strong>APC Status</strong><div>{giftBudget > 0 ? 'APC eligible' : 'No APC points yet'}</div></div>
                         <div><strong>Payment Terms</strong><div>{customer.paymentTerms || '-'}</div></div>
                         <div><strong>Notes</strong><div>{customer.notes || '-'}</div></div>
                       </div>

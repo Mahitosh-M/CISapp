@@ -4,7 +4,7 @@ import { storage } from '../firebase';
 const OFFER_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const OFFER_IMAGE_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-export interface UploadedOfferImage {
+export interface UploadedImage {
   imageUrl: string;
   imagePath: string;
 }
@@ -21,6 +21,8 @@ export const validateOfferImageFile = (file: File) => {
   return '';
 };
 
+export const validateRewardImageFile = validateOfferImageFile;
+
 export const getSafeFileName = (fileName: string) => {
   const cleanedName = fileName
     .trim()
@@ -36,12 +38,44 @@ export const buildOfferImagePath = (file: File, offerId?: string) => {
   return offerId ? `offers/${offerId}/${fileName}` : `offers/${fileName}`;
 };
 
+export const buildRewardImagePath = (file: File, rewardId?: string) => {
+  const fileName = `${Date.now()}_${getSafeFileName(file.name)}`;
+  return rewardId ? `offers/rewards/${rewardId}/${fileName}` : `offers/rewards/${fileName}`;
+};
+
 export const uploadOfferImage = (file: File, offerId?: string, onProgress?: (progress: number) => void) =>
-  new Promise<UploadedOfferImage>((resolve, reject) => {
+  new Promise<UploadedImage>((resolve, reject) => {
     const imagePath = buildOfferImagePath(file, offerId);
     const storageRef = ref(storage, imagePath);
 
     // Firebase Storage keeps offer images separate from Firestore; Firestore stores only imageUrl/imagePath.
+    const uploadTask = uploadBytesResumable(storageRef, file, { contentType: file.type });
+
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        if (!onProgress) return;
+
+        const progress = snapshot.totalBytes > 0 ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100) : 0;
+        onProgress(progress);
+      },
+      (error) => reject(error),
+      async () => {
+        try {
+          const imageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve({ imageUrl, imagePath });
+        } catch (error) {
+          reject(error);
+        }
+      }
+    );
+  });
+
+export const uploadRewardImage = (file: File, rewardId?: string, onProgress?: (progress: number) => void) =>
+  new Promise<UploadedImage>((resolve, reject) => {
+    const imagePath = buildRewardImagePath(file, rewardId);
+    const storageRef = ref(storage, imagePath);
+
     const uploadTask = uploadBytesResumable(storageRef, file, { contentType: file.type });
 
     uploadTask.on(

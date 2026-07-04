@@ -32,7 +32,7 @@ export const buildOverdueInvoiceAlerts = (
   return invoices
     .map((invoice) => {
       const customer = customerById.get(invoice.customerId);
-      const tier = customer?.tier ?? 'Tier 3';
+      const tier = customer?.tier ?? 'Tier 4';
       const paidAmount = getPaidAmountForInvoice(invoice.id, payments);
       const overdueAmount = getPendingAmount(invoice.totalSales, paidAmount);
       const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);

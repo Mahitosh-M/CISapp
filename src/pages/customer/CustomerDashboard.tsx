@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileText, ShoppingCart, Wallet, WalletCards } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { AlertTriangle, FileText, ShoppingCart, Wallet, WalletCards } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
-import { formatDate, formatMoney } from '../../utils/formatters';
+import { formatMoney } from '../../utils/formatters';
 import { calculateCustomerTotalOutstanding, isCurrentMonth } from '../../utils/customerPortal';
 import { formatApc } from '../../utils/loyalty';
-import { sortNewestFirst } from '../../utils/listDisplay';
 
 const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; value: string; icon: JSX.Element; color?: string }) => (
   <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)' }}>
@@ -28,13 +27,9 @@ const CustomerDashboard = () => {
   const currentMonthInvoices = invoices.filter((invoice) => isCurrentMonth(invoice.date));
   const currentMonthPayments = payments.filter((payment) => isCurrentMonth(payment.date));
   const currentMonthPurchases = currentMonthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-  const currentMonthPaymentTotal = currentMonthPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const totalOutstanding = calculateCustomerTotalOutstanding(customer, invoiceViews);
   const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
   const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
-  const latestInvoices = sortNewestFirst(invoices, ['updatedAt', 'createdAt', 'date']).slice(0, 1);
-  const latestPayments = sortNewestFirst(payments, ['updatedAt', 'createdAt', 'date']).slice(0, 1);
-  const invoiceStatusById = new Map(invoiceViews.map((invoiceView) => [invoiceView.invoice.id, invoiceView.status]));
 
   useEffect(() => {
     const markScrolled = () => {
@@ -76,7 +71,7 @@ const CustomerDashboard = () => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
         <StatTile title="Month Purchases" value={formatMoney(currentMonthPurchases)} icon={<ShoppingCart size={20} />} />
-        <StatTile title="Month Payments" value={formatMoney(currentMonthPaymentTotal)} icon={<WalletCards size={20} />} color="#166534" />
+        <StatTile title="APC Points" value={formatApc(apcSummary?.apcBalance ?? 0)} icon={<Wallet size={20} />} color="#166534" />
         <StatTile title="Invoices" value={`${currentMonthInvoices.length}`} icon={<FileText size={20} />} />
         <StatTile title="Payments" value={`${currentMonthPayments.length}`} icon={<WalletCards size={20} />} />
       </div>
@@ -89,86 +84,6 @@ const CustomerDashboard = () => {
           {overdueInvoices.length} overdue invoice(s), {formatMoney(overdueAmount)}
         </div>
       </div>
-
-      {apcSummary ? (
-        <section style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-            <div>
-              <div style={{ color: '#D4AF37', fontWeight: 900 }}>Ashoka Partner Points</div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Progress to Next Level</div>
-            </div>
-            <div style={{ width: 42, height: 42, borderRadius: 14, display: 'grid', placeItems: 'center', background: '#EAF7EE', color: '#166534' }}>
-              <Wallet size={21} />
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-            <div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Current Level</div>
-              <div style={{ fontWeight: 900 }}>{apcSummary.currentLevel}</div>
-            </div>
-            <div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>APC Balance</div>
-              <div style={{ color: '#166534', fontWeight: 900 }}>{formatApc(apcSummary.apcBalance)}</div>
-            </div>
-            <div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>This Month Earned APC</div>
-              <div style={{ fontWeight: 900 }}>You earned {formatApc(apcSummary.monthlyApcEarned)} APC</div>
-            </div>
-            <div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Next Level</div>
-              <div style={{ fontWeight: 900 }}>{apcSummary.nextLevel || 'Top level'}</div>
-            </div>
-          </div>
-
-          <div style={{ height: 9, borderRadius: 999, background: '#F2D7D5', overflow: 'hidden', marginBottom: 7 }}>
-            <div style={{ width: `${apcSummary.progressPercent}%`, height: '100%', background: '#166534' }} />
-          </div>
-          <div style={{ color: apcSummary.rewardAvailable ? '#166534' : '#B42318', fontSize: 12, fontWeight: 900 }}>
-            {apcSummary.rewardAvailable ? 'Reward available' : `You need ${formatApc(apcSummary.pointsNeededForNextReward)} more APC to unlock your next reward.`}
-          </div>
-        </section>
-      ) : null}
-
-      <section style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 900 }}>Latest Invoice</div>
-          <Link to="/customer/invoices" style={{ color: '#D4AF37', fontWeight: 900, textDecoration: 'none' }}>View All</Link>
-        </div>
-        {latestInvoices.map((invoice) => (
-          <div key={invoice.id} style={{ background: '#FFFFFF', borderRadius: 16, padding: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 900 }}>{invoice.invoiceNumber}</div>
-              <div style={{ color: '#67738E', fontSize: 12 }}>{formatDate(invoice.date)}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontWeight: 900 }}>{formatMoney(invoice.totalSales)}</div>
-              <div style={{ display: 'inline-block', marginTop: 6, padding: '3px 8px', borderRadius: 999, background: '#FFF7D6', color: '#0B1F3A', fontSize: 11, fontWeight: 900 }}>
-                {invoiceStatusById.get(invoice.id) || 'Pending'}
-              </div>
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 900 }}>Latest Payment</div>
-          <Link to="/customer/payments" style={{ color: '#D4AF37', fontWeight: 900, textDecoration: 'none' }}>View All</Link>
-        </div>
-        {latestPayments.map((payment) => (
-          <div key={payment.id} style={{ background: '#FFFFFF', borderRadius: 16, padding: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 900 }}>{payment.invoiceNumber || payment.id.slice(0, 8)}</div>
-              <div style={{ color: '#67738E', fontSize: 12 }}>{formatDate(payment.date)} | {payment.mode}</div>
-            </div>
-            <div style={{ textAlign: 'right', color: '#166534', fontWeight: 900 }}>
-              <CheckCircle2 size={17} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-              {formatMoney(payment.amount)}
-            </div>
-          </div>
-        ))}
-      </section>
 
       <div
         ref={bottomSentinelRef}

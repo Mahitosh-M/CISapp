@@ -11,6 +11,12 @@ const CustomerPartnerPoints = () => {
   const [redemptionError, setRedemptionError] = useState('');
   const [requestingRewardId, setRequestingRewardId] = useState('');
   const latestRedemption = sortNewestFirst(redemptionRequests, ['reviewedAt', 'requestedAt'])[0];
+  const latestRequestByRewardId = sortNewestFirst(redemptionRequests, ['reviewedAt', 'requestedAt']).reduce((requestMap, request) => {
+    if (!requestMap.has(request.rewardId)) {
+      requestMap.set(request.rewardId, request);
+    }
+    return requestMap;
+  }, new Map<string, (typeof redemptionRequests)[number]>());
   const progressPercent = apcSummary?.progressPercent ?? 0;
   const progressDegrees = Math.round((progressPercent / 100) * 360);
 
@@ -99,7 +105,7 @@ const CustomerPartnerPoints = () => {
                 <div style={{ width: `${progressPercent}%`, height: '100%', background: '#166534' }} />
               </div>
               <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 6 }}>
-                {apcSummary.nextLevel ? `${formatApc(apcSummary.pointsNeededForNextLevel)} more APC needed for ${apcSummary.nextLevel}` : 'You are already at the highest partner level.'}
+                {apcSummary.nextLevel ? `${formatApc(apcSummary.pointsNeededForNextLevel)} more score points needed for ${apcSummary.nextLevel}` : 'You are already at the highest partner level.'}
               </div>
             </div>
 
@@ -120,26 +126,50 @@ const CustomerPartnerPoints = () => {
           <div style={{ color: '#67738E', fontSize: 13 }}>No rewards available for your current points yet.</div>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
-            {availableRewards.map((reward) => (
-              <div key={reward.id} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontWeight: 900 }}>{reward.name}</div>
-                    <div style={{ color: '#67738E', fontSize: 12 }}>{formatApc(reward.requiredPoints)} APC | {reward.levelRequired}</div>
-                    {reward.description ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{reward.description}</div> : null}
+            {availableRewards.map((reward) => {
+              const rewardRequest = latestRequestByRewardId.get(reward.id);
+              const hasEnoughApc = (apcSummary?.apcBalance ?? 0) >= reward.requiredPoints;
+              const isRequested = rewardRequest?.status === 'Pending' || rewardRequest?.status === 'Approved';
+              const isGifted = rewardRequest?.status === 'Gifted';
+              const buttonText = isGifted ? 'Gifted' : isRequested ? 'Requested' : requestingRewardId === reward.id ? 'Sending' : 'Request';
+              const isButtonDisabled = !hasEnoughApc || isRequested || isGifted || requestingRewardId === reward.id;
+
+              return (
+                <div key={reward.id} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 10 }}>
+                  {reward.imageUrl ? (
+                    <img
+                      loading="lazy"
+                      src={reward.imageUrl}
+                      alt={reward.name}
+                      style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 12, display: 'block', marginBottom: 10 }}
+                    />
+                  ) : null}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 900 }}>{reward.name}</div>
+                      <div style={{ color: '#67738E', fontSize: 12 }}>{formatApc(reward.requiredPoints)} APC | {reward.levelRequired}</div>
+                      {reward.description ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{reward.description}</div> : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRewardRequest(reward.id)}
+                      disabled={isButtonDisabled}
+                      style={{
+                        border: 0,
+                        borderRadius: 10,
+                        background: isGifted ? '#EAF7EE' : isRequested || !hasEnoughApc ? '#E8EDF4' : '#D4AF37',
+                        color: isGifted ? '#166534' : isRequested || !hasEnoughApc ? '#67738E' : '#0B1F3A',
+                        padding: '8px 10px',
+                        fontWeight: 900
+                      }}
+                    >
+                      <Award size={15} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                      {buttonText}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRewardRequest(reward.id)}
-                    disabled={requestingRewardId === reward.id}
-                    style={{ border: 0, borderRadius: 10, background: '#D4AF37', color: '#0B1F3A', padding: '8px 10px', fontWeight: 900 }}
-                  >
-                    <Award size={15} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-                    {requestingRewardId === reward.id ? 'Sending' : 'Request'}
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

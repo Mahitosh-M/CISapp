@@ -122,7 +122,7 @@ const Invoices = () => {
         const paidAmount = getPaidAmount(invoice.id);
         const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
         const customer = customers.find((item) => item.id === invoice.customerId);
-        const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 3', settings);
+        const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 4', settings);
         const status = getInvoiceStatus(effectiveDueDate, invoice.totalSales, paidAmount);
 
         return {

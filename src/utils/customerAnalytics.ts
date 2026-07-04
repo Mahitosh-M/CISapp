@@ -23,6 +23,7 @@ import {
   normalizeScoreWeights
 } from './settings';
 import { formatDate } from './formatters';
+import { getTierDisplayName } from './tiers';
 
 interface DateWindow {
   start: Date;
@@ -71,6 +72,13 @@ export const TIER_CREDIT_POLICIES: Record<CustomerTier, TierCreditPolicy> = {
   },
   'Tier 3': {
     tier: 'Tier 3',
+    creditDays: 0,
+    bufferDays: 0,
+    label: 'No credit',
+    description: 'Developing partner with limited credit until score improves.'
+  },
+  'Tier 4': {
+    tier: 'Tier 4',
     creditDays: 0,
     bufferDays: 0,
     label: 'No credit',
@@ -252,26 +260,30 @@ const rateLoyaltyConsistency = (customerInvoices: Invoice[], window: DateWindow)
   return clamp(Math.round((getActiveMonthCount(customerInvoices) / monthsInWindow) * 100), 30, 100);
 };
 
-const assignTier = (intelligenceScore: number, paymentDisciplineScore: number): CustomerTier => {
-  if (intelligenceScore >= 80 && paymentDisciplineScore >= 70) {
+const assignTier = (intelligenceScore: number): CustomerTier => {
+  if (intelligenceScore >= 81) {
     return 'Tier 1';
   }
 
-  if (intelligenceScore >= 60 && paymentDisciplineScore >= 50) {
+  if (intelligenceScore >= 61) {
     return 'Tier 2';
   }
 
-  return 'Tier 3';
+  if (intelligenceScore >= 41) {
+    return 'Tier 3';
+  }
+
+  return 'Tier 4';
 };
 
 const getRiskLevel = (tier: CustomerTier, paymentDisciplineScore: number, outstanding: number, outstandingBase: number): RiskLevel => {
   const outstandingRatio = outstandingBase > 0 ? outstanding / outstandingBase : 0;
 
-  if (tier === 'Tier 3' || paymentDisciplineScore < 55 || outstandingRatio > 0.5) {
+  if (tier === 'Tier 4' || paymentDisciplineScore < 55 || outstandingRatio > 0.5) {
     return 'High';
   }
 
-  if (tier === 'Tier 2' || paymentDisciplineScore < 75 || outstanding > 0) {
+  if (tier === 'Tier 2' || tier === 'Tier 3' || paymentDisciplineScore < 75 || outstanding > 0) {
     return 'Medium';
   }
 
@@ -289,6 +301,10 @@ const getRecommendedAction = (riskLevel: RiskLevel, tier: CustomerTier, outstand
 
   if (tier === 'Tier 2') {
     return 'Encourage weekly ordering and timely collection';
+  }
+
+  if (tier === 'Tier 3') {
+    return 'Build ordering consistency and monitor collections';
   }
 
   return 'Monitor before increasing credit';
@@ -312,17 +328,18 @@ const getMovementDetails = (current: CustomerScore, previous?: CustomerScore): {
   }
 
   const tierOrder: Record<CustomerTier, number> = {
-    'Tier 1': 3,
-    'Tier 2': 2,
-    'Tier 3': 1
+    'Tier 1': 4,
+    'Tier 2': 3,
+    'Tier 3': 2,
+    'Tier 4': 1
   };
 
   if (tierOrder[current.tier] > tierOrder[previous.tier]) {
-    return { movement: 'Promoted', movementReason: `Moved from ${previous.tier} to ${current.tier}` };
+    return { movement: 'Promoted', movementReason: `Moved from ${getTierDisplayName(previous.tier)} to ${getTierDisplayName(current.tier)}` };
   }
 
   if (tierOrder[current.tier] < tierOrder[previous.tier]) {
-    return { movement: 'Demoted', movementReason: `Moved from ${previous.tier} to ${current.tier}` };
+    return { movement: 'Demoted', movementReason: `Moved from ${getTierDisplayName(previous.tier)} to ${getTierDisplayName(current.tier)}` };
   }
 
   const scoreChange = current.intelligenceScore - previous.intelligenceScore;
@@ -469,7 +486,7 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
         outstandingPenalty
     );
 
-    const tier = entry.customer.tierOverride ? entry.customer.tier : assignTier(intelligenceScore, paymentDisciplineScore);
+    const tier = entry.customer.tierOverride ? entry.customer.tier : assignTier(intelligenceScore);
     const creditPolicy = {
       creditDays: getCreditDaysForTierFromSettings(tier, settings),
       bufferDays: getPaymentBufferForTier(tier, settings),
@@ -644,6 +661,7 @@ export const buildIntelligenceSummary = (customerScores: CustomerScore[]): Intel
     tier1Count: 0,
     tier2Count: 0,
     tier3Count: 0,
+    tier4Count: 0,
     riskCustomerCount: 0
   };
 
@@ -663,6 +681,7 @@ export const buildIntelligenceSummary = (customerScores: CustomerScore[]): Intel
     if (customer.tier === 'Tier 1') runningSummary.tier1Count += 1;
     if (customer.tier === 'Tier 2') runningSummary.tier2Count += 1;
     if (customer.tier === 'Tier 3') runningSummary.tier3Count += 1;
+    if (customer.tier === 'Tier 4') runningSummary.tier4Count += 1;
     if (customer.riskLevel === 'High') runningSummary.riskCustomerCount += 1;
 
     return runningSummary;

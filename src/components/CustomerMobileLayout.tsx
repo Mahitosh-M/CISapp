@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { getLatestUnreadOffer, getOfferDateRangeLabel, markOfferAsViewed } from '../utils/offers';
+import { getTierDisplayName } from '../utils/tiers';
 
 const navItems = [
   { to: '/customer', label: 'Dashboard', icon: Home, end: true },
@@ -20,7 +21,7 @@ const CustomerMobileLayout = () => {
   const navigate = useNavigate();
   const [viewedOfferVersion, setViewedOfferVersion] = useState(0);
   const customerHeading = (portalData.customer?.name || portalData.userProfile?.customerName || portalData.userProfile?.email || 'Customer').toUpperCase();
-  const customerTierNumber = portalData.customer?.tier ? portalData.customer.tier.replace(/^Tier\s*/i, '') : '-';
+  const customerPartnerLevel = getTierDisplayName(portalData.customer?.tier);
 
   const latestUnreadOffer = useMemo(() => {
     return getLatestUnreadOffer(portalData.offers, portalData.userProfile?.uid);
@@ -56,10 +57,7 @@ const CustomerMobileLayout = () => {
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>{customerHeading}</div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 8, background: '#D4AF37', color: '#0B1F3A', borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 900, boxShadow: '0 8px 18px rgba(212,175,55,0.24)', letterSpacing: 0 }}>
-              <span>TIER</span>
-              <span style={{ display: 'inline-grid', placeItems: 'center', minWidth: 22, height: 22, borderRadius: 999, background: '#0B1F3A', color: '#D4AF37', fontWeight: 900 }}>
-                {customerTierNumber}
-              </span>
+              <span>{customerPartnerLevel}</span>
             </div>
           </div>
           <button type="button" onClick={logout} style={{ border: 0, borderRadius: 12, background: '#D4AF37', color: '#0B1F3A', padding: '9px 12px', fontWeight: 900 }}>

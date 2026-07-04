@@ -1,7 +1,7 @@
 import type { AppSettings, Customer, CustomerTier, Invoice, Payment, UserProfile } from '../types';
-import { getCurrentMonthRange } from './dateUtils';
+import { addDaysToDateString, getCurrentMonthRange } from './dateUtils';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
-import { getEffectiveInvoiceDueDate } from './settings';
+import { getEffectiveInvoiceDueDate, getGiftPercentageForTier, getPaymentBufferForTier } from './settings';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const PAID_GREEN = '#166534';
@@ -24,6 +24,10 @@ export interface CustomerInvoiceView {
   pendingPercentage: number;
   urgencyColor: string;
   status: 'Overdue' | 'Partial' | 'Pending' | 'Paid' | 'Due Soon' | 'Due Later' | 'Due date not set';
+  expectedApc: number;
+  earnedApc: number;
+  apcDeadline: string;
+  apcStatus: 'Earned' | 'Available' | 'Expired' | 'Not available';
 }
 
 const parseDate = (dateString: string) => {
@@ -63,6 +67,54 @@ export const calculateInvoiceOutstanding = (invoice: Invoice, payments: Payment[
   };
 };
 
+export const getInvoiceApcDeadline = (invoice: Invoice, tier?: CustomerTier, settings?: AppSettings) => {
+  if (!tier) return invoice.dueDate;
+  if (invoice.dueDate) return addDaysToDateString(invoice.dueDate, getPaymentBufferForTier(tier, settings));
+  return getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);
+};
+
+export const getInvoiceFullPaymentDate = (invoice: Invoice, payments: Payment[]) => {
+  const invoiceAmount = invoice.totalSales || invoice.salesAmount;
+  let runningPaid = 0;
+  const invoicePayments = payments
+    .filter((payment) => payment.invoiceId === invoice.id)
+    .sort((left, right) => left.date.localeCompare(right.date));
+
+  for (const payment of invoicePayments) {
+    runningPaid += getInvoicePaymentEffect(payment);
+    if (getPendingAmount(invoiceAmount, runningPaid) <= 0) {
+      return payment.date;
+    }
+  }
+
+  return '';
+};
+
+export const calculateInvoiceApcInfo = (
+  invoice: Invoice,
+  payments: Payment[],
+  tier?: CustomerTier,
+  settings?: AppSettings,
+  todayString = new Date().toISOString().slice(0, 10)
+) => {
+  const deadline = getInvoiceApcDeadline(invoice, tier, settings);
+  const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
+  const expectedApc = tier
+    ? Math.round(Math.max(0, invoice.totalProfit) * (getGiftPercentageForTier(tier, settings) / 100)) + Math.max(0, Number(settings?.loyaltySettings.onTimePaymentBonus ?? 0))
+    : 0;
+  const isFullyPaid = Boolean(fullPaymentDate);
+  const isDeadlineValid = Boolean(deadline);
+  const isPaidOnTime = isFullyPaid && isDeadlineValid && fullPaymentDate <= deadline;
+  const isExpired = isDeadlineValid && !isPaidOnTime && todayString > deadline;
+
+  return {
+    expectedApc: Math.max(0, Math.round(expectedApc)),
+    earnedApc: isPaidOnTime ? Math.max(0, Math.round(expectedApc)) : 0,
+    apcDeadline: deadline || '',
+    apcStatus: isPaidOnTime ? 'Earned' as const : isExpired ? 'Expired' as const : isDeadlineValid ? 'Available' as const : 'Not available' as const
+  };
+};
+
 export const getDueUrgencyColor = (dueProgressPercentage: number, isOverdue: boolean, isPaid: boolean) => {
   // Paid invoice portions stay dark green and are independent of due urgency.
   if (isPaid) return PAID_GREEN;
@@ -97,6 +149,7 @@ export const calculateDueStatus = (
   const invoiceDate = parseDate(invoice.date);
   const effectiveDueDate = tier ? getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings) : invoice.dueDate;
   const invoiceWithEffectiveDueDate = effectiveDueDate && effectiveDueDate !== invoice.dueDate ? { ...invoice, dueDate: effectiveDueDate } : invoice;
+  const apcInfo = calculateInvoiceApcInfo(invoice, payments, tier, settings, todayString);
   const dueDate = parseDate(effectiveDueDate);
   const today = parseDate(todayString) ?? new Date();
   const isPaid = outstandingAmount <= 0;
@@ -115,7 +168,8 @@ export const calculateDueStatus = (
       dueProgressPercentage: isPaid ? 100 : 0,
       ...percentages,
       urgencyColor: getDueUrgencyColor(0, false, isPaid),
-      status: isPaid ? 'Paid' : 'Due date not set'
+      status: isPaid ? 'Paid' : 'Due date not set',
+      ...apcInfo
     };
   }
 
@@ -150,7 +204,8 @@ export const calculateDueStatus = (
     dueProgressPercentage,
     ...percentages,
     urgencyColor: getDueUrgencyColor(dueProgressPercentage, isOverdue, isPaid),
-    status: status === 'Pending' && daysRemaining > 3 ? 'Due Later' : status
+    status: status === 'Pending' && daysRemaining > 3 ? 'Due Later' : status,
+    ...apcInfo
   };
 };
 

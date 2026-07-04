@@ -1,6 +1,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import type { CustomerInvoiceView } from '../utils/customerPortal';
 import { formatDate, formatMoney } from '../utils/formatters';
+import { formatApc } from '../utils/loyalty';
 
 interface CustomerInvoiceCardProps {
   invoiceView: CustomerInvoiceView;
@@ -8,6 +9,15 @@ interface CustomerInvoiceCardProps {
 
 const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
   const isPaid = invoiceView.outstandingAmount <= 0;
+  const apcColor = invoiceView.apcStatus === 'Earned' ? '#166534' : invoiceView.apcStatus === 'Expired' ? '#B42318' : '#0B1F3A';
+  const apcLabel =
+    invoiceView.apcStatus === 'Earned'
+      ? `Earned ${formatApc(invoiceView.earnedApc)} APC`
+      : invoiceView.apcStatus === 'Expired'
+        ? 'APC expired'
+        : invoiceView.expectedApc > 0
+          ? `Expected ${formatApc(invoiceView.expectedApc)} APC`
+          : 'No APC available';
   const chartData = isPaid
     ? [{ name: 'Paid', value: 100, color: '#166534' }]
     : invoiceView.paidAmount > 0
@@ -29,6 +39,12 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
           </div>
           <div style={{ color: '#67738E', fontSize: 12, marginTop: 8 }}>Invoice: {formatDate(invoiceView.invoice.date)}</div>
           <div style={{ color: '#67738E', fontSize: 12 }}>Due: {invoiceView.invoice.dueDate ? formatDate(invoiceView.invoice.dueDate) : 'Due date not set'}</div>
+          <div style={{ color: apcColor, fontSize: 12, fontWeight: 900, marginTop: 6 }}>
+            {apcLabel}
+            {invoiceView.apcStatus === 'Available' && invoiceView.apcDeadline ? (
+              <span style={{ color: '#67738E', fontWeight: 800 }}> if paid by {formatDate(invoiceView.apcDeadline)}</span>
+            ) : null}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
             <div>
               <div style={{ color: '#67738E', fontSize: 11 }}>Paid</div>

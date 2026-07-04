@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { AppSettings, TargetTierKey, UserProfile, UserRole } from '../types';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { DEFAULT_SETTINGS, isScoringWeightTotalValid, mergeWithDefaultSettings, validateAppSettings } from '../utils/settings';
+import { CUSTOMER_TIERS, getTierDisplayName } from '../utils/tiers';
 
 const Settings = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -236,9 +237,9 @@ const Settings = () => {
       <form style={cardStyle} onSubmit={handleSaveSettings}>
         <div style={sectionTitleStyle}>Gift Settings</div>
         <div style={gridStyle}>
-          {(['Tier 1', 'Tier 2', 'Tier 3'] as const).map((tier) => (
+          {CUSTOMER_TIERS.map((tier) => (
             <label key={tier} style={labelStyle}>
-              {tier} Gift %
+              {getTierDisplayName(tier)} Gift %
               <input
                 style={inputStyle}
                 type="number"
@@ -253,9 +254,9 @@ const Settings = () => {
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Credit Days</div>
         <div style={gridStyle}>
-          {(['Tier 1', 'Tier 2', 'Tier 3'] as const).map((tier) => (
+          {CUSTOMER_TIERS.map((tier) => (
             <label key={tier} style={labelStyle}>
-              {tier} Credit Days
+              {getTierDisplayName(tier)} Credit Days
               <input
                 style={inputStyle}
                 type="number"
@@ -269,9 +270,9 @@ const Settings = () => {
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Payment Buffer Days</div>
         <div style={gridStyle}>
-          {(['Tier 1', 'Tier 2', 'Tier 3'] as const).map((tier) => (
+          {CUSTOMER_TIERS.map((tier) => (
             <label key={tier} style={labelStyle}>
-              {tier} Buffer Days
+              {getTierDisplayName(tier)} Buffer Days
               <input
                 style={inputStyle}
                 type="number"
@@ -329,15 +330,16 @@ const Settings = () => {
           </div>
         ) : null}
 
-        <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Tier-wise Monthly Targets</div>
+        <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Partner Level Monthly Targets</div>
         <div style={{ color: '#5C6A84', fontSize: 13, marginBottom: 12 }}>
           These targets feed the Sales Performance and Order Performance score portions without changing the total 100% weight.
         </div>
         <div style={gridStyle}>
           {([
-            { tierKey: 'tier1', label: 'Tier 1' },
-            { tierKey: 'tier2', label: 'Tier 2' },
-            { tierKey: 'tier3', label: 'Tier 3' }
+            { tierKey: 'tier1', label: 'Platinum Partner' },
+            { tierKey: 'tier2', label: 'Gold Partner' },
+            { tierKey: 'tier3', label: 'Silver Partner' },
+            { tierKey: 'tier4', label: 'Active Partner' }
           ] as { tierKey: TargetTierKey; label: string }[]).map(({ tierKey, label }) => (
             <div key={tierKey} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 12 }}>
               <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>{label}</div>
