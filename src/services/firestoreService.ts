@@ -32,6 +32,12 @@ import type {
   OfferFormData,
   Payment,
   PaymentFormData,
+  MonthlyCustomerStats,
+  LoyaltyLedgerEntry,
+  RewardFormData,
+  RewardItem,
+  RedemptionRequest,
+  RedemptionStatus,
   UserProfile,
   UserRole
 } from '../types';
@@ -43,6 +49,7 @@ import {
   validateAppSettings
 } from '../utils/settings';
 import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
+import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getLevelProgressPercent, getMonthlyStatsId, getPartnerLevelForPoints } from '../utils/loyalty';
 
 const CUSTOMERS = 'customers';
 const INVOICES = 'invoices';
@@ -54,8 +61,13 @@ const GIFT_ITEMS = 'giftItems';
 const USERS = 'users';
 const ALERTS = 'alerts';
 const OFFERS = 'offers';
+const MONTHLY_CUSTOMER_STATS = 'monthlyCustomerStats';
+const LOYALTY_LEDGER = 'loyaltyLedger';
+const REWARD_ITEMS = 'rewardItems';
+const REDEMPTION_REQUESTS = 'redemptionRequests';
 const DEFAULT_LIST_LIMIT = 50;
 const ACTIVE_OFFER_LIMIT = 20;
+const ACTIVE_REWARD_LIMIT = 50;
 
 export interface AuditUser {
   userId?: string;
@@ -325,6 +337,54 @@ const mapOfferDoc = (id: string, data: Record<string, unknown>): Offer => ({
   createdAt: dateFieldToString(data.createdAt),
   createdBy: data.createdBy ? String(data.createdBy) : undefined,
   updatedAt: data.updatedAt ? dateFieldToString(data.updatedAt) : undefined
+});
+
+const mapMonthlyCustomerStatsDoc = (id: string, data: Record<string, unknown>): MonthlyCustomerStats => ({
+  id,
+  customerId: String(data.customerId || ''),
+  month: String(data.month || ''),
+  totalSales: numberOrZero(data.totalSales),
+  totalPayments: numberOrZero(data.totalPayments),
+  orderCount: numberOrZero(data.orderCount),
+  overdueAmount: numberOrZero(data.overdueAmount),
+  target: numberOrZero(data.target),
+  pointsEarned: numberOrZero(data.pointsEarned),
+  currentLevel: (data.currentLevel as MonthlyCustomerStats['currentLevel']) || 'Active Partner',
+  progressPercent: numberOrZero(data.progressPercent),
+  updatedAt: String(data.updatedAt || '')
+});
+
+const mapRewardItemDoc = (id: string, data: Record<string, unknown>): RewardItem => ({
+  id,
+  name: String(data.name || ''),
+  requiredPoints: numberOrZero(data.requiredPoints),
+  levelRequired: (data.levelRequired as RewardItem['levelRequired']) || 'Active Partner',
+  isActive: data.isActive !== false,
+  description: data.description ? String(data.description) : '',
+  createdAt: String(data.createdAt || ''),
+  updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
+});
+
+const mapRedemptionRequestDoc = (id: string, data: Record<string, unknown>): RedemptionRequest => ({
+  id,
+  customerId: String(data.customerId || ''),
+  customerName: String(data.customerName || ''),
+  rewardId: String(data.rewardId || ''),
+  rewardName: String(data.rewardName || ''),
+  points: numberOrZero(data.points),
+  status: (data.status as RedemptionStatus) || 'Pending',
+  requestedAt: String(data.requestedAt || ''),
+  reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
+  reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
+  notes: data.notes ? String(data.notes) : undefined
+});
+
+const sanitizeRewardPayload = (reward: RewardFormData): RewardFormData => ({
+  name: reward.name.trim(),
+  requiredPoints: Math.max(0, Math.round(numberOrZero(reward.requiredPoints))),
+  levelRequired: reward.levelRequired,
+  isActive: reward.isActive,
+  description: reward.description.trim()
 });
 
 const sanitizeOfferPayload = (offer: OfferFormData): OfferFormData => ({
@@ -1028,4 +1088,239 @@ export const updateOfferRecord = async (offerId: string, offer: OfferFormData, a
 
 export const deleteOfferRecord = async (offerId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, OFFERS, offerId));
+};
+
+export const getMonthlyCustomerStats = async (customerId: string, month = getCurrentMonthKey()) => {
+  if (!customerId) return undefined;
+  const statsId = getMonthlyStatsId(customerId, month);
+  const snapshot = await getDoc(doc(db, MONTHLY_CUSTOMER_STATS, statsId));
+  return snapshot.exists() ? mapMonthlyCustomerStatsDoc(snapshot.id, snapshot.data()) : undefined;
+};
+
+export const getMonthlyCustomerStatsForMonth = async (month = getCurrentMonthKey(), limitCount = DEFAULT_LIST_LIMIT) => {
+  const statsQuery = query(collection(db, MONTHLY_CUSTOMER_STATS), where('month', '==', month), firestoreLimit(limitCount));
+  const snapshot = await getDocs(statsQuery);
+  return snapshot.docs.map((statsDoc) => mapMonthlyCustomerStatsDoc(statsDoc.id, statsDoc.data()));
+};
+
+export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), auditUser?: AuditUser) => {
+  const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
+    getCustomers(),
+    getInvoices({ fromDate: `${month}-01`, toDate: `${month}-31` }),
+    getPayments({ fromDate: `${month}-01`, toDate: `${month}-31` }),
+    getAppSettings()
+  ]);
+  const timestamp = nowIso();
+  const statsRows = customerRows.map((customer) => buildMonthlyCustomerStats(customer, invoiceRows, paymentRows, appSettings, month));
+
+  await Promise.all(
+    statsRows.map(async (stats) => {
+      const statsRef = doc(db, MONTHLY_CUSTOMER_STATS, stats.id);
+      const existingStatsSnapshot = await getDoc(statsRef);
+      const existingStats = existingStatsSnapshot.exists() ? mapMonthlyCustomerStatsDoc(existingStatsSnapshot.id, existingStatsSnapshot.data()) : undefined;
+      const approvedRedemptions = existingStats ? Math.max(0, stats.pointsEarned - existingStats.pointsEarned) : 0;
+      const adjustedPoints = Math.max(0, stats.pointsEarned - approvedRedemptions);
+      const adjustedLevel = getPartnerLevelForPoints(adjustedPoints, appSettings);
+
+      await setDoc(statsRef, {
+        ...stats,
+        pointsEarned: adjustedPoints,
+        currentLevel: adjustedLevel,
+        progressPercent: getLevelProgressPercent(adjustedPoints, adjustedLevel, appSettings),
+        updatedAt: timestamp
+      }, { merge: true });
+
+      if (stats.pointsEarned > 0) {
+        const ledgerId = `${stats.customerId}_${month.replace('-', '_')}_monthly_points`;
+        const ledgerEntry: Omit<LoyaltyLedgerEntry, 'id'> = {
+          customerId: stats.customerId,
+          type: 'purchase',
+          points: stats.pointsEarned,
+          reason: 'Monthly APC points',
+          referenceId: stats.id,
+          month,
+          createdAt: timestamp
+        };
+
+        await setDoc(doc(db, LOYALTY_LEDGER, ledgerId), ledgerEntry, { merge: false });
+      }
+    })
+  );
+
+  return statsRows;
+};
+
+export const getRewardItems = async () => {
+  const rewardsQuery = query(collection(db, REWARD_ITEMS), orderBy('requiredPoints', 'asc'), firestoreLimit(ACTIVE_REWARD_LIMIT));
+  const snapshot = await getDocs(rewardsQuery);
+  return snapshot.docs.map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()));
+};
+
+export const getActiveRewardItems = async () => {
+  const rewardsQuery = query(collection(db, REWARD_ITEMS), where('isActive', '==', true));
+  const snapshot = await getDocs(rewardsQuery);
+  return snapshot.docs
+    .map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()))
+    .sort((left, right) => left.requiredPoints - right.requiredPoints)
+    .slice(0, ACTIVE_REWARD_LIMIT);
+};
+
+export const getAvailableRewardsForCustomer = async (customerId: string, month = getCurrentMonthKey()) => {
+  const [stats, rewards] = await Promise.all([
+    getMonthlyCustomerStats(customerId, month),
+    getDocs(query(collection(db, REWARD_ITEMS), where('isActive', '==', true)))
+  ]);
+  const activeRewards = rewards.docs.map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()));
+
+  if (!stats) return { stats, rewards: [] };
+
+  return {
+    stats,
+    rewards: activeRewards
+      .filter((reward) => reward.requiredPoints <= stats.pointsEarned && canViewRewardAtLevel(stats.currentLevel, reward.levelRequired))
+      .sort((left, right) => left.requiredPoints - right.requiredPoints)
+      .slice(0, ACTIVE_REWARD_LIMIT)
+  };
+};
+
+export const createRewardItem = async (reward: RewardFormData, auditUser?: AuditUser) => {
+  const payload = sanitizeRewardPayload(reward);
+  const timestamp = nowIso();
+  const docRef = await addDoc(collection(db, REWARD_ITEMS), {
+    ...payload,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+
+  return docRef;
+};
+
+export const updateRewardItemRecord = async (rewardId: string, reward: RewardFormData, auditUser?: AuditUser) => {
+  const payload = sanitizeRewardPayload(reward);
+  await updateDoc(doc(db, REWARD_ITEMS, rewardId), {
+    ...payload,
+    updatedAt: nowIso()
+  });
+};
+
+export const deleteRewardItemRecord = async (rewardId: string, auditUser?: AuditUser) => {
+  await deleteDoc(doc(db, REWARD_ITEMS, rewardId));
+};
+
+export const getRedemptionRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
+  const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), orderBy('requestedAt', 'desc'), firestoreLimit(limitCount));
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const getRedemptionRequestsForCustomer = async (customerId: string, limitCount = 20) => {
+  if (!customerId) return [];
+  const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), where('customerId', '==', customerId), firestoreLimit(limitCount));
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs
+    .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
+    .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt));
+};
+
+export const createRedemptionRequest = async (customer: Customer, reward: RewardItem) => {
+  const requestId = `${customer.id}_${reward.id}`;
+  const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
+  const timestamp = nowIso();
+
+  await runTransaction(db, async (transaction) => {
+    const existingRequest = await transaction.get(requestRef);
+
+    if (existingRequest.exists()) {
+      const existing = mapRedemptionRequestDoc(existingRequest.id, existingRequest.data());
+      if (existing.status === 'Pending' || existing.status === 'Approved') {
+        throw new Error('This reward request is already recorded.');
+      }
+    }
+
+    transaction.set(requestRef, {
+      customerId: customer.id,
+      customerName: customer.name,
+      rewardId: reward.id,
+      rewardName: reward.name,
+      points: reward.requiredPoints,
+      status: 'Pending',
+      requestedAt: timestamp
+    });
+  });
+};
+
+export const reviewRedemptionRequest = async (
+  requestId: string,
+  status: Exclude<RedemptionStatus, 'Pending'>,
+  auditUser?: AuditUser,
+  notes = ''
+) => {
+  const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
+  const timestamp = nowIso();
+  const settings = await getAppSettings();
+
+  await runTransaction(db, async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
+
+    if (!requestSnapshot.exists()) {
+      throw new Error('Redemption request no longer exists.');
+    }
+
+    const redemption = mapRedemptionRequestDoc(requestSnapshot.id, requestSnapshot.data());
+
+    if (redemption.status !== 'Pending') {
+      throw new Error('Only pending redemption requests can be reviewed.');
+    }
+
+    let stats:
+      | {
+          ref: ReturnType<typeof doc>;
+          data: MonthlyCustomerStats;
+        }
+      | undefined;
+    if (status === 'Approved') {
+      const month = getCurrentMonthKey();
+      const statsRef = doc(db, MONTHLY_CUSTOMER_STATS, getMonthlyStatsId(redemption.customerId, month));
+      const statsSnapshot = await transaction.get(statsRef);
+
+      if (!statsSnapshot.exists()) {
+        throw new Error('Monthly loyalty summary is missing. Rebuild loyalty stats before approval.');
+      }
+
+      stats = {
+        ref: statsRef,
+        data: mapMonthlyCustomerStatsDoc(statsSnapshot.id, statsSnapshot.data())
+      };
+    }
+
+    transaction.update(requestRef, {
+      status,
+      reviewedAt: timestamp,
+      reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
+      notes
+    });
+
+    if (status === 'Approved' && stats) {
+      const month = getCurrentMonthKey();
+      const nextPoints = Math.max(0, stats.data.pointsEarned - redemption.points);
+      const nextLevel = getPartnerLevelForPoints(nextPoints, settings);
+
+      transaction.update(stats.ref, {
+        pointsEarned: nextPoints,
+        currentLevel: nextLevel,
+        progressPercent: getLevelProgressPercent(nextPoints, nextLevel, settings),
+        updatedAt: timestamp
+      });
+
+      transaction.set(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`), {
+        customerId: redemption.customerId,
+        type: 'redemption',
+        points: -Math.abs(redemption.points),
+        reason: `Reward approved: ${redemption.rewardName}`,
+        referenceId: requestId,
+        month,
+        createdAt: timestamp
+      });
+    }
+  });
 };

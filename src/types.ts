@@ -20,6 +20,10 @@ export type AlertStatus = 'Open' | 'Reviewed' | 'Resolved';
 
 export type AlertSeverity = 'Low' | 'Medium' | 'High';
 
+export type PartnerLevel = 'Active Partner' | 'Silver Partner' | 'Gold Partner' | 'Platinum Partner';
+
+export type RedemptionStatus = 'Pending' | 'Approved' | 'Rejected';
+
 export type AlertType =
   | 'overdue_payment'
   | 'high_outstanding'
@@ -35,6 +39,15 @@ export type TargetTierKey = 'tier1' | 'tier2' | 'tier3';
 export interface TierTargetSetting {
   monthlySalesTarget: number;
   monthlyOrderTarget: number;
+}
+
+export interface LoyaltySettings {
+  pointsPerThousand: number;
+  onTimePaymentBonus: number;
+  monthlyTargetBonus: number;
+  orderFrequencyBonus: number;
+  partnerLevelThresholds: Record<PartnerLevel, number>;
+  rewardBudgetCap: number;
 }
 
 export interface Customer {
@@ -127,6 +140,7 @@ export interface AppSettings {
     canViewDashboard: boolean;
   };
   targetSettings: Record<TargetTierKey, TierTargetSetting>;
+  loyaltySettings: LoyaltySettings;
   showCustomerTierToCustomer: boolean;
   updatedAt?: string;
 }
@@ -382,6 +396,76 @@ export interface MonthlyRankingGroup {
   monthLabel: string;
   periodLabel: string;
   rankings: MonthlyRankingRow[];
+}
+
+export interface MonthlyCustomerStats {
+  id: string;
+  customerId: string;
+  month: string;
+  totalSales: number;
+  totalPayments: number;
+  orderCount: number;
+  overdueAmount: number;
+  target: number;
+  pointsEarned: number;
+  currentLevel: PartnerLevel;
+  progressPercent: number;
+  updatedAt: string;
+}
+
+export interface CustomerApcSummary {
+  currentLevel: PartnerLevel;
+  apcBalance: number;
+  monthlyApcEarned: number;
+  progressPercent: number;
+  nextLevel?: PartnerLevel;
+  pointsNeededForNextLevel: number;
+  pointsNeededForNextReward: number;
+  rewardAvailable: boolean;
+}
+
+export interface LoyaltyLedgerEntry {
+  id: string;
+  customerId: string;
+  type: 'purchase' | 'on_time_payment' | 'monthly_target' | 'order_frequency' | 'redemption';
+  points: number;
+  reason: string;
+  referenceId: string;
+  month: string;
+  createdAt: string;
+}
+
+export interface RewardItem {
+  id: string;
+  name: string;
+  requiredPoints: number;
+  levelRequired: PartnerLevel;
+  isActive: boolean;
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface RewardFormData {
+  name: string;
+  requiredPoints: number;
+  levelRequired: PartnerLevel;
+  isActive: boolean;
+  description: string;
+}
+
+export interface RedemptionRequest {
+  id: string;
+  customerId: string;
+  customerName: string;
+  rewardId: string;
+  rewardName: string;
+  points: number;
+  status: RedemptionStatus;
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  notes?: string;
 }
 
 export interface IntelligenceSummary {

@@ -38,6 +38,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
     canViewReports: false,
     canViewDashboard: true
   },
+  loyaltySettings: {
+    pointsPerThousand: 10,
+    onTimePaymentBonus: 25,
+    monthlyTargetBonus: 50,
+    orderFrequencyBonus: 25,
+    partnerLevelThresholds: {
+      'Active Partner': 0,
+      'Silver Partner': 500,
+      'Gold Partner': 1500,
+      'Platinum Partner': 3000
+    },
+    rewardBudgetCap: 5000
+  },
   targetSettings: {
     tier1: {
       monthlySalesTarget: 50000,
@@ -101,6 +114,14 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   staffPermissions: {
     ...DEFAULT_SETTINGS.staffPermissions,
     ...settings?.staffPermissions
+  },
+  loyaltySettings: {
+    ...DEFAULT_SETTINGS.loyaltySettings,
+    ...settings?.loyaltySettings,
+    partnerLevelThresholds: {
+      ...DEFAULT_SETTINGS.loyaltySettings.partnerLevelThresholds,
+      ...settings?.loyaltySettings?.partnerLevelThresholds
+    }
   },
   showCustomerTierToCustomer: settings?.showCustomerTierToCustomer ?? DEFAULT_SETTINGS.showCustomerTierToCustomer,
   targetSettings: {
@@ -194,6 +215,26 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
   if (!activeSettings.invoicePrefix.trim()) {
     errors.push('Invoice prefix is required.');
   }
+
+  const loyaltySettings = activeSettings.loyaltySettings;
+  [
+    ['Points per purchase slab', loyaltySettings.pointsPerThousand],
+    ['On-time payment bonus', loyaltySettings.onTimePaymentBonus],
+    ['Monthly target bonus', loyaltySettings.monthlyTargetBonus],
+    ['Order frequency bonus', loyaltySettings.orderFrequencyBonus],
+    ['Reward budget cap', loyaltySettings.rewardBudgetCap]
+  ].forEach(([label, value]) => {
+    if (!Number.isFinite(Number(value)) || Number(value) < 0) {
+      errors.push(`${label} must be a non-negative number.`);
+    }
+  });
+
+  (['Active Partner', 'Silver Partner', 'Gold Partner', 'Platinum Partner'] as const).forEach((level) => {
+    const threshold = loyaltySettings.partnerLevelThresholds[level];
+    if (!Number.isFinite(Number(threshold)) || Number(threshold) < 0) {
+      errors.push(`${level} threshold must be a non-negative number.`);
+    }
+  });
 
   (Object.entries(activeSettings.targetSettings) as [TargetTierKey, TierTargetSetting][]).forEach(([tierKey, target]) => {
     const readableTier = tierKey === 'tier1' ? 'Tier 1' : tierKey === 'tier2' ? 'Tier 2' : 'Tier 3';

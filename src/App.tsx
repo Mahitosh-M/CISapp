@@ -14,12 +14,14 @@ import Login from './pages/Login';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
+import Loyalty from './pages/Loyalty';
 import NotFound from './pages/NotFound';
 import CustomerDashboard from './pages/customer/CustomerDashboard';
 import CustomerInvoices from './pages/customer/CustomerInvoices';
 import CustomerPayments from './pages/customer/CustomerPayments';
 import CustomerOffers from './pages/customer/CustomerOffers';
 import CustomerProfile from './pages/customer/CustomerProfile';
+import CustomerPartnerPoints from './pages/customer/CustomerPartnerPoints';
 import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
 import { useIsMobile } from './hooks/useIsMobile';
@@ -44,6 +46,7 @@ const App = () => {
         <Route path="invoices" element={<CustomerInvoices />} />
         <Route path="payments" element={<CustomerPayments />} />
         <Route path="offers" element={<CustomerOffers />} />
+        <Route path="partner-points" element={<CustomerPartnerPoints />} />
         <Route path="profile" element={<CustomerProfile />} />
       </Route>
       <Route path="/" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Layout /></ProtectedRoute>}>
@@ -53,9 +56,10 @@ const App = () => {
         <Route path="invoices" element={<Invoices />} />
         <Route path="payments" element={<Payments />} />
         <Route path="intelligence" element={<Intelligence />} />
-        <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin']}><Analytics /></ProtectedRoute>} />
+        <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Analytics /></ProtectedRoute>} />
         <Route path="gifts" element={<ProtectedRoute allowedRoles={['Admin']}><Gifts /></ProtectedRoute>} />
         <Route path="suggested-gifts" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><SuggestedGifts /></ProtectedRoute>} />
+        <Route path="loyalty" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Loyalty /></ProtectedRoute>} />
         <Route path="reports" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Reports /></ProtectedRoute>} />
         <Route path="admin" element={<ProtectedRoute allowedRoles={['Admin']}><Admin /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute allowedRoles={['Admin']}><Settings /></ProtectedRoute>} />

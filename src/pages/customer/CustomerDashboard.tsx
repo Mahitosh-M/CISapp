@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileText, ShoppingCart, WalletCards } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, ShoppingCart, Wallet, WalletCards } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatDate, formatMoney } from '../../utils/formatters';
 import { calculateCustomerTotalOutstanding, isCurrentMonth } from '../../utils/customerPortal';
+import { formatApc } from '../../utils/loyalty';
 import { sortNewestFirst } from '../../utils/listDisplay';
 
 const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; value: string; icon: JSX.Element; color?: string }) => (
@@ -19,7 +20,7 @@ const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; va
 );
 
 const CustomerDashboard = () => {
-  const { customer, invoices, payments, invoiceViews } = useCustomerPortalContext();
+  const { customer, invoices, payments, invoiceViews, apcSummary } = useCustomerPortalContext();
   const navigate = useNavigate();
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const hasScrolledRef = useRef(false);
@@ -88,6 +89,46 @@ const CustomerDashboard = () => {
           {overdueInvoices.length} overdue invoice(s), {formatMoney(overdueAmount)}
         </div>
       </div>
+
+      {apcSummary ? (
+        <section style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <div style={{ color: '#D4AF37', fontWeight: 900 }}>Ashoka Partner Points</div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Progress to Next Level</div>
+            </div>
+            <div style={{ width: 42, height: 42, borderRadius: 14, display: 'grid', placeItems: 'center', background: '#EAF7EE', color: '#166534' }}>
+              <Wallet size={21} />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Current Level</div>
+              <div style={{ fontWeight: 900 }}>{apcSummary.currentLevel}</div>
+            </div>
+            <div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>APC Balance</div>
+              <div style={{ color: '#166534', fontWeight: 900 }}>{formatApc(apcSummary.apcBalance)}</div>
+            </div>
+            <div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>This Month Earned APC</div>
+              <div style={{ fontWeight: 900 }}>You earned {formatApc(apcSummary.monthlyApcEarned)} APC</div>
+            </div>
+            <div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Next Level</div>
+              <div style={{ fontWeight: 900 }}>{apcSummary.nextLevel || 'Top level'}</div>
+            </div>
+          </div>
+
+          <div style={{ height: 9, borderRadius: 999, background: '#F2D7D5', overflow: 'hidden', marginBottom: 7 }}>
+            <div style={{ width: `${apcSummary.progressPercent}%`, height: '100%', background: '#166534' }} />
+          </div>
+          <div style={{ color: apcSummary.rewardAvailable ? '#166534' : '#B42318', fontSize: 12, fontWeight: 900 }}>
+            {apcSummary.rewardAvailable ? 'Reward available' : `You need ${formatApc(apcSummary.pointsNeededForNextReward)} more APC to unlock your next reward.`}
+          </div>
+        </section>
+      ) : null}
 
       <section style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>

@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildIntelligenceSummary } from '../utils/customerAnalytics';
+import { buildCustomerContributionRows, buildTopFivePieRows } from '../utils/contribution';
 import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
@@ -28,7 +29,8 @@ import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../
 import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
-const chartColors = ['#D4AF37', '#56CCF2', '#EB5757'];
+const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#7C3AED', '#9AA6B2'];
+const formatPercent = (value: number) => `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
 
 const Dashboard = () => {
   const defaultRange = useMemo(() => getCurrentMonthRange(), []);
@@ -88,12 +90,11 @@ const Dashboard = () => {
     periodPayments.forEach((payment) => dailyPayments.set(payment.date, (dailyPayments.get(payment.date) || 0) + payment.amount));
     return [...dailyPayments.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, collected]) => ({ date, collected }));
   }, [periodPayments]);
-  const tierDistribution = useMemo(() => {
-    return (['Tier 1', 'Tier 2', 'Tier 3'] as const).map((tier) => ({
-      name: tier,
-      value: customerScores.filter((customer) => customer.tier === tier).length
-    }));
-  }, [customerScores]);
+  const contributionRows = useMemo(() => buildCustomerContributionRows(customers, periodInvoices), [customers, periodInvoices]);
+  const salesContributionRows = useMemo(() => [...contributionRows].sort((a, b) => b.sales - a.sales), [contributionRows]);
+  const profitContributionRows = useMemo(() => [...contributionRows].sort((a, b) => b.profit - a.profit), [contributionRows]);
+  const salesPieRows = useMemo(() => buildTopFivePieRows(contributionRows, 'sales'), [contributionRows]);
+  const profitPieRows = useMemo(() => buildTopFivePieRows(contributionRows, 'profit'), [contributionRows]);
   const riskCustomers = customerScores
     .filter((customer) => customer.riskLevel === 'High' || customer.overdueStatus === 'Overdue' || customer.outstanding > 0)
     .sort((a, b) => b.outstanding - a.outstanding);
@@ -156,6 +157,73 @@ const Dashboard = () => {
     color: '#0B1F3A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
+
+  const contributionListStyle: CSSProperties = {
+    ...latestFiveScrollStyle,
+    border: '1px solid #E8EDF4',
+    borderRadius: 12,
+    padding: '0 12px'
+  };
+
+  const contributionRowStyle: CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gap: 12,
+    alignItems: 'center',
+    padding: '12px 0',
+    borderBottom: '1px solid #E8EDF4'
+  };
+
+  const renderContributionPie = (title: string, rows: { name: string; value: number; percent: number }[]) => (
+    <div style={chartCardStyle}>
+      <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>{title}</div>
+      <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>Top 5 customers + Others</div>
+      {rows.length === 0 ? (
+        <div style={{ height: isMobile ? 220 : 260, display: 'grid', placeItems: 'center', color: '#67738E', fontWeight: 800 }}>No contribution data</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={isMobile ? 240 : 280}>
+          <PieChart>
+            <Pie data={rows} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={2} label={({ payload }) => formatPercent((payload as { percent?: number }).percent ?? 0)}>
+              {rows.map((entry, index) => (
+                <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value, name, item) => [formatMoney(Number(value)), `${name} (${formatPercent((item.payload as { percent?: number }).percent ?? 0)})`]} />
+          </PieChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+
+  const renderContributionList = (
+    title: string,
+    rows: typeof contributionRows,
+    metric: 'sales' | 'profit'
+  ) => (
+    <div style={chartCardStyle}>
+      <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>{title}</div>
+      <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>Top 5 visible. Scroll for all customers.</div>
+      <div style={contributionListStyle}>
+        {rows.length === 0 ? (
+          <div style={{ padding: '14px 0', color: '#67738E', fontWeight: 800 }}>No customer contribution yet.</div>
+        ) : (
+          rows.map((row, index) => (
+            <div key={row.customerId || `${row.customerName}-${index}`} style={contributionRowStyle}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{index + 1}. {row.customerName}</div>
+                <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+                  {formatMoney(row[metric])} | {row.invoiceCount} invoice(s)
+                </div>
+              </div>
+              <div style={{ color: metric === 'profit' && row.profit < 0 ? '#B42318' : '#0B1F3A', fontWeight: 900 }}>
+                {formatPercent(metric === 'sales' ? row.salesPercent : row.profitPercent)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -241,21 +309,16 @@ const Dashboard = () => {
           </ResponsiveContainer>
         </div>
 
-        <div style={chartCardStyle}>
-          <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Tier Distribution</div>
-          <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
-            <PieChart>
-              <Pie data={tierDistribution} dataKey="value" nameKey="name" innerRadius={55} outerRadius={92} label>
-                {tierDistribution.map((entry, index) => (
-                  <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+      </div>
 
+      <div style={panelGridStyle}>
+        {renderContributionPie('Sales Contribution', salesPieRows)}
+        {renderContributionPie('Profit Contribution', profitPieRows)}
+      </div>
+
+      <div style={panelGridStyle}>
+        {renderContributionList('Sales Contribution %', salesContributionRows, 'sales')}
+        {renderContributionList('Profit Contribution %', profitContributionRows, 'profit')}
       </div>
 
       <div style={panelGridStyle}>

@@ -42,6 +42,128 @@ service cloud.firestore {
       return profile().customerId;
     }
 
+    function isPartnerLevel(level) {
+      return level in ['Active Partner', 'Silver Partner', 'Gold Partner', 'Platinum Partner'];
+    }
+
+    function isRedemptionStatus(status) {
+      return status in ['Pending', 'Approved', 'Rejected'];
+    }
+
+    function validOptionalString(data, field, maxSize) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxSize);
+    }
+
+    function validMonthlyCustomerStats(data) {
+      return data.keys().hasOnly([
+          'id',
+          'customerId',
+          'month',
+          'totalSales',
+          'totalPayments',
+          'orderCount',
+          'overdueAmount',
+          'target',
+          'pointsEarned',
+          'currentLevel',
+          'progressPercent',
+          'updatedAt'
+        ])
+        && data.id is string
+        && data.customerId is string
+        && data.month is string
+        && data.month.matches('^\\d{4}-\\d{2}$')
+        && data.totalSales is number
+        && data.totalPayments is number
+        && data.orderCount is number
+        && data.overdueAmount is number
+        && data.target is number
+        && data.pointsEarned is number
+        && data.progressPercent is number
+        && data.totalSales >= 0
+        && data.totalPayments >= 0
+        && data.orderCount >= 0
+        && data.overdueAmount >= 0
+        && data.target >= 0
+        && data.pointsEarned >= 0
+        && data.progressPercent >= 0
+        && data.progressPercent <= 100
+        && isPartnerLevel(data.currentLevel)
+        && data.updatedAt is string;
+    }
+
+    function validLoyaltyLedgerEntry(data) {
+      return data.keys().hasOnly([
+          'customerId',
+          'type',
+          'points',
+          'reason',
+          'referenceId',
+          'month',
+          'createdAt'
+        ])
+        && data.customerId is string
+        && data.type in ['purchase', 'on_time_payment', 'monthly_target', 'order_frequency', 'redemption']
+        && data.points is number
+        && data.reason is string
+        && data.reason.size() <= 160
+        && data.referenceId is string
+        && data.referenceId.size() <= 160
+        && data.month is string
+        && data.month.matches('^\\d{4}-\\d{2}$')
+        && data.createdAt is string;
+    }
+
+    function validRewardItem(data) {
+      return data.keys().hasOnly([
+          'name',
+          'requiredPoints',
+          'levelRequired',
+          'isActive',
+          'description',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 120
+        && data.requiredPoints is number
+        && data.requiredPoints >= 0
+        && isPartnerLevel(data.levelRequired)
+        && data.isActive is bool
+        && validOptionalString(data, 'description', 500)
+        && data.createdAt is string
+        && data.updatedAt is string;
+    }
+
+    function validRedemptionRequest(data) {
+      return data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'rewardId',
+          'rewardName',
+          'points',
+          'status',
+          'requestedAt',
+          'reviewedAt',
+          'reviewedBy',
+          'notes'
+        ])
+        && data.customerId is string
+        && data.customerName is string
+        && data.customerName.size() <= 140
+        && data.rewardId is string
+        && data.rewardName is string
+        && data.rewardName.size() <= 120
+        && data.points is number
+        && data.points >= 0
+        && isRedemptionStatus(data.status)
+        && data.requestedAt is string
+        && validOptionalString(data, 'reviewedAt', 40)
+        && validOptionalString(data, 'reviewedBy', 160)
+        && validOptionalString(data, 'notes', 500);
+    }
+
     function validUserProfile(data) {
       return data.keys().hasOnly([
           'uid',
@@ -136,6 +258,34 @@ service cloud.firestore {
     match /offers/{offerId} {
       allow read: if isTeam() || (isCustomer() && resource.data.isActive == true);
       allow write: if isAdmin();
+    }
+
+    match /monthlyCustomerStats/{statsId} {
+      allow read: if isTeam() || (isCustomer() && resource.data.customerId == customerId());
+      allow create, update: if isAdmin() && validMonthlyCustomerStats(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /loyaltyLedger/{entryId} {
+      allow read: if isTeam();
+      allow create, update: if isAdmin() && validLoyaltyLedgerEntry(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /rewardItems/{rewardId} {
+      allow read: if isTeam() || (isCustomer() && resource.data.isActive == true);
+      allow create, update: if isAdmin() && validRewardItem(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /redemptionRequests/{requestId} {
+      allow read: if isTeam() || (isCustomer() && resource.data.customerId == customerId());
+      allow create: if isCustomer()
+        && validRedemptionRequest(request.resource.data)
+        && request.resource.data.customerId == customerId()
+        && request.resource.data.status == 'Pending';
+      allow update: if isAdmin() && validRedemptionRequest(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /{document=**} {

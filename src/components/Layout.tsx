@@ -17,9 +17,10 @@ const navItems: NavItem[] = [
   { to: '/invoices', label: 'Invoices' },
   { to: '/payments', label: 'Payments' },
   { to: '/intelligence', label: 'Intelligence' },
-  { to: '/analytics', label: 'Analytics', adminOnly: true },
+  { to: '/analytics', label: 'Analytics' },
   { to: '/gifts', label: 'Gifts', adminOnly: true },
   { to: '/suggested-gifts', label: 'Suggested Gifts' },
+  { to: '/loyalty', label: 'Loyalty' },
   { to: '/reports', label: 'Reports', staffPermission: 'canViewReports' },
   { to: '/admin', label: 'Admin', adminOnly: true },
   { to: '/settings', label: 'Settings', adminOnly: true }

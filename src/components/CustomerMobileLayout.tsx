@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
-import { Bell, FileText, Home, Tags, WalletCards } from 'lucide-react';
+import { Award, Bell, FileText, Home, Tags, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/customer', label: 'Dashboard', icon: Home, end: true },
   { to: '/customer/invoices', label: 'Invoices', icon: FileText },
   { to: '/customer/payments', label: 'Payments', icon: WalletCards },
+  { to: '/customer/partner-points', label: 'Points', icon: Award },
   { to: '/customer/offers', label: 'Offers', icon: Tags }
 ];
 
@@ -76,7 +77,7 @@ const CustomerMobileLayout = () => {
         <Outlet context={portalData} />
       </main>
 
-      <nav style={{ position: 'fixed', left: '50%', bottom: 0, transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: '#FFFFFF', borderTop: '1px solid #D8DEE9', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', padding: '8px 6px 10px', boxShadow: '0 -12px 24px rgba(11,31,58,0.12)' }}>
+      <nav style={{ position: 'fixed', left: '50%', bottom: 0, transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: '#FFFFFF', borderTop: '1px solid #D8DEE9', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', padding: '8px 6px 10px', boxShadow: '0 -12px 24px rgba(11,31,58,0.12)' }}>
         {navItems.map((item) => {
           const Icon = item.icon;
           return (
