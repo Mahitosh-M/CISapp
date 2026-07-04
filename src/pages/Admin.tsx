@@ -423,7 +423,7 @@ const Admin = () => {
       return;
     }
 
-    const confirmed = window.confirm(`Delete ERP access for ${user.email}? This removes the app user profile. The Firebase Auth account itself must be removed from Firebase Console or a future Admin SDK function.`);
+    const confirmed = window.confirm(`Delete ERP access for ${user.email}? This removes the app user profile. You can recreate access with the same email by using that email's current password, or send a password reset first.`);
 
     if (!confirmed) {
       return;
@@ -433,7 +433,7 @@ const Admin = () => {
       setSaving(true);
       setAdminError('');
       await deleteUserProfileRecord(user.id, auditUser);
-      setMessage(`ERP access deleted for ${user.email}. Firebase Auth password records are not exposed by the client app.`);
+      setMessage(`ERP access deleted for ${user.email}. To reuse this email, create access again with the current password or send a password reset first.`);
       await loadAdminData();
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Unable to delete user access.');

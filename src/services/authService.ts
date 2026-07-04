@@ -22,6 +22,28 @@ import type { UserProfile, UserRole } from '../types';
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+const isAuthEmailAlreadyInUse = (err: unknown) => {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === 'auth/email-already-in-use';
+};
+
+const getReusableAuthCredential = async (secondaryAuth: ReturnType<typeof getAuth>, email: string, password: string) => {
+  try {
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    return { credential, createdNewAuthUser: true };
+  } catch (err) {
+    if (!isAuthEmailAlreadyInUse(err)) {
+      throw err;
+    }
+
+    try {
+      const credential = await signInWithEmailAndPassword(secondaryAuth, email, password);
+      return { credential, createdNewAuthUser: false };
+    } catch {
+      throw new Error('This email already exists in Firebase Auth. Use the current password for that email, or send a password reset before recreating access.');
+    }
+  }
+};
+
 export const listenToAuthState = (callback: (user: User | null) => void) => onAuthStateChanged(auth, callback);
 
 export const loginWithEmail = async (email: string, password: string) => {
@@ -121,7 +143,7 @@ export const createStaffAuthAccount = async (email: string, password: string, na
 
   try {
     const secondaryAuth = getAuth(secondaryApp);
-    const credential = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, password);
+    const { credential, createdNewAuthUser } = await getReusableAuthCredential(secondaryAuth, normalizedEmail, password);
 
     try {
       await createUserProfile({
@@ -132,7 +154,9 @@ export const createStaffAuthAccount = async (email: string, password: string, na
         active: true
       });
     } catch (err) {
-      await deleteUser(credential.user);
+      if (createdNewAuthUser) {
+        await deleteUser(credential.user);
+      }
       throw err;
     }
 
@@ -155,7 +179,7 @@ export const createCustomerAuthAccount = async (
 
   try {
     const secondaryAuth = getAuth(secondaryApp);
-    const credential = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, password);
+    const { credential, createdNewAuthUser } = await getReusableAuthCredential(secondaryAuth, normalizedEmail, password);
 
     try {
       const normalizedCustomerName = customerName.trim();
@@ -170,7 +194,9 @@ export const createCustomerAuthAccount = async (
         active: true
       });
     } catch (err) {
-      await deleteUser(credential.user);
+      if (createdNewAuthUser) {
+        await deleteUser(credential.user);
+      }
       throw err;
     }
 

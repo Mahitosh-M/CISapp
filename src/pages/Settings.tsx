@@ -127,7 +127,7 @@ const Settings = () => {
   };
 
   const handleDeleteUserProfile = async (user: UserProfile) => {
-    const confirmed = window.confirm(`Delete profile for ${user.email}? This removes ERP role access but does not delete the Firebase Auth account.`);
+    const confirmed = window.confirm(`Delete profile for ${user.email}? This removes ERP role access. You can recreate access with the same email by using that email's current password, or send a password reset first.`);
     if (!confirmed) return;
     await deleteUserProfileRecord(user.id, auditUser);
     await loadSettings();
