@@ -73,7 +73,7 @@ const CustomerDashboard = () => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
         <StatTile title="Month Purchases" value={formatMoney(currentMonthPurchases)} icon={<ShoppingCart size={20} />} />
-        <StatTile title="PC Points" value={formatApc(apcSummary?.apcBalance ?? 0)} icon={<Wallet size={20} />} color="#166534" />
+        <StatTile title="PC Balance" value={formatApc(apcSummary?.apcBalance ?? 0)} icon={<Wallet size={20} />} color="#166534" />
         <StatTile title="Invoices" value={`${currentMonthInvoices.length}`} icon={<FileText size={20} />} />
         <StatTile title="Payments" value={`${currentMonthPayments.length}`} icon={<WalletCards size={20} />} />
       </div>

@@ -27,8 +27,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     'Tier 4': 0
   },
   scoringWeights: {
-    profit: 35,
-    paymentDiscipline: 25,
+    profit: 30,
+    paymentDiscipline: 30,
     frequency: 20,
     sales: 15,
     loyalty: 5

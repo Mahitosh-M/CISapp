@@ -185,6 +185,11 @@ const Intelligence = () => {
         title="Customer Intelligence"
         description="Rolling 2-month customer ranking, partner level assignment, overdue status, and PC points from Firestore."
       />
+      {!isStaff ? (
+        <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>
+          Score uses the last 60 days; PC is calculated separately. Overdue or new customers may be capped even if their score is high.
+        </div>
+      ) : null}
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
 
@@ -195,7 +200,7 @@ const Intelligence = () => {
           <StatCard title="Total Payments" value={formatMoney(summary.totalPayments)} subtitle="Collected against scored invoices" />
           <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Previous + invoice outstanding" color="#EB5757" />
           <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Weighted score" />
-          <StatCard title="PC Points" value={formatMoney(summary.giftBudget)} subtitle="Calculated from current rules" />
+          <StatCard title="Partner Coin" value={`${formatMoney(summary.giftBudget)} PC`} subtitle="Mapped from available PC rules" />
         </div>
       ) : null}
 
@@ -214,7 +219,7 @@ const Intelligence = () => {
           <div style={whiteCardStyle}>
             <div style={{ fontWeight: 800, marginBottom: 6 }}>Frequency + Sales + Loyalty</div>
             <div style={{ color: '#D4AF37', fontSize: 28, fontWeight: 800 }}>{Math.round((scoreWeights.frequency + scoreWeights.sales + scoreWeights.loyalty) * 100)}%</div>
-            <div style={{ color: '#5C6A84', marginTop: 8 }}>Balances weekly ordering with rare but large-volume customers.</div>
+            <div style={{ color: '#5C6A84', marginTop: 8 }}>Targets are based on recent average and capped to avoid sudden jumps.</div>
           </div>
         </div>
       ) : null}
@@ -309,6 +314,9 @@ const Intelligence = () => {
             title="Score Breakdown"
             description="Each card shows the weighted score used for ranking, partner level, and PC point decisions."
           />
+          <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 8 }}>
+            Outstanding penalty includes unpaid invoices and previous outstanding. New customers use onboarding mode until enough history is available.
+          </div>
           <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
           <div style={{ ...latestFiveScrollStyle, maxHeight: 520 }}>
             <div style={scoreCardGridStyle}>
@@ -346,7 +354,7 @@ const Intelligence = () => {
                         <div>
                           <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
                           <div style={mutedTextStyle}>
-                            {formatMoney(ranking.totalSales)} sales | PC {formatMoney(ranking.giftBudget)}
+                            {formatMoney(ranking.totalSales)} sales | {formatMoney(ranking.giftBudget)} PC
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
