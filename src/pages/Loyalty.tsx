@@ -444,7 +444,7 @@ const Loyalty = () => {
 
   return (
     <div>
-      <SectionHeader title="Ashoka Partner Program" description="Manage APC points, partner levels, rewards, and redemption approvals." />
+      <SectionHeader title="Ashoka Partner Program" description="Manage PC points, partner levels, rewards, and redemption approvals." />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
@@ -461,9 +461,10 @@ const Loyalty = () => {
         <form style={cardStyle} onSubmit={saveSettings}>
           <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Loyalty Settings</div>
           <div style={gridStyle}>
-            <label style={{ fontWeight: 800 }}>On-time payment bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.onTimePaymentBonus} onChange={(event) => updateLoyaltyNumber('onTimePaymentBonus', event.target.value)} /></label>
-            <label style={{ fontWeight: 800 }}>Monthly target bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.monthlyTargetBonus} onChange={(event) => updateLoyaltyNumber('monthlyTargetBonus', event.target.value)} /></label>
-            <label style={{ fontWeight: 800 }}>Order frequency bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.orderFrequencyBonus} onChange={(event) => updateLoyaltyNumber('orderFrequencyBonus', event.target.value)} /></label>
+            <label style={{ fontWeight: 800 }}>New customer bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.newCustomerBonus} onChange={(event) => updateLoyaltyNumber('newCustomerBonus', event.target.value)} /></label>
+            <label style={{ fontWeight: 800 }}>Payment bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.paymentBonus} onChange={(event) => updateLoyaltyNumber('paymentBonus', event.target.value)} /></label>
+            <label style={{ fontWeight: 800 }}>Purchase target bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.purchaseTargetBonus} onChange={(event) => updateLoyaltyNumber('purchaseTargetBonus', event.target.value)} /></label>
+            <label style={{ fontWeight: 800 }}>Referral bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.referralBonus} onChange={(event) => updateLoyaltyNumber('referralBonus', event.target.value)} /></label>
           </div>
           <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 16 }}>
             {saving ? 'Saving...' : 'Save Loyalty Settings'}
@@ -731,7 +732,7 @@ const Loyalty = () => {
           <table style={{ ...tableStyle, minWidth: 980 }}>
             <thead>
               <tr>
-                {['Customer', 'Partner Level', 'Status', 'Available APC Points', 'Reward', 'Redeemed Date', 'Approved By', 'Notes', 'Action'].map((header) => (
+                {['Customer', 'Partner Level', 'Status', 'Available PC Points', 'Reward', 'Redeemed Date', 'Approved By', 'Notes', 'Action'].map((header) => (
                   <th key={header} style={thStyle}>{header}</th>
                 ))}
               </tr>

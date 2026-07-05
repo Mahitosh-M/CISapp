@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, FileText, ShoppingCart, Wallet, WalletCards } from 'lucide-react';
+import { AlertTriangle, Coins, FileText, ShoppingCart, Wallet, WalletCards } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatMoney } from '../../utils/formatters';
@@ -19,7 +19,7 @@ const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; va
 );
 
 const CustomerDashboard = () => {
-  const { customer, invoices, payments, invoiceViews, apcSummary } = useCustomerPortalContext();
+  const { customer, invoices, payments, invoiceViews, apcSummary, bonusPcRequests } = useCustomerPortalContext();
   const navigate = useNavigate();
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const hasScrolledRef = useRef(false);
@@ -30,6 +30,8 @@ const CustomerDashboard = () => {
   const totalOutstanding = calculateCustomerTotalOutstanding(customer, invoiceViews);
   const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
   const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
+  const currentMonthBonusRequests = bonusPcRequests.filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)));
+  const currentMonthBonusPc = currentMonthBonusRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
 
   useEffect(() => {
     const markScrolled = () => {
@@ -71,10 +73,27 @@ const CustomerDashboard = () => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
         <StatTile title="Month Purchases" value={formatMoney(currentMonthPurchases)} icon={<ShoppingCart size={20} />} />
-        <StatTile title="APC Points" value={formatApc(apcSummary?.apcBalance ?? 0)} icon={<Wallet size={20} />} color="#166534" />
+        <StatTile title="PC Points" value={formatApc(apcSummary?.apcBalance ?? 0)} icon={<Wallet size={20} />} color="#166534" />
         <StatTile title="Invoices" value={`${currentMonthInvoices.length}`} icon={<FileText size={20} />} />
         <StatTile title="Payments" value={`${currentMonthPayments.length}`} icon={<WalletCards size={20} />} />
       </div>
+
+      {currentMonthBonusPc > 0 ? (
+        <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12, border: '1px solid #F4DE91' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ width: 46, height: 46, borderRadius: 16, background: '#FFF7D6', display: 'grid', placeItems: 'center', color: '#0B1F3A' }}>
+              <Coins size={24} />
+            </div>
+            <div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>This Month Bonus Credit</div>
+              <div style={{ color: '#166534', fontSize: 22, fontWeight: 900 }}>+{formatApc(currentMonthBonusPc)} PC</div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>
+                {currentMonthBonusRequests.map((request) => request.bonusLabel).join(', ')}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ background: '#0B1F3A', color: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 12 }}>
         <div style={{ color: '#D4AF37', fontWeight: 900 }}>Total Outstanding</div>

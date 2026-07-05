@@ -24,6 +24,12 @@ export type PartnerLevel = 'Active Partner' | 'Silver Partner' | 'Gold Partner' 
 
 export type RedemptionStatus = 'Pending' | 'Approved' | 'Rejected' | 'Gifted';
 
+export type OverduePcRequestStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export type BonusPcRequestStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export type BonusPcType = 'new_customer' | 'payment' | 'purchase_target' | 'referral';
+
 export type AlertType =
   | 'overdue_payment'
   | 'high_outstanding'
@@ -46,6 +52,10 @@ export interface LoyaltySettings {
   onTimePaymentBonus: number;
   monthlyTargetBonus: number;
   orderFrequencyBonus: number;
+  newCustomerBonus: number;
+  paymentBonus: number;
+  purchaseTargetBonus: number;
+  referralBonus: number;
   partnerLevelThresholds: Record<PartnerLevel, number>;
   rewardBudgetCap: number;
 }
@@ -174,7 +184,7 @@ export interface OfferFormData {
 export interface GiftItem {
   id: string;
   giftItemName: string;
-  // Current simplified gift rule: targetValue is the maximum APC points needed
+  // Current simplified gift rule: targetValue is the maximum PC points needed
   // before this item can be suggested. Legacy fields remain optional for old docs.
   targetType?: GiftItemTargetType;
   targetValue: number;
@@ -431,12 +441,50 @@ export interface CustomerApcSummary {
 export interface LoyaltyLedgerEntry {
   id: string;
   customerId: string;
-  type: 'purchase' | 'on_time_payment' | 'monthly_target' | 'order_frequency' | 'redemption';
+  type: 'purchase' | 'on_time_payment' | 'monthly_target' | 'order_frequency' | 'overdue_payment' | 'bonus' | 'redemption';
   points: number;
   reason: string;
   referenceId: string;
   month: string;
   createdAt: string;
+}
+
+export interface OverduePcRequest {
+  id: string;
+  customerId: string;
+  customerName: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  fullPaymentDate: string;
+  overdueDays: number;
+  invoiceAmount: number;
+  suggestedCoins: number;
+  approvedCoins: number;
+  status: OverduePcRequestStatus;
+  generatedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  notes?: string;
+}
+
+export interface BonusPcRequest {
+  id: string;
+  customerId: string;
+  customerName: string;
+  bonusType: BonusPcType;
+  bonusLabel: string;
+  triggerType: string;
+  referenceId: string;
+  suggestedCoins: number;
+  approvedCoins: number;
+  status: BonusPcRequestStatus;
+  generatedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  customerSeenAt?: string;
+  notes?: string;
 }
 
 export interface RewardItem {

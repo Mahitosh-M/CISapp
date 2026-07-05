@@ -12,12 +12,12 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
   const apcColor = invoiceView.apcStatus === 'Earned' ? '#166534' : invoiceView.apcStatus === 'Expired' ? '#B42318' : '#0B1F3A';
   const apcLabel =
     invoiceView.apcStatus === 'Earned'
-      ? `Earned ${formatApc(invoiceView.earnedApc)} APC`
+      ? `Earned ${formatApc(invoiceView.earnedApc)} PC`
       : invoiceView.apcStatus === 'Expired'
-        ? 'APC expired'
+        ? 'PC expired'
         : invoiceView.expectedApc > 0
-          ? `Expected ${formatApc(invoiceView.expectedApc)} APC`
-          : 'No APC available';
+          ? `Expected ${formatApc(invoiceView.expectedApc)} PC`
+          : 'No PC available';
   const chartData = isPaid
     ? [{ name: 'Paid', value: 100, color: '#166534' }]
     : invoiceView.paidAmount > 0

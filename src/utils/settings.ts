@@ -47,6 +47,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     onTimePaymentBonus: 0,
     monthlyTargetBonus: 0,
     orderFrequencyBonus: 0,
+    newCustomerBonus: 0,
+    paymentBonus: 0,
+    purchaseTargetBonus: 0,
+    referralBonus: 0,
     partnerLevelThresholds: {
       'Active Partner': 0,
       'Silver Partner': 0,
@@ -228,9 +232,10 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
 
   const loyaltySettings = activeSettings.loyaltySettings;
   [
-    ['On-time payment bonus', loyaltySettings.onTimePaymentBonus],
-    ['Monthly target bonus', loyaltySettings.monthlyTargetBonus],
-    ['Order frequency bonus', loyaltySettings.orderFrequencyBonus]
+    ['New customer bonus', loyaltySettings.newCustomerBonus],
+    ['Payment bonus', loyaltySettings.paymentBonus],
+    ['Purchase target bonus', loyaltySettings.purchaseTargetBonus],
+    ['Referral bonus', loyaltySettings.referralBonus]
   ].forEach(([label, value]) => {
     if (!Number.isFinite(Number(value)) || Number(value) < 0) {
       errors.push(`${label} must be a non-negative number.`);

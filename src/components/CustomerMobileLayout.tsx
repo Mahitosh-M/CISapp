@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
-import { Award, Bell, FileText, Home, Tags, WalletCards } from 'lucide-react';
+import { Award, Bell, Coins, FileText, Home, Tags, Wallet, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
+import { markBonusPcRequestSeen } from '../services/firestoreService';
 import { getLatestUnreadOffer, getOfferDateRangeLabel, markOfferAsViewed } from '../utils/offers';
 import { getTierDisplayName } from '../utils/tiers';
 
@@ -20,8 +21,15 @@ const CustomerMobileLayout = () => {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [viewedOfferVersion, setViewedOfferVersion] = useState(0);
+  const [viewedBonusVersion, setViewedBonusVersion] = useState(0);
   const customerHeading = (portalData.customer?.name || portalData.userProfile?.customerName || portalData.userProfile?.email || 'Customer').toUpperCase();
   const customerPartnerLevel = getTierDisplayName(portalData.customer?.tier);
+
+  const latestUnreadBonus = useMemo(() => {
+    return [...portalData.bonusPcRequests]
+      .filter((request) => request.status === 'Approved' && !request.customerSeenAt)
+      .sort((left, right) => (right.reviewedAt || right.generatedAt).localeCompare(left.reviewedAt || left.generatedAt))[0];
+  }, [portalData.bonusPcRequests, viewedBonusVersion]);
 
   const latestUnreadOffer = useMemo(() => {
     return getLatestUnreadOffer(portalData.offers, portalData.userProfile?.uid);
@@ -44,6 +52,14 @@ const CustomerMobileLayout = () => {
     markOfferAsViewed(latestUnreadOffer.id, portalData.userProfile?.uid);
     setViewedOfferVersion((current) => current + 1);
     navigate('/customer/offers');
+  };
+
+  const closeBonus = async () => {
+    if (!latestUnreadBonus) return;
+
+    await markBonusPcRequestSeen(latestUnreadBonus.id);
+    setViewedBonusVersion((current) => current + 1);
+    await portalData.refreshData();
   };
 
   if (portalData.loading) {
@@ -101,7 +117,32 @@ const CustomerMobileLayout = () => {
         })}
       </nav>
 
-      {latestUnreadOffer ? (
+      {latestUnreadBonus ? (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(11,31,58,0.68)', display: 'grid', placeItems: 'center', padding: 18, zIndex: 30 }}>
+          <div style={{ background: '#FFFFFF', borderRadius: 24, padding: 20, maxWidth: 360, width: '100%', color: '#0B1F3A', boxShadow: '0 24px 50px rgba(11,31,58,0.30)', textAlign: 'center' }}>
+            <div style={{ display: 'grid', placeItems: 'center', marginBottom: 12 }}>
+              <div style={{ width: 92, height: 92, borderRadius: '50%', background: '#FFF7D6', display: 'grid', placeItems: 'center', boxShadow: '0 16px 30px rgba(212,175,55,0.32)', position: 'relative' }}>
+                <Wallet size={42} color="#0B1F3A" />
+                <div style={{ position: 'absolute', right: -2, top: -4, width: 36, height: 36, borderRadius: '50%', background: '#D4AF37', display: 'grid', placeItems: 'center', border: '3px solid #FFFFFF' }}>
+                  <Coins size={21} color="#0B1F3A" />
+                </div>
+              </div>
+            </div>
+            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 14, marginBottom: 6 }}>Congratulations</div>
+            <div style={{ fontWeight: 900, fontSize: 24, marginBottom: 8 }}>Partner Coins credited</div>
+            <div style={{ color: '#166534', fontSize: 34, fontWeight: 900, marginBottom: 8 }}>+{latestUnreadBonus.approvedCoins} PC</div>
+            <div style={{ color: '#4B5871', lineHeight: 1.5, fontSize: 14 }}>
+              You received this bonus for: <strong>{latestUnreadBonus.bonusLabel}</strong>.
+            </div>
+            {latestUnreadBonus.notes ? (
+              <div style={{ color: '#67738E', fontSize: 12, marginTop: 8 }}>{latestUnreadBonus.notes}</div>
+            ) : null}
+            <button type="button" onClick={closeBonus} style={{ marginTop: 18, width: '100%', border: 0, borderRadius: 14, background: '#D4AF37', color: '#0B1F3A', padding: 13, fontWeight: 900 }}>
+              View My Dashboard
+            </button>
+          </div>
+        </div>
+      ) : latestUnreadOffer ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(11,31,58,0.62)', display: 'grid', placeItems: 'center', padding: 18, zIndex: 20 }}>
           <div style={{ background: '#FFFFFF', borderRadius: 22, padding: 18, maxWidth: 360, width: '100%', color: '#0B1F3A', boxShadow: '0 24px 50px rgba(11,31,58,0.28)' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, background: '#FFF7D6', color: '#0B1F3A', padding: '5px 10px', fontSize: 12, fontWeight: 900, marginBottom: 10 }}>

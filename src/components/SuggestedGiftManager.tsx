@@ -3,8 +3,8 @@ import type { CSSProperties } from 'react';
 import TierBadge from './TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
-import { createGiftHistoryRecord, deleteGiftHistoryRecord, getGiftHistory, getRewardItems, updateGiftHistoryRecord } from '../services/firestoreService';
-import type { GiftHistory, GiftItem, GiftPeriod, RewardItem } from '../types';
+import { createGiftHistoryRecord, deleteGiftHistoryRecord, getApprovedBonusPcRequests, getApprovedOverduePcRequests, getGiftHistory, getRewardItems, updateGiftHistoryRecord } from '../services/firestoreService';
+import type { BonusPcRequest, GiftHistory, GiftItem, GiftPeriod, OverduePcRequest, RewardItem } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
 import { buildSuggestedGiftRows, calculateGiftDifference } from '../utils/giftUtils';
@@ -18,6 +18,8 @@ const SuggestedGiftManager = () => {
   const { userProfile, canApproveGifts } = useAuth();
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [giftItems, setGiftItems] = useState<GiftItem[]>([]);
+  const [approvedOverduePcRequests, setApprovedOverduePcRequests] = useState<OverduePcRequest[]>([]);
+  const [approvedBonusPcRequests, setApprovedBonusPcRequests] = useState<BonusPcRequest[]>([]);
   const [selectedGiftByCustomer, setSelectedGiftByCustomer] = useState<Record<string, string>>({});
   const [notesByCustomer, setNotesByCustomer] = useState<Record<string, string>>({});
   const [customerSearchText, setCustomerSearchText] = useState('');
@@ -50,9 +52,11 @@ const SuggestedGiftManager = () => {
   const loadGiftData = async () => {
     try {
       setGiftError('');
-      const [historyRows, rewardRows] = await Promise.all([getGiftHistory(), getRewardItems()]);
+      const [historyRows, rewardRows, overduePcRows, bonusPcRows] = await Promise.all([getGiftHistory(), getRewardItems(), getApprovedOverduePcRequests(100), getApprovedBonusPcRequests(100)]);
       setGiftHistory(historyRows);
       setGiftItems(rewardRows.map(mapRewardToGiftItem));
+      setApprovedOverduePcRequests(overduePcRows);
+      setApprovedBonusPcRequests(bonusPcRows);
     } catch (err) {
       setGiftError(err instanceof Error ? err.message : 'Unable to load reward suggestions.');
     }
@@ -63,8 +67,8 @@ const SuggestedGiftManager = () => {
   }, []);
 
   const suggestedRows = useMemo(() => {
-    return buildSuggestedGiftRows(customers, invoices, giftHistory, giftItems, settings, payments);
-  }, [customers, giftHistory, giftItems, invoices, payments, settings]);
+    return buildSuggestedGiftRows(customers, invoices, giftHistory, giftItems, settings, payments, approvedOverduePcRequests, approvedBonusPcRequests);
+  }, [approvedBonusPcRequests, approvedOverduePcRequests, customers, giftHistory, giftItems, invoices, payments, settings]);
 
   const sortedSuggestedRows = useMemo(() => {
     return [...suggestedRows].sort((a, b) => b.giftBudget - a.giftBudget || a.customer.name.localeCompare(b.customer.name));
@@ -307,7 +311,7 @@ const SuggestedGiftManager = () => {
             Eligible: {eligibleCount} | Pending Approval: {blockedCount}
           </div>
           <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>
-            Available APC points are lifetime earned points plus bonuses, reduced only when rewards are redeemed.
+            Available PC points are lifetime earned points plus bonuses, reduced only when rewards are redeemed.
           </div>
         </div>
       </div>
@@ -336,7 +340,7 @@ const SuggestedGiftManager = () => {
               <option value="">Select customer</option>
               {searchedCustomerRows.map((row) => (
                 <option key={row.customer.id} value={row.customer.id}>
-                  {row.customer.name} - {formatMoney(row.giftBudget)} APC
+                  {row.customer.name} - {formatMoney(row.giftBudget)} PC
                 </option>
               ))}
             </select>
@@ -360,7 +364,7 @@ const SuggestedGiftManager = () => {
         <div style={{ ...latestFiveScrollStyle, maxHeight: 520, paddingRight: 6 }}>
           {!selectedCustomerId ? (
             <div style={{ color: '#67738E', border: '1px solid #E8EDF4', borderRadius: 14, padding: 16 }}>
-              Choose a customer from the dropdown to show reward eligibility, available APC points, and approval actions.
+              Choose a customer from the dropdown to show reward eligibility, available PC points, and approval actions.
             </div>
           ) : visibleSuggestedRows.length === 0 ? (
             <div style={{ color: '#67738E' }}>No reward suggestion found for the selected customer.</div>
@@ -382,8 +386,8 @@ const SuggestedGiftManager = () => {
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
                     <div><strong>Profit Considered</strong><div>{formatMoney(row.profitConsidered)}</div></div>
-                    <div><strong>Available APC Points</strong><div>{formatMoney(row.giftBudget)}</div></div>
-                    <div><strong>Redeemed APC Points</strong><div>{formatMoney(row.alreadyGiftedAmount)}</div></div>
+                    <div><strong>Available PC Points</strong><div>{formatMoney(row.giftBudget)}</div></div>
+                    <div><strong>Redeemed PC Points</strong><div>{formatMoney(row.alreadyGiftedAmount)}</div></div>
                     <div><strong>Selected Reward</strong><div>{selectedGiftName || '-'}</div></div>
                     <div><strong>Selected Reward Cost</strong><div>{selectedGiftName ? formatMoney(selectedRewardCost) : '-'}</div></div>
                   </div>
@@ -418,9 +422,9 @@ const SuggestedGiftManager = () => {
                               />
                             ) : null}
                             <div style={{ fontWeight: 900 }}>{giftItem.giftItemName}</div>
-                            <div style={{ marginTop: 5 }}>{formatMoney(giftItem.targetValue)} APC</div>
+                            <div style={{ marginTop: 5 }}>{formatMoney(giftItem.targetValue)} PC</div>
                             <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
-                              {difference === 0 ? 'Exact APC match' : `${formatMoney(difference)} APC below limit`}
+                              {difference === 0 ? 'Exact PC match' : `${formatMoney(difference)} PC below limit`}
                             </div>
                             {giftItem.notes ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{giftItem.notes}</div> : null}
                           </button>
@@ -429,7 +433,7 @@ const SuggestedGiftManager = () => {
                     </div>
                   ) : (
                     <div style={{ color: '#67738E', marginBottom: 14 }}>
-                      {row.pendingApproval ? `Approved reward: ${selectedGiftName || '-'}` : 'No selectable reward option for these available APC points.'}
+                      {row.pendingApproval ? `Approved reward: ${selectedGiftName || '-'}` : 'No selectable reward option for these available PC points.'}
                     </div>
                   )}
 
@@ -480,7 +484,7 @@ const SuggestedGiftManager = () => {
           )}
         </div>
         <div style={{ color: '#67738E', fontSize: 12, marginTop: 12 }}>
-          Available APC points do not expire. Redeemed rewards are deducted from the customer balance.
+          Available PC points do not expire. Redeemed rewards are deducted from the customer balance.
         </div>
       </div>
     </>

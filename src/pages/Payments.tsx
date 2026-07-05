@@ -19,7 +19,6 @@ import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } 
 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
 const LIST_PAGE_SIZE = 50;
-const PAYMENT_FORM_INVOICE_LIMIT = 200;
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -63,8 +62,8 @@ const Payments = () => {
 
       const [customerRows, invoiceRows, paymentRows] = await Promise.all([
         getCustomers(),
-        getInvoices({ limitCount: PAYMENT_FORM_INVOICE_LIMIT }),
-        getPayments({ limitCount: paymentLimit })
+        getInvoices(),
+        getPayments()
       ]);
 
       setCustomers(customerRows);
@@ -79,7 +78,7 @@ const Payments = () => {
 
   useEffect(() => {
     loadData();
-  }, [paymentLimit]);
+  }, []);
 
   const getPaidAmountForInvoice = (invoiceId: string, ignoredPaymentId = '') => {
     return payments
@@ -105,16 +104,23 @@ const Payments = () => {
       .sort((left, right) => {
         if (left.pendingAmount > 0 && right.pendingAmount <= 0) return -1;
         if (left.pendingAmount <= 0 && right.pendingAmount > 0) return 1;
-        return right.date.localeCompare(left.date) || right.invoiceNumber.localeCompare(left.invoiceNumber);
+        return left.date.localeCompare(right.date) || left.invoiceNumber.localeCompare(right.invoiceNumber);
       });
   }, [editingPaymentId, formData.customerId, formData.invoiceId, invoices, payments]);
+
+  const pendingInvoiceOptions = useMemo(
+    () => invoiceOptions.filter((invoice) => invoice.pendingAmount > 0),
+    [invoiceOptions]
+  );
 
   const selectedInvoice = invoices.find((invoice) => invoice.id === formData.invoiceId);
   const selectedInvoicePaid = selectedInvoice ? getPaidAmountForInvoice(selectedInvoice.id, editingPaymentId) : 0;
   const selectedInvoiceOutstanding = selectedInvoice ? Math.max(0, selectedInvoice.totalSales - selectedInvoicePaid) : 0;
   const amountAppliedToInvoicePreview = formData.amount;
   const paymentEffect = amountAppliedToInvoicePreview + formData.cashDiscount;
-  const selectedInvoiceOptions = invoiceOptions.filter((invoice) => selectedInvoiceIds.includes(invoice.id));
+  const selectedInvoiceOptions = selectedInvoiceIds
+    .map((invoiceId) => invoiceOptions.find((invoice) => invoice.id === invoiceId))
+    .filter((invoice): invoice is Invoice & { paidAmount: number; pendingAmount: number } => Boolean(invoice));
   const selectedPendingTotal = selectedInvoiceOptions.reduce((sum, invoice) => sum + invoice.pendingAmount, 0);
   const overpaymentAmount = selectedInvoiceIds.length > 1
     ? Math.max(0, paymentEffect - selectedPendingTotal)
@@ -146,7 +152,42 @@ const Payments = () => {
     });
   }, [formData.amount, formData.cashDiscount, paymentEffect, selectedInvoiceOptions]);
 
-  const paymentRows = useMemo(() => {
+  useEffect(() => {
+    if (editingPaymentId || !formData.customerId) return;
+
+    if (paymentEffect <= 0) {
+      if (selectedInvoiceIds.length > 0) {
+        setSelectedInvoiceIds([]);
+        setFormData((current) => ({ ...current, invoiceId: '', invoiceNumber: '' }));
+      }
+      return;
+    }
+
+    let remainingEffect = paymentEffect;
+    const autoSelectedInvoices: typeof pendingInvoiceOptions = [];
+
+    for (const invoice of pendingInvoiceOptions) {
+      if (remainingEffect <= 0) break;
+      autoSelectedInvoices.push(invoice);
+      remainingEffect -= invoice.pendingAmount;
+    }
+
+    const nextSelectedIds = autoSelectedInvoices.map((invoice) => invoice.id);
+    const firstInvoice = autoSelectedInvoices[0];
+    const currentIdsKey = selectedInvoiceIds.join('|');
+    const nextIdsKey = nextSelectedIds.join('|');
+
+    if (currentIdsKey !== nextIdsKey || formData.invoiceId !== (firstInvoice?.id ?? '')) {
+      setSelectedInvoiceIds(nextSelectedIds);
+      setFormData((current) => ({
+        ...current,
+        invoiceId: firstInvoice?.id ?? '',
+        invoiceNumber: firstInvoice?.invoiceNumber ?? ''
+      }));
+    }
+  }, [editingPaymentId, formData.customerId, formData.invoiceId, paymentEffect, pendingInvoiceOptions, selectedInvoiceIds]);
+
+  const filteredPaymentRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
     return sortNewestFirst(payments.filter((payment) => {
@@ -159,6 +200,8 @@ const Payments = () => {
       return matchesSearch && matchesCustomer && matchesMode;
     }), ['updatedAt', 'createdAt', 'date']);
   }, [customerFilter, modeFilter, payments, searchText]);
+
+  const paymentRows = useMemo(() => filteredPaymentRows.slice(0, paymentLimit), [filteredPaymentRows, paymentLimit]);
 
   const handleFieldChange = (field: keyof PaymentFormData, value: string) => {
     if (field === 'customerId') {
@@ -636,7 +679,7 @@ const Payments = () => {
             </tbody>
           </table>
         </div>
-        {!loading && payments.length >= paymentLimit ? (
+        {!loading && filteredPaymentRows.length > paymentLimit ? (
           <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
             Load More
           </button>

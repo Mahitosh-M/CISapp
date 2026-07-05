@@ -19,6 +19,8 @@ export const getMonthlyStatsId = (customerId: string, month: string) => `${custo
 
 export const formatApc = (value: unknown) => `${Math.max(0, Math.round(numberOrZero(value)))}`;
 
+export const formatPc = formatApc;
+
 export const getPartnerLevelForTier = (tier?: CustomerTier): PartnerLevel => {
   if (tier === 'Tier 1') return 'Platinum Partner';
   if (tier === 'Tier 2') return 'Gold Partner';

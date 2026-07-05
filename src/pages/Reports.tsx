@@ -303,7 +303,7 @@ const Reports = () => {
     Sales: formatMoney(score.totalSales),
     Profit: formatMoney(score.totalProfit),
     Outstanding: formatMoney(score.outstanding),
-    'APC Points': formatMoney(score.giftBudget),
+    'PC Points': formatMoney(score.giftBudget),
     Overdue: score.overdueStatus
   }));
 
@@ -315,7 +315,7 @@ const Reports = () => {
       Sales: formatMoney(tierScores.reduce((sum, score) => sum + score.totalSales, 0)),
       Profit: formatMoney(tierScores.reduce((sum, score) => sum + score.totalProfit, 0)),
       Outstanding: formatMoney(tierScores.reduce((sum, score) => sum + score.outstanding, 0)),
-      'APC Points': formatMoney(tierScores.reduce((sum, score) => sum + score.giftBudget, 0))
+      'PC Points': formatMoney(tierScores.reduce((sum, score) => sum + score.giftBudget, 0))
     };
   });
 
@@ -328,7 +328,7 @@ const Reports = () => {
     Profit: formatMoney(gift.profitConsidered),
     Percentage: `${gift.giftPercentage}%`,
     Status: gift.status,
-    'Suggested APC Points': formatMoney(gift.suggestedGiftBudget),
+    'Suggested PC Points': formatMoney(gift.suggestedGiftBudget),
     'Gift Amount': formatMoney(gift.actualGiftAmount),
     'Gifted By': gift.giftedBy || gift.approvedBy,
     Notes: gift.notes || '-'
@@ -349,9 +349,9 @@ const Reports = () => {
     profit: ['Invoice', 'Date', 'Customer', 'Sales', 'Cost', 'Transport', 'Profit'],
     payments: ['Date', 'Customer', 'Invoice', 'Amount', 'Cash Discount', 'Mode', 'Notes'],
     outstanding: ['Customer', 'Partner Level', 'Area', 'Previous Outstanding', 'New Sales', 'New Payments', 'Invoice Outstanding', 'Total Outstanding', 'Status'],
-    ranking: ['Rank', 'Customer', 'Partner Level', 'Score', 'Sales', 'Profit', 'Outstanding', 'APC Points', 'Overdue'],
-    tier: ['Partner Level', 'Customers', 'Sales', 'Profit', 'Outstanding', 'APC Points'],
-    gifts: ['Date', 'Customer', 'Partner Level', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested APC Points', 'Gift Amount', 'Gifted By', 'Notes']
+    ranking: ['Rank', 'Customer', 'Partner Level', 'Score', 'Sales', 'Profit', 'Outstanding', 'PC Points', 'Overdue'],
+    tier: ['Partner Level', 'Customers', 'Sales', 'Profit', 'Outstanding', 'PC Points'],
+    gifts: ['Date', 'Customer', 'Partner Level', 'Period', 'Profit', 'Percentage', 'Status', 'Suggested PC Points', 'Gift Amount', 'Gifted By', 'Notes']
   };
 
   const activeRows = sortNewestFirst(rowsByReport[reportType], ['SortDate', 'Date', 'Due', 'Period']);

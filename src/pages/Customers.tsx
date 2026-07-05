@@ -516,8 +516,8 @@ const Customers = () => {
                         <div><strong>Invoice Outstanding</strong><div>{formatMoney(outstanding?.newOutstanding ?? 0)}</div></div>
                         <div><strong>Total Outstanding</strong><div>{formatMoney(outstanding?.outstanding ?? 0)}</div></div>
                         <div><strong>Overdue</strong><div>{formatMoney(outstanding?.overdueAmount ?? 0)} | {outstanding?.overdueDays ?? 0} day(s)</div></div>
-                        <div><strong>APC Points</strong><div>{formatMoney(giftBudget)}</div></div>
-                        <div><strong>APC Status</strong><div>{giftBudget > 0 ? 'APC eligible' : 'No APC points yet'}</div></div>
+                        <div><strong>PC Points</strong><div>{formatMoney(giftBudget)}</div></div>
+                        <div><strong>PC Status</strong><div>{giftBudget > 0 ? 'PC eligible' : 'No PC points yet'}</div></div>
                         <div><strong>Payment Terms</strong><div>{customer.paymentTerms || '-'}</div></div>
                         <div><strong>Notes</strong><div>{customer.notes || '-'}</div></div>
                       </div>

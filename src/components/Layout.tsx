@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
   { to: '/intelligence', label: 'Intelligence' },
   { to: '/analytics', label: 'Analytics' },
   { to: '/loyalty', label: 'Loyalty' },
+  { to: '/overdue-pc-requests', label: 'Overdue PC', adminOnly: true },
   { to: '/reports', label: 'Reports', staffPermission: 'canViewReports' },
   { to: '/admin', label: 'Admin', adminOnly: true },
   { to: '/settings', label: 'Settings', adminOnly: true }
