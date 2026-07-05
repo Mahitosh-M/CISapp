@@ -13,6 +13,7 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import Loyalty from './pages/Loyalty';
+import OverduePcRequests from './pages/OverduePcRequests';
 import NotFound from './pages/NotFound';
 import CustomerDashboard from './pages/customer/CustomerDashboard';
 import CustomerInvoices from './pages/customer/CustomerInvoices';
@@ -56,6 +57,7 @@ const App = () => {
         <Route path="intelligence" element={<Intelligence />} />
         <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Analytics /></ProtectedRoute>} />
         <Route path="loyalty" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Loyalty /></ProtectedRoute>} />
+        <Route path="overdue-pc-requests" element={<ProtectedRoute allowedRoles={['Admin']}><OverduePcRequests /></ProtectedRoute>} />
         <Route path="reports" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Reports /></ProtectedRoute>} />
         <Route path="admin" element={<ProtectedRoute allowedRoles={['Admin']}><Admin /></ProtectedRoute>} />
         <Route path="settings" element={<ProtectedRoute allowedRoles={['Admin']}><Settings /></ProtectedRoute>} />

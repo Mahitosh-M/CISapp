@@ -1,4 +1,4 @@
-import type { AppSettings, Customer, GiftHistory, GiftItem, GiftPeriod, Invoice, Payment } from '../types';
+import type { AppSettings, BonusPcRequest, Customer, GiftHistory, GiftItem, GiftPeriod, Invoice, OverduePcRequest, Payment } from '../types';
 import { calculateInvoiceApcInfo } from './customerPortal';
 import { getGiftPercentageForTier } from './settings';
 import { getTierTargetSettings } from './settings';
@@ -37,7 +37,7 @@ export const doPeriodsOverlap = (startA: string, endA: string, startB: string, e
 };
 
 export const calculateCustomerGiftBudget = (profitConsidered: number, customer: Customer, settings: AppSettings) => {
-  // APC points are based on profit percentage from Admin Settings, not sales.
+  // PC points are based on profit percentage from Admin Settings, not sales.
   return Math.round(Math.max(0, profitConsidered) * (getGiftPercentageForTier(customer.tier, settings) / 100));
 };
 
@@ -78,7 +78,9 @@ export const calculateCustomerAvailableApc = (
   customerInvoices: Invoice[],
   customerPayments: Payment[],
   giftHistory: GiftHistory[],
-  settings: AppSettings
+  settings: AppSettings,
+  approvedOverduePcRequests: OverduePcRequest[] = [],
+  approvedBonusPcRequests: BonusPcRequest[] = []
 ) => {
   const profitConsidered = customerInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalProfit), 0);
   const baseApcPoints = customerInvoices.reduce(
@@ -89,14 +91,22 @@ export const calculateCustomerAvailableApc = (
   const redeemedApcPoints = giftHistory
     .filter((gift) => gift.customerId === customer.id && gift.status === 'Given')
     .reduce((sum, gift) => sum + numberOrZero(gift.giftAmount || gift.actualGiftAmount), 0);
+  const overduePcPoints = approvedOverduePcRequests
+    .filter((request) => request.customerId === customer.id && request.status === 'Approved')
+    .reduce((sum, request) => sum + numberOrZero(request.approvedCoins), 0);
+  const approvedBonusPcPoints = approvedBonusPcRequests
+    .filter((request) => request.customerId === customer.id && request.status === 'Approved')
+    .reduce((sum, request) => sum + numberOrZero(request.approvedCoins), 0);
 
   return {
     salesAmount: customerInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0),
     profitConsidered,
     baseApcPoints,
     bonusApcPoints,
+    overduePcPoints,
+    approvedBonusPcPoints,
     redeemedApcPoints,
-    availableApcPoints: Math.max(0, Math.round(baseApcPoints + bonusApcPoints - redeemedApcPoints))
+    availableApcPoints: Math.max(0, Math.round(baseApcPoints + bonusApcPoints + overduePcPoints + approvedBonusPcPoints - redeemedApcPoints))
   };
 };
 
@@ -105,8 +115,8 @@ export const calculateGiftDifference = (availableApcPoints: number, giftItem: Gi
 };
 
 export const getNearestGiftOptions = (giftItems: GiftItem[], customerGiftBudget: number) => {
-  // availableApcPoints comes from the APC calculation minus rewards already redeemed.
-  // A reward targetValue means "suggest this reward only when available APC reaches this value".
+  // availableApcPoints comes from the PC calculation minus rewards already redeemed.
+  // A reward targetValue means "suggest this reward only when available PC reaches this value".
   const activeWithinBudget = giftItems
     .filter((giftItem) => giftItem.isActive && giftItem.targetValue <= customerGiftBudget)
     .sort((a, b) => b.targetValue - a.targetValue || a.giftItemName.localeCompare(b.giftItemName));
@@ -161,12 +171,14 @@ export const buildGiftEligibilityRows = (
   invoices: Invoice[],
   giftHistory: GiftHistory[],
   settings: AppSettings,
-  payments: Payment[] = []
+  payments: Payment[] = [],
+  approvedOverduePcRequests: OverduePcRequest[] = [],
+  approvedBonusPcRequests: BonusPcRequest[] = []
 ) => {
   return customers.map((customer) => {
     const customerInvoices = invoices.filter((invoice) => invoice.customerId === customer.id);
     const customerPayments = payments.filter((payment) => payment.customerId === customer.id);
-    const apcTotals = calculateCustomerAvailableApc(customer, customerInvoices, customerPayments, giftHistory, settings);
+    const apcTotals = calculateCustomerAvailableApc(customer, customerInvoices, customerPayments, giftHistory, settings, approvedOverduePcRequests, approvedBonusPcRequests);
     const giftPercentage = getGiftPercentageForTier(customer.tier, settings);
     const pendingApproval = giftHistory.find((gift) => gift.customerId === customer.id && gift.status === 'Approved');
 
@@ -192,9 +204,11 @@ export const buildSuggestedGiftRows = (
   giftHistory: GiftHistory[],
   giftItems: GiftItem[],
   settings: AppSettings,
-  payments: Payment[] = []
+  payments: Payment[] = [],
+  approvedOverduePcRequests: OverduePcRequest[] = [],
+  approvedBonusPcRequests: BonusPcRequest[] = []
 ) => {
-  const giftBudgetRows = buildGiftEligibilityRows(customers, invoices, giftHistory, settings, payments);
+  const giftBudgetRows = buildGiftEligibilityRows(customers, invoices, giftHistory, settings, payments, approvedOverduePcRequests, approvedBonusPcRequests);
 
   return giftBudgetRows.map((giftBudgetRow) => {
     const pendingApproval = giftBudgetRow.pendingApproval;
@@ -208,8 +222,8 @@ export const buildSuggestedGiftRows = (
     const eligibilityReason = pendingApproval?.status === 'Approved'
         ? 'Reward already approved for this customer.'
         : matchedGiftItems.length > 0
-          ? 'Reward cost is within the customer available APC points.'
-          : 'No active reward cost is within the customer available APC points.';
+          ? 'Reward cost is within the customer available PC points.'
+          : 'No active reward cost is within the customer available PC points.';
 
     return {
       ...giftBudgetRow,

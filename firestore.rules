@@ -119,7 +119,7 @@ service cloud.firestore {
           'createdAt'
         ])
         && data.customerId is string
-        && data.type in ['purchase', 'on_time_payment', 'monthly_target', 'order_frequency', 'redemption']
+        && data.type in ['purchase', 'on_time_payment', 'monthly_target', 'order_frequency', 'overdue_payment', 'bonus', 'redemption']
         && data.points is number
         && data.reason is string
         && data.reason.size() <= 160
@@ -210,6 +210,92 @@ service cloud.firestore {
         && data.requestedAt is string
         && validOptionalString(data, 'reviewedAt', 40)
         && validOptionalString(data, 'reviewedBy', 160)
+        && validOptionalString(data, 'notes', 500);
+    }
+
+    function validOverduePcRequest(data) {
+      return data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'invoiceId',
+          'invoiceNumber',
+          'invoiceDate',
+          'dueDate',
+          'fullPaymentDate',
+          'overdueDays',
+          'invoiceAmount',
+          'suggestedCoins',
+          'approvedCoins',
+          'status',
+          'generatedAt',
+          'reviewedAt',
+          'reviewedBy',
+          'notes'
+        ])
+        && data.customerId is string
+        && data.customerName is string
+        && data.customerName.size() <= 140
+        && data.invoiceId is string
+        && data.invoiceNumber is string
+        && data.invoiceNumber.size() <= 80
+        && data.invoiceDate is string
+        && data.dueDate is string
+        && data.fullPaymentDate is string
+        && data.overdueDays is number
+        && data.overdueDays >= 0
+        && data.invoiceAmount is number
+        && data.invoiceAmount >= 0
+        && data.suggestedCoins is number
+        && data.suggestedCoins >= 0
+        && data.approvedCoins is number
+        && data.approvedCoins >= 0
+        && data.status in ['Pending', 'Approved', 'Rejected']
+        && data.generatedAt is string
+        && validOptionalString(data, 'reviewedAt', 40)
+        && validOptionalString(data, 'reviewedBy', 160)
+        && validOptionalString(data, 'notes', 500);
+    }
+
+    function isBonusPcType(type) {
+      return type in ['new_customer', 'payment', 'purchase_target', 'referral'];
+    }
+
+    function validBonusPcRequest(data) {
+      return data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'bonusType',
+          'bonusLabel',
+          'triggerType',
+          'referenceId',
+          'suggestedCoins',
+          'approvedCoins',
+          'status',
+          'generatedAt',
+          'reviewedAt',
+          'reviewedBy',
+          'customerSeenAt',
+          'notes'
+        ])
+        && data.customerId is string
+        && data.customerName is string
+        && data.customerName.size() <= 140
+        && isBonusPcType(data.bonusType)
+        && data.bonusLabel is string
+        && data.bonusLabel.size() <= 80
+        && data.triggerType is string
+        && data.triggerType.size() <= 80
+        && data.referenceId is string
+        && data.referenceId.size() <= 160
+        && data.suggestedCoins is number
+        && data.suggestedCoins >= 0
+        && data.approvedCoins is number
+        && data.approvedCoins >= 0
+        && data.status in ['Pending', 'Approved', 'Rejected']
+        && data.generatedAt is string
+        && validOptionalString(data, 'reviewedAt', 40)
+        && validOptionalString(data, 'reviewedBy', 160)
+        && validOptionalString(data, 'customerSeenAt', 40)
         && validOptionalString(data, 'notes', 500);
     }
 
@@ -346,6 +432,25 @@ service cloud.firestore {
         && request.resource.data.rewardName == resource.data.rewardName
         && request.resource.data.points == resource.data.points;
       allow update: if isAdmin() && validRedemptionRequest(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /overduePcRequests/{requestId} {
+      allow read: if isTeam() || (isCustomer() && ownsCustomerRecord(resource.data) && resource.data.status == 'Approved');
+      allow create, update: if isAdmin() && validOverduePcRequest(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /bonusPcRequests/{requestId} {
+      allow read: if isTeam() || (isCustomer() && ownsCustomerRecord(resource.data) && resource.data.status == 'Approved');
+      allow create, update: if isAdmin() && validBonusPcRequest(request.resource.data);
+      allow update: if isCustomer()
+        && ownsCustomerRecord(resource.data)
+        && ownsCustomerRecord(request.resource.data)
+        && resource.data.status == 'Approved'
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['customerSeenAt'])
+        && request.resource.data.customerSeenAt is string
+        && request.resource.data.customerSeenAt.size() <= 40;
       allow delete: if isAdmin();
     }
 

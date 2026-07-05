@@ -510,7 +510,7 @@ const Admin = () => {
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Gift Approvals</div>
         {renderTable(
-          ['Customer', 'Partner Level', 'Status', 'Period', 'APC Points', 'Item', 'Action'],
+          ['Customer', 'Partner Level', 'Status', 'Period', 'PC Points', 'Item', 'Action'],
           <>
             {sortedPendingGifts.length === 0 ? (
               <tr><td style={cellStyle} colSpan={7}>No pending gift approvals.</td></tr>

@@ -22,6 +22,9 @@ import type {
   CustomerFormData,
   CustomerTier,
   AppSettings,
+  BonusPcRequest,
+  BonusPcRequestStatus,
+  BonusPcType,
   GiftItem,
   GiftItemFormData,
   GiftHistory,
@@ -34,6 +37,8 @@ import type {
   PaymentFormData,
   MonthlyCustomerStats,
   LoyaltyLedgerEntry,
+  OverduePcRequest,
+  OverduePcRequestStatus,
   RewardFormData,
   RewardItem,
   RedemptionRequest,
@@ -49,6 +54,7 @@ import {
   validateAppSettings
 } from '../utils/settings';
 import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
+import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate } from '../utils/customerPortal';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
 
 const CUSTOMERS = 'customers';
@@ -65,6 +71,8 @@ const MONTHLY_CUSTOMER_STATS = 'monthlyCustomerStats';
 const LOYALTY_LEDGER = 'loyaltyLedger';
 const REWARD_ITEMS = 'rewardItems';
 const REDEMPTION_REQUESTS = 'redemptionRequests';
+const OVERDUE_PC_REQUESTS = 'overduePcRequests';
+const BONUS_PC_REQUESTS = 'bonusPcRequests';
 const DEFAULT_LIST_LIMIT = 50;
 const ACTIVE_OFFER_LIMIT = 20;
 const ACTIVE_REWARD_LIMIT = 50;
@@ -251,7 +259,7 @@ const mapGiftItemDoc = (id: string, data: Record<string, unknown>): GiftItem => 
 
 const sanitizeGiftItemPayload = (giftItem: GiftItemFormData): GiftItemFormData => ({
   giftItemName: giftItem.giftItemName.trim(),
-  // Simplified gift item settings now use only targetValue as the APC points threshold.
+  // Simplified gift item settings now use only targetValue as the PC points threshold.
   // Legacy targetType/minBudget/maxBudget/eligibleTier fields may still exist on old docs,
   // but new saves intentionally leave those untouched/unused.
   targetValue: Math.max(0, numberOrZero(giftItem.targetValue)),
@@ -382,6 +390,72 @@ const mapRedemptionRequestDoc = (id: string, data: Record<string, unknown>): Red
   reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
   notes: data.notes ? String(data.notes) : undefined
 });
+
+const mapOverduePcRequestDoc = (id: string, data: Record<string, unknown>): OverduePcRequest => ({
+  id,
+  customerId: String(data.customerId || ''),
+  customerName: String(data.customerName || ''),
+  invoiceId: String(data.invoiceId || ''),
+  invoiceNumber: String(data.invoiceNumber || ''),
+  invoiceDate: String(data.invoiceDate || ''),
+  dueDate: String(data.dueDate || ''),
+  fullPaymentDate: String(data.fullPaymentDate || ''),
+  overdueDays: numberOrZero(data.overdueDays),
+  invoiceAmount: numberOrZero(data.invoiceAmount),
+  suggestedCoins: numberOrZero(data.suggestedCoins),
+  approvedCoins: numberOrZero(data.approvedCoins),
+  status: (data.status as OverduePcRequestStatus) || 'Pending',
+  generatedAt: String(data.generatedAt || ''),
+  reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
+  reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
+  notes: data.notes ? String(data.notes) : undefined
+});
+
+export const BONUS_PC_LABELS: Record<BonusPcType, string> = {
+  new_customer: 'New customer bonus',
+  payment: 'Payment bonus',
+  purchase_target: 'Purchase target bonus',
+  referral: 'Referral bonus'
+};
+
+const isBonusPcType = (value: unknown): value is BonusPcType => (
+  value === 'new_customer' || value === 'payment' || value === 'purchase_target' || value === 'referral'
+);
+
+const mapBonusPcRequestDoc = (id: string, data: Record<string, unknown>): BonusPcRequest => {
+  const bonusType = isBonusPcType(data.bonusType) ? data.bonusType : 'new_customer';
+
+  return {
+    id,
+    customerId: String(data.customerId || ''),
+    customerName: String(data.customerName || ''),
+    bonusType,
+    bonusLabel: String(data.bonusLabel || BONUS_PC_LABELS[bonusType]),
+    triggerType: String(data.triggerType || ''),
+    referenceId: String(data.referenceId || ''),
+    suggestedCoins: numberOrZero(data.suggestedCoins),
+    approvedCoins: numberOrZero(data.approvedCoins),
+    status: (data.status as BonusPcRequestStatus) || 'Pending',
+    generatedAt: String(data.generatedAt || ''),
+    reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
+    reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
+    customerSeenAt: data.customerSeenAt ? String(data.customerSeenAt) : undefined,
+    notes: data.notes ? String(data.notes) : undefined
+  };
+};
+
+const daysBetweenDateStrings = (fromDate: string, toDate: string) => {
+  const fromTime = new Date(`${fromDate}T00:00:00`).getTime();
+  const toTime = new Date(`${toDate}T00:00:00`).getTime();
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime)) return 0;
+  return Math.max(0, Math.floor((toTime - fromTime) / (24 * 60 * 60 * 1000)));
+};
+
+const getPastDateString = (daysBack: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() - daysBack);
+  return date.toISOString().slice(0, 10);
+};
 
 const sanitizeRewardPayload = (reward: RewardFormData): RewardFormData => ({
   name: reward.name.trim(),
@@ -1139,7 +1213,7 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
           customerId: stats.customerId,
           type: 'purchase',
           points: stats.pointsEarned,
-          reason: 'Monthly APC points',
+          reason: 'Monthly PC points',
           referenceId: stats.id,
           month,
           createdAt: timestamp
@@ -1151,6 +1225,259 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
   );
 
   return statsRows;
+};
+
+export const getOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
+  const requestsQuery = query(collection(db, OVERDUE_PC_REQUESTS), orderBy('generatedAt', 'desc'), firestoreLimit(limitCount));
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const getApprovedOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
+  const requestsQuery = query(collection(db, OVERDUE_PC_REQUESTS), where('status', '==', 'Approved'), firestoreLimit(limitCount));
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const getApprovedOverduePcRequestsForCustomer = async (customerId: string, limitCount = DEFAULT_LIST_LIMIT) => {
+  if (!customerId) return [];
+  const requestsQuery = query(
+    collection(db, OVERDUE_PC_REQUESTS),
+    where('customerId', '==', customerId),
+    where('status', '==', 'Approved'),
+    firestoreLimit(limitCount)
+  );
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const generateOverduePcRequests = async (auditUser?: AuditUser, options?: DateRangeQueryOptions) => {
+  const fromDate = options?.fromDate || getPastDateString(180);
+  const toDate = options?.toDate || getTodayDateString();
+  const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
+    getCustomers(),
+    getInvoices({ fromDate, toDate }),
+    getPayments({ fromDate, toDate }),
+    getAppSettings()
+  ]);
+  const customersById = new Map(customerRows.map((customer) => [customer.id, customer]));
+  const timestamp = nowIso();
+  let createdCount = 0;
+
+  await Promise.all(
+    invoiceRows.map(async (invoice) => {
+      const customer = customersById.get(invoice.customerId);
+      if (!customer) return;
+
+      const fullPaymentDate = getInvoiceFullPaymentDate(invoice, paymentRows);
+      const pcInfo = calculateInvoiceApcInfo(invoice, paymentRows, customer.tier, appSettings);
+
+      if (!fullPaymentDate || !pcInfo.apcDeadline || fullPaymentDate <= pcInfo.apcDeadline || pcInfo.expectedApc <= 0) {
+        return;
+      }
+
+      const requestRef = doc(db, OVERDUE_PC_REQUESTS, invoice.id);
+      const existingSnapshot = await getDoc(requestRef);
+      if (existingSnapshot.exists()) return;
+
+      await setDoc(requestRef, {
+        customerId: customer.id,
+        customerName: customer.name,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceDate: invoice.date,
+        dueDate: pcInfo.apcDeadline,
+        fullPaymentDate,
+        overdueDays: daysBetweenDateStrings(pcInfo.apcDeadline, fullPaymentDate),
+        invoiceAmount: invoice.totalSales || invoice.salesAmount,
+        suggestedCoins: Math.max(0, Math.round(pcInfo.expectedApc)),
+        approvedCoins: Math.max(0, Math.round(pcInfo.expectedApc)),
+        status: 'Pending',
+        generatedAt: timestamp,
+        reviewedAt: '',
+        reviewedBy: '',
+        notes: auditUser?.userEmail ? `Generated by ${auditUser.userEmail}` : 'Generated by Admin'
+      });
+      createdCount += 1;
+    })
+  );
+
+  return { createdCount };
+};
+
+export const reviewOverduePcRequest = async (
+  requestId: string,
+  status: 'Approved' | 'Rejected',
+  approvedCoins: number,
+  auditUser?: AuditUser,
+  notes = ''
+) => {
+  const requestRef = doc(db, OVERDUE_PC_REQUESTS, requestId);
+  const timestamp = nowIso();
+
+  await runTransaction(db, async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
+
+    if (!requestSnapshot.exists()) {
+      throw new Error('Overdue PC request no longer exists.');
+    }
+
+    const pcRequest = mapOverduePcRequestDoc(requestSnapshot.id, requestSnapshot.data());
+
+    if (pcRequest.status !== 'Pending') {
+      throw new Error('Only pending overdue PC requests can be reviewed.');
+    }
+
+    const cleanCoins = Math.max(0, Math.round(numberOrZero(approvedCoins)));
+
+    transaction.update(requestRef, {
+      status,
+      approvedCoins: status === 'Approved' ? cleanCoins : 0,
+      reviewedAt: timestamp,
+      reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
+      notes
+    });
+
+    if (status === 'Approved' && cleanCoins > 0) {
+      transaction.set(doc(db, LOYALTY_LEDGER, `${pcRequest.customerId}_${requestId}_overdue_pc`), {
+        customerId: pcRequest.customerId,
+        type: 'overdue_payment',
+        points: cleanCoins,
+        reason: `Admin approved overdue invoice PC: ${pcRequest.invoiceNumber}`,
+        referenceId: requestId,
+        month: (pcRequest.fullPaymentDate || getTodayDateString()).slice(0, 7),
+        createdAt: timestamp
+      });
+    }
+  });
+};
+
+export const getBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
+  const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), orderBy('generatedAt', 'desc'), firestoreLimit(limitCount));
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const getApprovedBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
+  const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), where('status', '==', 'Approved'), firestoreLimit(limitCount));
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const getApprovedBonusPcRequestsForCustomer = async (customerId: string, limitCount = DEFAULT_LIST_LIMIT) => {
+  if (!customerId) return [];
+  const requestsQuery = query(
+    collection(db, BONUS_PC_REQUESTS),
+    where('customerId', '==', customerId),
+    where('status', '==', 'Approved'),
+    firestoreLimit(limitCount)
+  );
+  const snapshot = await getDocs(requestsQuery);
+  return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+};
+
+export const generateBonusPcRequests = async (auditUser?: AuditUser) => {
+  const [customerRows, invoiceRows, appSettings] = await Promise.all([
+    getCustomers(),
+    getInvoices(),
+    getAppSettings()
+  ]);
+  const amount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.newCustomerBonus)));
+  const timestamp = nowIso();
+  let createdCount = 0;
+
+  if (amount <= 0) {
+    return { createdCount };
+  }
+
+  await Promise.all(
+    customerRows.map(async (customer) => {
+      const customerInvoices = invoiceRows
+        .filter((invoice) => invoice.customerId === customer.id)
+        .sort((left, right) => left.date.localeCompare(right.date) || left.createdAt.localeCompare(right.createdAt));
+      const firstInvoice = customerInvoices[0];
+
+      if (!firstInvoice) return;
+
+      const requestRef = doc(db, BONUS_PC_REQUESTS, `${customer.id}_new_customer`);
+      const existingSnapshot = await getDoc(requestRef);
+      if (existingSnapshot.exists()) return;
+
+      await setDoc(requestRef, {
+        customerId: customer.id,
+        customerName: customer.name,
+        bonusType: 'new_customer',
+        bonusLabel: BONUS_PC_LABELS.new_customer,
+        triggerType: 'first_invoice',
+        referenceId: firstInvoice.id,
+        suggestedCoins: amount,
+        approvedCoins: amount,
+        status: 'Pending',
+        generatedAt: timestamp,
+        reviewedAt: '',
+        reviewedBy: '',
+        customerSeenAt: '',
+        notes: `First invoice ${firstInvoice.invoiceNumber || firstInvoice.id}`
+      });
+      createdCount += 1;
+    })
+  );
+
+  return { createdCount };
+};
+
+export const reviewBonusPcRequest = async (
+  requestId: string,
+  status: 'Approved' | 'Rejected',
+  approvedCoins: number,
+  auditUser?: AuditUser,
+  notes = ''
+) => {
+  const requestRef = doc(db, BONUS_PC_REQUESTS, requestId);
+  const timestamp = nowIso();
+
+  await runTransaction(db, async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
+
+    if (!requestSnapshot.exists()) {
+      throw new Error('Bonus PC request no longer exists.');
+    }
+
+    const bonusRequest = mapBonusPcRequestDoc(requestSnapshot.id, requestSnapshot.data());
+
+    if (bonusRequest.status !== 'Pending') {
+      throw new Error('Only pending bonus PC requests can be reviewed.');
+    }
+
+    const cleanCoins = Math.max(0, Math.round(numberOrZero(approvedCoins)));
+
+    transaction.update(requestRef, {
+      status,
+      approvedCoins: status === 'Approved' ? cleanCoins : 0,
+      reviewedAt: timestamp,
+      reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
+      notes
+    });
+
+    if (status === 'Approved' && cleanCoins > 0) {
+      transaction.set(doc(db, LOYALTY_LEDGER, `${bonusRequest.customerId}_${requestId}_bonus_pc`), {
+        customerId: bonusRequest.customerId,
+        type: 'bonus',
+        points: cleanCoins,
+        reason: `${bonusRequest.bonusLabel}: ${bonusRequest.notes || 'Admin approved bonus'}`,
+        referenceId: requestId,
+        month: getCurrentMonthKey(),
+        createdAt: timestamp
+      });
+    }
+  });
+};
+
+export const markBonusPcRequestSeen = async (requestId: string) => {
+  if (!requestId) return;
+  await updateDoc(doc(db, BONUS_PC_REQUESTS, requestId), {
+    customerSeenAt: nowIso()
+  });
 };
 
 export const getRewardItems = async () => {

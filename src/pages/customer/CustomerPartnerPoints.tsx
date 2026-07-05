@@ -83,12 +83,12 @@ const CustomerPartnerPoints = () => {
                 <div style={{ fontWeight: 900 }}>{apcSummary.currentLevel}</div>
               </div>
               <div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>APC Balance</div>
+                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>PC Balance</div>
                 <div style={{ color: '#166534', fontWeight: 900 }}>{formatApc(apcSummary.apcBalance)}</div>
               </div>
               <div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>This Month Earned APC</div>
-                <div style={{ fontWeight: 900 }}>You earned {formatApc(apcSummary.monthlyApcEarned)} APC</div>
+                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>This Month Earned PC</div>
+                <div style={{ fontWeight: 900 }}>You earned {formatApc(apcSummary.monthlyApcEarned)} PC</div>
               </div>
               <div>
                 <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Reward Status</div>
@@ -110,7 +110,7 @@ const CustomerPartnerPoints = () => {
             </div>
 
             <div style={{ color: apcSummary.rewardAvailable ? '#166534' : '#B42318', fontSize: 12, fontWeight: 900 }}>
-              {apcSummary.rewardAvailable ? 'Reward available' : `You need ${formatApc(apcSummary.pointsNeededForNextReward)} more APC to unlock your next reward.`}
+              {apcSummary.rewardAvailable ? 'Reward available' : `You need ${formatApc(apcSummary.pointsNeededForNextReward)} more PC to unlock your next reward.`}
             </div>
           </>
         ) : (
@@ -147,7 +147,7 @@ const CustomerPartnerPoints = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                     <div>
                       <div style={{ fontWeight: 900 }}>{reward.name}</div>
-                      <div style={{ color: '#67738E', fontSize: 12 }}>{formatApc(reward.requiredPoints)} APC | {reward.levelRequired}</div>
+                      <div style={{ color: '#67738E', fontSize: 12 }}>{formatApc(reward.requiredPoints)} PC | {reward.levelRequired}</div>
                       {reward.description ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{reward.description}</div> : null}
                     </div>
                     <button
