@@ -440,11 +440,6 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    match /alerts/{alertId} {
-      allow read, create, update: if isTeam();
-      allow delete: if isAdmin();
-    }
-
     match /offers/{offerId} {
       allow read: if isTeam() || (isCustomer() && resource.data.isActive == true);
       allow create, update: if isAdmin() && validOffer(request.resource.data);

@@ -26,7 +26,7 @@ import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
-import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
+import { buildOverdueInvoiceRisks } from '../utils/overdueUtils';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#7C3AED', '#9AA6B2'];
@@ -67,11 +67,11 @@ const Dashboard = () => {
   }, [customers, payments, periodInvoiceIds, periodInvoices, periodPayments]);
 
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
-  const overdueAlerts = useMemo(
-    () => sortNewestFirst(buildOverdueInvoiceAlerts(customers, invoices, payments, settings), ['effectiveDueDate', 'dueDate', 'invoiceDate']),
+  const overdueRisks = useMemo(
+    () => sortNewestFirst(buildOverdueInvoiceRisks(customers, invoices, payments, settings), ['effectiveDueDate', 'dueDate', 'invoiceDate']),
     [customers, invoices, payments, settings]
   );
-  const overdueAmount = overdueAlerts.reduce((sum, alert) => sum + alert.overdueAmount, 0);
+  const overdueAmount = overdueRisks.reduce((sum, row) => sum + row.overdueAmount, 0);
   const topCustomers = customerScores;
   const salesTrend = useMemo(() => {
     const dailySales = new Map<string, { date: string; sales: number; profit: number }>();
@@ -276,8 +276,7 @@ const Dashboard = () => {
         <StatCard title="Collected" value={formatMoney(periodTotals.collected)} subtitle="Payments against period invoices" />
         <StatCard title="Outstanding" value={formatMoney(periodTotals.outstanding)} subtitle="Previous + period unpaid invoices" color="#D32F2F" />
         <StatCard title="Customers" value={`${customers.length}`} subtitle="Firestore customer records" />
-        <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Rolling 2-month intelligence" />
-        <StatCard title="Overdue Alerts" value={`${overdueAlerts.length}`} subtitle={formatMoney(overdueAmount)} color="#EB5757" />
+        <StatCard title="Overdue Invoices" value={`${overdueRisks.length}`} subtitle={formatMoney(overdueAmount)} color="#EB5757" />
       </div>
 
       <div style={panelGridStyle}>
@@ -323,21 +322,21 @@ const Dashboard = () => {
 
       <div style={panelGridStyle}>
         <div style={panelStyle}>
-          <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 6 }}>Overdue Invoice Alerts</div>
+          <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 6 }}>Overdue Invoices</div>
           <div style={{ color: '#BFC8D9', marginBottom: 12 }}>Dynamic credit days and buffer settings are applied here.</div>
           <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
 
-          {overdueAlerts.length === 0 ? (
+          {overdueRisks.length === 0 ? (
             <div style={{ color: '#BFC8D9' }}>No overdue invoices right now.</div>
           ) : (
             <div style={latestFiveScrollStyle}>
-              {overdueAlerts.map((alert) => (
-                <div key={alert.invoiceId} style={rowStyle}>
+              {overdueRisks.map((row) => (
+                <div key={row.invoiceId} style={rowStyle}>
                   <div>
-                    <div style={{ fontWeight: 800 }}>{alert.invoiceNumber} - {alert.customerName}</div>
-                    <div style={mutedTextStyle}>Due {formatDate(alert.effectiveDueDate)} | {alert.overdueDays} day(s) overdue</div>
+                    <div style={{ fontWeight: 800 }}>{row.invoiceNumber} - {row.customerName}</div>
+                    <div style={mutedTextStyle}>Due {formatDate(row.effectiveDueDate)} | {row.overdueDays} day(s) overdue</div>
                   </div>
-                  <div style={{ color: '#EB5757', fontWeight: 900 }}>{formatMoney(alert.overdueAmount)}</div>
+                  <div style={{ color: '#EB5757', fontWeight: 900 }}>{formatMoney(row.overdueAmount)}</div>
                 </div>
               ))}
             </div>
@@ -373,7 +372,7 @@ const Dashboard = () => {
 
         <div style={panelStyle}>
           <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 6 }}>Overdue / Risk Customers</div>
-          <div style={{ color: '#BFC8D9', marginBottom: 12 }}>Payment discipline and outstanding alerts.</div>
+          <div style={{ color: '#BFC8D9', marginBottom: 12 }}>Payment discipline and outstanding risks.</div>
           <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
 
           {riskCustomers.length === 0 ? (

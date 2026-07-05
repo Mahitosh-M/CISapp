@@ -198,7 +198,6 @@ const Intelligence = () => {
           <StatCard title="Rolling Sales" value={formatMoney(summary.totalSales)} subtitle="Current 2-month window" />
           <StatCard title="Rolling Profit" value={formatMoney(summary.totalProfit)} subtitle="Profit contribution" />
           <StatCard title="Total Payments" value={formatMoney(summary.totalPayments)} subtitle="Collected against scored invoices" />
-          <StatCard title="Outstanding" value={formatMoney(summary.outstanding)} subtitle="Previous + invoice outstanding" color="#EB5757" />
           <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Weighted score" />
           <StatCard title="Partner Coin" value={`${formatMoney(summary.giftBudget)} PC`} subtitle="Mapped from available PC rules" />
         </div>

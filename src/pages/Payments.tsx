@@ -9,6 +9,7 @@ import {
   getCustomers,
   getInvoices,
   getPayments,
+  syncCustomerPartnerLevelsFromFirestore,
   updatePaymentRecord
 } from '../services/firestoreService';
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
@@ -335,6 +336,7 @@ const Payments = () => {
         setMessage(`Payment added. ${formatMoney(paymentEffect)} recorded across ${payableAllocations.length} invoice(s).`);
       }
 
+      await syncCustomerPartnerLevelsFromFirestore();
       resetForm();
       await loadData();
     } catch (err) {
@@ -379,6 +381,7 @@ const Payments = () => {
 
     try {
       await deletePaymentRecord(payment.id, auditUser);
+      await syncCustomerPartnerLevelsFromFirestore();
       setMessage('Payment deleted successfully.');
       await loadData();
     } catch (err) {

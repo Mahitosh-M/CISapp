@@ -18,10 +18,6 @@ export type GiftItemTargetType = 'profit' | 'sales' | 'score';
 
 export type GiftEligibleTier = CustomerTier | 'All';
 
-export type AlertStatus = 'Open' | 'Reviewed' | 'Resolved';
-
-export type AlertSeverity = 'Low' | 'Medium' | 'High';
-
 export type PartnerLevel = 'Active Partner' | 'Silver Partner' | 'Gold Partner' | 'Platinum Partner';
 
 export type RedemptionStatus = 'Pending' | 'Approved' | 'Rejected' | 'Gifted';
@@ -31,16 +27,6 @@ export type OverduePcRequestStatus = 'Pending' | 'Approved' | 'Rejected';
 export type BonusPcRequestStatus = 'Pending' | 'Approved' | 'Rejected';
 
 export type BonusPcType = 'new_customer' | 'payment' | 'purchase_target' | 'referral';
-
-export type AlertType =
-  | 'overdue_payment'
-  | 'high_outstanding'
-  | 'negative_profit'
-  | 'inactive_customer'
-  | 'gift_pending'
-  | 'tier_downgrade_risk'
-  | 'automatic_tier_change'
-  | 'tier3_credit_warning';
 
 export type TargetTierKey = 'tier1' | 'tier2' | 'tier3' | 'tier4';
 
@@ -68,7 +54,6 @@ export interface Customer {
   mobile: string;
   area: string;
   tier: CustomerTier;
-  tierOverride?: boolean;
   previousOutstandingAmount: number;
   paymentTerms: string;
   notes: string;
@@ -263,7 +248,7 @@ export interface GiftHistoryFormData {
   notes: string;
 }
 
-export interface OverdueInvoiceAlert {
+export interface OverdueInvoiceRisk {
   invoiceId: string;
   invoiceNumber: string;
   customerId: string;
@@ -287,7 +272,6 @@ export interface CustomerFormData {
   paymentTerms: string;
   notes: string;
   previousOutstandingAmount: number;
-  tierOverride?: boolean;
   status?: string;
 }
 
@@ -381,23 +365,6 @@ export interface CustomerScore {
   onboardingStage: OnboardingStage;
   confidenceFactor: number;
   scoreBreakdown: ScoreBreakdownItem[];
-}
-
-export interface Alert {
-  id: string;
-  uniqueKey: string;
-  customerId: string;
-  customerName: string;
-  invoiceId?: string;
-  invoiceNumber?: string;
-  alertType: AlertType;
-  severity: AlertSeverity;
-  date: string;
-  status: AlertStatus;
-  actionRequired: string;
-  message: string;
-  createdAt: string;
-  updatedAt?: string;
 }
 
 export interface MonthlyRankingRow {

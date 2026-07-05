@@ -39,7 +39,8 @@ const getReusableAuthCredential = async (secondaryAuth: ReturnType<typeof getAut
       const credential = await signInWithEmailAndPassword(secondaryAuth, email, password);
       return { credential, createdNewAuthUser: false };
     } catch {
-      throw new Error('This email already exists in Firebase Auth. Use the current password for that email, or send a password reset before recreating access.');
+      await sendPasswordResetEmail(auth, email);
+      throw new Error('This email already exists in Firebase Auth with a different password. A password reset email has been sent; use the reset link, then create or use this customer login with the updated password.');
     }
   }
 };

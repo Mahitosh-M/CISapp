@@ -13,6 +13,7 @@ import {
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
   getPaymentsByInvoiceIds,
+  syncCustomerPartnerLevelsFromFirestore,
   updateInvoiceRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '../types';
@@ -224,6 +225,7 @@ const Invoices = () => {
         setMessage('Invoice created successfully.');
       }
 
+      await syncCustomerPartnerLevelsFromFirestore();
       resetForm();
       await loadData();
     } catch (err) {
@@ -272,6 +274,7 @@ const Invoices = () => {
       if (!confirmed) return;
 
       const deleteResult = await deleteInvoiceRecord(invoice.id, auditUser);
+      await syncCustomerPartnerLevelsFromFirestore();
       setMessage(
         deleteResult.deletedPaymentCount > 0
           ? `Invoice deleted with ${deleteResult.deletedPaymentCount} linked payment(s).`

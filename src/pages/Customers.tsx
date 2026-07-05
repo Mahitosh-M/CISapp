@@ -29,11 +29,10 @@ const emptyCustomerForm: CustomerFormData = {
   paymentTerms: getPaymentTermsForTier('Tier 4'),
   notes: '',
   previousOutstandingAmount: 0,
-  tierOverride: false,
   status: 'Active'
 };
 
-type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount' | 'tierOverride'>;
+type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount'>;
 
 const Customers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -205,7 +204,6 @@ const Customers = () => {
       paymentTerms: customer.paymentTerms,
       notes: customer.notes,
       previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
-      tierOverride: Boolean(customer.tierOverride),
       status: customer.status || 'Active'
     });
     setShowCustomerForm(true);
@@ -394,14 +392,6 @@ const Customers = () => {
                 Old opening balance before this ERP. It is added to invoice sales minus payments for total outstanding.
               </div>
 
-              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(formData.tierOverride)}
-                  onChange={(event) => setFormData((current) => ({ ...current, tierOverride: event.target.checked }))}
-                />
-                Admin partner level override
-              </label>
             </>
           ) : null}
 

@@ -16,8 +16,6 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import type {
-  Alert,
-  AlertStatus,
   Customer,
   CustomerFormData,
   CustomerTier,
@@ -56,6 +54,7 @@ import {
 } from '../utils/settings';
 import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
 import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate } from '../utils/customerPortal';
+import { buildCustomerScores } from '../utils/customerAnalytics';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
 
 const CUSTOMERS = 'customers';
@@ -66,7 +65,6 @@ const APP_SETTINGS_DOC_ID = 'appSettings';
 const GIFT_HISTORY = 'giftHistory';
 const GIFT_ITEMS = 'giftItems';
 const USERS = 'users';
-const ALERTS = 'alerts';
 const OFFERS = 'offers';
 const MONTHLY_CUSTOMER_STATS = 'monthlyCustomerStats';
 const LOYALTY_LEDGER = 'loyaltyLedger';
@@ -131,7 +129,6 @@ const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => 
     mobile: String(data.mobile || ''),
     area: String(data.area || ''),
     tier,
-    tierOverride: Boolean(data.tierOverride),
     // Old balance from before this ERP started. Missing legacy documents safely read as zero.
     previousOutstandingAmount: Math.max(0, numberOrZero(data.previousOutstandingAmount)),
     paymentTerms: String(data.paymentTerms || getPaymentTermsLabel(tier)),
@@ -266,23 +263,6 @@ const sanitizeGiftItemPayload = (giftItem: GiftItemFormData): GiftItemFormData =
   targetValue: Math.max(0, numberOrZero(giftItem.targetValue)),
   notes: giftItem.notes.trim(),
   isActive: giftItem.isActive
-});
-
-const mapAlertDoc = (id: string, data: Record<string, unknown>): Alert => ({
-  id,
-  uniqueKey: String(data.uniqueKey || id),
-  customerId: String(data.customerId || ''),
-  customerName: String(data.customerName || ''),
-  invoiceId: data.invoiceId ? String(data.invoiceId) : undefined,
-  invoiceNumber: data.invoiceNumber ? String(data.invoiceNumber) : undefined,
-  alertType: data.alertType as Alert['alertType'],
-  severity: (data.severity as Alert['severity']) || 'Medium',
-  date: String(data.date || getTodayDateString()),
-  status: (data.status as Alert['status']) || 'Open',
-  actionRequired: String(data.actionRequired || ''),
-  message: String(data.message || ''),
-  createdAt: String(data.createdAt || ''),
-  updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
 });
 
 const dateFieldToString = (value: unknown) => {
@@ -660,6 +640,31 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
     updatedAt: nowIso()
   });
 
+};
+
+export const syncCustomerPartnerLevelsFromFirestore = async () => {
+  const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
+    getCustomers(),
+    getInvoices(),
+    getPayments(),
+    getAppSettings()
+  ]);
+  const customersById = new Map(customerRows.map((customer) => [customer.id, customer]));
+  const scores = buildCustomerScores(customerRows, invoiceRows, paymentRows, new Date(), appSettings);
+  const timestamp = nowIso();
+  const updates = scores.filter((score) => customersById.get(score.customerId)?.tier !== score.tier);
+
+  await Promise.all(
+    updates.map((score) =>
+      updateDoc(doc(db, CUSTOMERS, score.customerId), {
+        tier: score.tier,
+        paymentTerms: getPaymentTermsLabel(score.tier, appSettings),
+        updatedAt: timestamp
+      })
+    )
+  );
+
+  return updates.length;
 };
 
 export const deleteCustomerRecord = async (customerId: string, auditUser?: AuditUser) => {
@@ -1200,48 +1205,6 @@ export const updateUserProfileRecord = async (profileId: string, profile: Partia
 
 export const deleteUserProfileRecord = async (profileId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, USERS, profileId));
-};
-
-export const getAlerts = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const alertsQuery = query(collection(db, ALERTS), orderBy('createdAt', 'desc'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(alertsQuery);
-  return snapshot.docs.map((alertDoc) => mapAlertDoc(alertDoc.id, alertDoc.data()));
-};
-
-export const upsertAlerts = async (alerts: Omit<Alert, 'id' | 'createdAt' | 'updatedAt'>[], auditUser?: AuditUser) => {
-  // Upsert needs the complete existing key set to avoid duplicate alert writes.
-  const existingSnapshot = await getDocs(query(collection(db, ALERTS), orderBy('createdAt', 'desc')));
-  const existingAlerts = existingSnapshot.docs.map((alertDoc) => mapAlertDoc(alertDoc.id, alertDoc.data()));
-  const existingByKey = new Map(existingAlerts.map((alert) => [alert.uniqueKey, alert]));
-
-  await Promise.all(
-    alerts.map(async (alert) => {
-      const existing = existingByKey.get(alert.uniqueKey);
-
-      if (existing) {
-        return updateDoc(doc(db, ALERTS, existing.id), {
-          ...alert,
-          status: existing.status,
-          updatedAt: nowIso()
-        });
-      }
-
-      const docRef = await addDoc(collection(db, ALERTS), {
-        ...alert,
-        createdAt: nowIso(),
-        updatedAt: nowIso()
-      });
-
-    })
-  );
-};
-
-export const updateAlertStatus = async (alertId: string, status: AlertStatus, auditUser?: AuditUser) => {
-  await updateDoc(doc(db, ALERTS, alertId), {
-    status,
-    updatedAt: nowIso()
-  });
-
 };
 
 export const getOffers = async () => {

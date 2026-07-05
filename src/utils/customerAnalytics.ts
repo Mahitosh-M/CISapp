@@ -723,10 +723,8 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
       isOnboarding
     );
 
-    const tier = entry.customer.tierOverride ? entry.customer.tier : gatedTier.tier;
-    const tierCapReason = entry.customer.tierOverride && (hasOverdue || paymentDisciplineScore < 55 || outstandingRatio > 0.5)
-      ? 'Admin override preserved, but payment risk should be reviewed.'
-      : gatedTier.tierCapReason;
+    const tier = gatedTier.tier;
+    const tierCapReason = gatedTier.tierCapReason;
     const creditPolicy = {
       creditDays: getCreditDaysForTierFromSettings(tier, settings),
       bufferDays: getPaymentBufferForTier(tier, settings),
