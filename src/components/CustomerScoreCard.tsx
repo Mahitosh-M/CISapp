@@ -114,6 +114,13 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
       ))}
 
       <div style={movementStyle}>{customer.movement}: {customer.movementReason}</div>
+      {customer.isOnboarding || customer.tierCapReason ? (
+        <div style={{ ...metaStyle, color: '#F2C94C' }}>
+          {[customer.isOnboarding ? `${customer.onboardingStage} onboarding | ${Math.round(customer.confidenceFactor * 100)}% confidence` : '', customer.tierCapReason || '']
+            .filter(Boolean)
+            .join(' | ')}
+        </div>
+      ) : null}
       {customer.insights.length > 0 ? (
         <div style={{ ...metaStyle, color: '#E8EDF5' }}>{customer.insights.slice(0, 3).join(' | ')}</div>
       ) : null}

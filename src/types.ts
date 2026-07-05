@@ -4,6 +4,8 @@ export type CustomerMovement = 'Promoted' | 'Demoted' | 'Stable' | 'New';
 
 export type RiskLevel = 'Low' | 'Medium' | 'High';
 
+export type OnboardingStage = 'None' | 'Stage A' | 'Stage B' | 'Stage C' | 'Stage D';
+
 export type PaymentMode = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Card' | 'Other';
 
 export type UserRole = 'Admin' | 'Staff' | 'customer';
@@ -374,6 +376,10 @@ export interface CustomerScore {
   riskLevel: RiskLevel;
   recommendedAction: string;
   overdueStatus: string;
+  tierCapReason?: string;
+  isOnboarding: boolean;
+  onboardingStage: OnboardingStage;
+  confidenceFactor: number;
   scoreBreakdown: ScoreBreakdownItem[];
 }
 
@@ -417,10 +423,29 @@ export interface MonthlyCustomerStats {
   customerId: string;
   month: string;
   totalSales: number;
+  totalProfit?: number;
   totalPayments: number;
   orderCount: number;
   overdueAmount: number;
   target: number;
+  basePcEarned?: number;
+  bonusPcEarned?: number;
+  availablePc?: number;
+  salesTarget?: number;
+  profitTarget?: number;
+  frequencyTarget?: number;
+  paymentScore?: number;
+  profitScore?: number;
+  frequencyScore?: number;
+  salesScore?: number;
+  loyaltyScore?: number;
+  rollingScore?: number;
+  calculatedTier?: CustomerTier;
+  finalTier?: CustomerTier;
+  tierCapReason?: string;
+  isOnboarding?: boolean;
+  onboardingStage?: OnboardingStage;
+  confidenceFactor?: number;
   pointsEarned: number;
   currentLevel: PartnerLevel;
   progressPercent: number;

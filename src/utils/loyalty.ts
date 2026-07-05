@@ -70,6 +70,7 @@ export const buildMonthlyCustomerStats = (
   const monthlyPayments = payments.filter((payment) => payment.customerId === customer.id && payment.date.startsWith(monthPrefix));
   const targetSettings = getTierTargetSettings(customer.tier, activeSettings);
   const totalSales = monthlyInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
+  const totalProfit = monthlyInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalProfit), 0);
   const totalPayments = monthlyPayments.reduce((sum, payment) => sum + numberOrZero(payment.amount), 0);
   const overdueAmount = monthlyInvoices
     .map((invoice) => calculateDueStatus(invoice, payments, undefined, customer.tier, activeSettings))
@@ -80,6 +81,8 @@ export const buildMonthlyCustomerStats = (
   const invoiceApc = apcEligibleInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, payments, customer.tier, activeSettings).earnedApc, 0);
   const targetBonus = apcEligibleSales >= targetSettings.monthlySalesTarget && targetSettings.monthlySalesTarget > 0 ? activeSettings.loyaltySettings.monthlyTargetBonus : 0;
   const frequencyBonus = apcEligibleInvoices.length >= targetSettings.monthlyOrderTarget && targetSettings.monthlyOrderTarget > 0 ? activeSettings.loyaltySettings.orderFrequencyBonus : 0;
+  const basePcEarned = Math.round(Math.max(0, invoiceApc));
+  const bonusPcEarned = Math.round(Math.max(0, targetBonus + frequencyBonus));
   const pointsEarned = Math.round(Math.max(0, invoiceApc + targetBonus + frequencyBonus));
   const currentLevel = getPartnerLevelForTier(customer.tier);
 
@@ -88,10 +91,21 @@ export const buildMonthlyCustomerStats = (
     customerId: customer.id,
     month,
     totalSales,
+    totalProfit,
     totalPayments,
     orderCount: monthlyInvoices.length,
     overdueAmount,
     target: targetSettings.monthlySalesTarget,
+    basePcEarned,
+    bonusPcEarned,
+    availablePc: pointsEarned,
+    salesTarget: targetSettings.monthlySalesTarget,
+    frequencyTarget: targetSettings.monthlyOrderTarget,
+    calculatedTier: customer.tier,
+    finalTier: customer.tier,
+    isOnboarding: false,
+    onboardingStage: 'None',
+    confidenceFactor: 1,
     pointsEarned,
     currentLevel,
     progressPercent: 100,
