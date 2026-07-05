@@ -73,15 +73,10 @@ export const useCustomerPortalData = () => {
         getPaymentsForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
         getAppSettings(),
         getActiveOffers(),
-<<<<<<< HEAD
         optionalCustomerRead(() => getActiveRewardItems(), []),
-        customerId ? optionalCustomerRead(() => getRedemptionRequestsForCustomer(customerId), []) : Promise.resolve([])
-=======
-        getActiveRewardItems(),
-        customerId ? getRedemptionRequestsForCustomer(customerId) : Promise.resolve([]),
-        customerId ? getApprovedOverduePcRequestsForCustomer(customerId) : Promise.resolve([]),
-        customerId ? getApprovedBonusPcRequestsForCustomer(customerId) : Promise.resolve([])
->>>>>>> big
+        customerId ? optionalCustomerRead(() => getRedemptionRequestsForCustomer(customerId), []) : Promise.resolve([]),
+        customerId ? optionalCustomerRead(() => getApprovedOverduePcRequestsForCustomer(customerId), []) : Promise.resolve([]),
+        customerId ? optionalCustomerRead(() => getApprovedBonusPcRequestsForCustomer(customerId), []) : Promise.resolve([])
       ]);
 
       const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
