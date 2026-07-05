@@ -260,7 +260,10 @@ const OverduePcRequests = () => {
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Bonus Request Queue</div>
             <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
-              Four bonus types are supported. Current automatic trigger creates New customer bonus requests after the first invoice, once per customer.
+              Pending bonuses need approval before PC is added. Approved/rejected requests are hidden from this queue but kept in history.
+            </div>
+            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+              Payment and target bonuses are generated once per customer per month. Referral bonus is not generated yet.
             </div>
           </div>
           <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
@@ -269,11 +272,18 @@ const OverduePcRequests = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          {Object.values(BONUS_PC_LABELS).map((label) => (
-            <span key={label} style={{ background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
-              {label}
+          {(['new_customer', 'payment', 'purchase_target'] as const).map((key) => (
+            <span key={key} style={{ background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
+              {BONUS_PC_LABELS[key]}
             </span>
           ))}
+          <span style={{ background: '#F3F4F6', color: '#67738E', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
+            Referral bonus disabled
+          </span>
+        </div>
+
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 12 }}>
+          Bonus PC is capped at 20% of the customer&apos;s base PC earned for the month when generated automatically.
         </div>
 
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>

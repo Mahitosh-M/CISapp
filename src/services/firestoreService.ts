@@ -49,6 +49,7 @@ import type {
 import {
   DEFAULT_SETTINGS,
   calculateDynamicDueDate,
+  getEffectiveInvoiceDueDate,
   getPaymentTermsLabel,
   mergeWithDefaultSettings,
   validateAppSettings
@@ -474,6 +475,103 @@ const getPastDateString = (daysBack: number) => {
   const date = new Date();
   date.setDate(date.getDate() - daysBack);
   return date.toISOString().slice(0, 10);
+};
+
+const getMonthDateRange = (month: string) => {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const monthStart = new Date(year, monthNumber - 1, 1);
+  const monthEnd = new Date(year, monthNumber, 0);
+  const formatDate = (date: Date) => {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  return {
+    fromDate: formatDate(monthStart),
+    toDate: formatDate(monthEnd)
+  };
+};
+
+const getBonusRequestId = (customerId: string, bonusType: 'payment' | 'purchase_target', month: string) => {
+  const suffix = bonusType === 'payment' ? 'payment' : 'target';
+  return `${customerId}_${suffix}_${month.replace('-', '_')}`;
+};
+
+const getMonthFromBonusRequest = (request: BonusPcRequest) => {
+  const match = request.id.match(/_(payment|target)_(\d{4})_(\d{2})$/);
+  if (match) {
+    return `${match[2]}-${match[3]}`;
+  }
+
+  return request.generatedAt ? request.generatedAt.slice(0, 7) : getCurrentMonthKey();
+};
+
+const isMonthActivityInvoice = (invoice: Invoice, month: string) => invoice.date.startsWith(`${month}-`);
+
+const getInvoicePaidDateOrEmpty = (invoice: Invoice, payments: Payment[]) => getInvoiceFullPaymentDate(invoice, payments) || '';
+
+const hasUnpaidOverdueInvoice = (
+  customer: Customer,
+  invoices: Invoice[],
+  payments: Payment[],
+  settings: AppSettings,
+  today = getTodayDateString()
+) => {
+  return invoices.some((invoice) => {
+    if (invoice.customerId !== customer.id) return false;
+    const pcInfo = calculateInvoiceApcInfo(invoice, payments, customer.tier, settings, today);
+    const fullPaymentDate = getInvoicePaidDateOrEmpty(invoice, payments);
+    return !fullPaymentDate && pcInfo.apcDeadline && today > pcInfo.apcDeadline;
+  });
+};
+
+const getPaymentScoreForInvoices = (customer: Customer, invoices: Invoice[], payments: Payment[], settings: AppSettings) => {
+  if (invoices.length === 0) return 0;
+
+  const delayScores = invoices.map((invoice) => {
+    const dueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
+    const fullPaymentDate = getInvoicePaidDateOrEmpty(invoice, payments);
+
+    if (!fullPaymentDate || !dueDate) return 0;
+
+    const delayDays = daysBetweenDateStrings(dueDate, fullPaymentDate);
+    return Math.max(20, Math.min(100, Math.round(100 - delayDays * 4)));
+  });
+
+  return Math.round(delayScores.reduce((sum, score) => sum + score, 0) / delayScores.length);
+};
+
+const allDueInvoicesPaidOnTime = (customer: Customer, invoices: Invoice[], payments: Payment[], settings: AppSettings, month: string) => {
+  const dueInvoices = invoices.filter((invoice) => {
+    if (invoice.customerId !== customer.id) return false;
+    const dueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
+    return dueDate.startsWith(`${month}-`);
+  });
+
+  if (dueInvoices.length === 0) return false;
+
+  return dueInvoices.every((invoice) => {
+    const dueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings);
+    const fullPaymentDate = getInvoicePaidDateOrEmpty(invoice, payments);
+    return Boolean(fullPaymentDate && fullPaymentDate <= dueDate);
+  });
+};
+
+const getBasePcEarnedForMonth = (customer: Customer, monthlyInvoices: Invoice[], payments: Payment[], settings: AppSettings) => {
+  return monthlyInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, payments, customer.tier, settings).earnedApc, 0);
+};
+
+const getCappedBonusAmount = (configuredAmount: number, basePcEarned: number, alreadyPlannedBonus: number) => {
+  const cleanAmount = Math.max(0, Math.round(numberOrZero(configuredAmount)));
+  const monthlyCap = Math.floor(Math.max(0, basePcEarned) * 0.2);
+
+  if (cleanAmount <= 0 || monthlyCap <= alreadyPlannedBonus) {
+    return 0;
+  }
+
+  return Math.min(cleanAmount, monthlyCap - alreadyPlannedBonus);
 };
 
 const sanitizeRewardPayload = (reward: RewardFormData): RewardFormData => ({
@@ -1372,9 +1470,11 @@ export const reviewOverduePcRequest = async (
 };
 
 export const getBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), orderBy('generatedAt', 'desc'), firestoreLimit(limitCount));
+  const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), where('status', '==', 'Pending'), firestoreLimit(limitCount));
   const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+  return snapshot.docs
+    .map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()))
+    .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
 };
 
 export const getApprovedBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
@@ -1395,19 +1495,63 @@ export const getApprovedBonusPcRequestsForCustomer = async (customerId: string, 
   return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
 };
 
-export const generateBonusPcRequests = async (auditUser?: AuditUser) => {
-  const [customerRows, invoiceRows, appSettings] = await Promise.all([
+export const generateBonusPcRequests = async (auditUser?: AuditUser, month = getCurrentMonthKey()) => {
+  const monthRange = getMonthDateRange(month);
+  const recentFromDate = getPastDateString(180);
+  const [customerRows, invoiceRows, paymentRows, monthlyInvoiceRows, monthlyPaymentRows, statsRows, appSettings] = await Promise.all([
     getCustomers(),
-    getInvoices(),
+    getInvoices({ fromDate: recentFromDate, toDate: monthRange.toDate }),
+    getPayments({ fromDate: recentFromDate, toDate: monthRange.toDate }),
+    getInvoices({ fromDate: monthRange.fromDate, toDate: monthRange.toDate }),
+    getPayments({ fromDate: monthRange.fromDate, toDate: monthRange.toDate }),
+    getMonthlyCustomerStatsForMonth(month, 500),
     getAppSettings()
   ]);
-  const amount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.newCustomerBonus)));
+  const newCustomerAmount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.newCustomerBonus)));
+  const paymentBonusAmount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.paymentBonus)));
+  const targetBonusAmount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.purchaseTargetBonus)));
+  const paymentScoreThreshold = 85;
+  const statsByCustomerId = new Map(statsRows.map((stats) => [stats.customerId, stats]));
   const timestamp = nowIso();
   let createdCount = 0;
 
-  if (amount <= 0) {
+  if (newCustomerAmount <= 0 && paymentBonusAmount <= 0 && targetBonusAmount <= 0) {
     return { createdCount };
   }
+
+  const createBonusRequestIfMissing = async (
+    requestId: string,
+    customer: Customer,
+    bonusType: Exclude<BonusPcType, 'referral'>,
+    triggerType: string,
+    referenceId: string,
+    amount: number,
+    notes: string
+  ) => {
+    if (amount <= 0) return;
+
+    const requestRef = doc(db, BONUS_PC_REQUESTS, requestId);
+    const existingSnapshot = await getDoc(requestRef);
+    if (existingSnapshot.exists()) return;
+
+    await setDoc(requestRef, {
+      customerId: customer.id,
+      customerName: customer.name,
+      bonusType,
+      bonusLabel: BONUS_PC_LABELS[bonusType],
+      triggerType,
+      referenceId,
+      suggestedCoins: amount,
+      approvedCoins: amount,
+      status: 'Pending',
+      generatedAt: timestamp,
+      reviewedAt: '',
+      reviewedBy: '',
+      customerSeenAt: '',
+      notes
+    });
+    createdCount += 1;
+  };
 
   await Promise.all(
     customerRows.map(async (customer) => {
@@ -1416,29 +1560,79 @@ export const generateBonusPcRequests = async (auditUser?: AuditUser) => {
         .sort((left, right) => left.date.localeCompare(right.date) || left.createdAt.localeCompare(right.createdAt));
       const firstInvoice = customerInvoices[0];
 
-      if (!firstInvoice) return;
+      if (firstInvoice && newCustomerAmount > 0) {
+        await createBonusRequestIfMissing(
+          `${customer.id}_new_customer`,
+          customer,
+          'new_customer',
+          'first_invoice',
+          firstInvoice.id,
+          newCustomerAmount,
+          `First invoice ${firstInvoice.invoiceNumber || firstInvoice.id}`
+        );
+      }
 
-      const requestRef = doc(db, BONUS_PC_REQUESTS, `${customer.id}_new_customer`);
-      const existingSnapshot = await getDoc(requestRef);
-      if (existingSnapshot.exists()) return;
+      const monthlyInvoices = monthlyInvoiceRows.filter((invoice) => invoice.customerId === customer.id);
+      const monthlyPayments = monthlyPaymentRows.filter((payment) => payment.customerId === customer.id);
+      const stats = statsByCustomerId.get(customer.id);
+      const hasMonthlyActivity = monthlyInvoices.length > 0 || monthlyPayments.length > 0;
 
-      await setDoc(requestRef, {
-        customerId: customer.id,
-        customerName: customer.name,
-        bonusType: 'new_customer',
-        bonusLabel: BONUS_PC_LABELS.new_customer,
-        triggerType: 'first_invoice',
-        referenceId: firstInvoice.id,
-        suggestedCoins: amount,
-        approvedCoins: amount,
-        status: 'Pending',
-        generatedAt: timestamp,
-        reviewedAt: '',
-        reviewedBy: '',
-        customerSeenAt: '',
-        notes: `First invoice ${firstInvoice.invoiceNumber || firstInvoice.id}`
-      });
-      createdCount += 1;
+      if (!hasMonthlyActivity || hasUnpaidOverdueInvoice(customer, invoiceRows, paymentRows, appSettings)) {
+        return;
+      }
+
+      const basePcEarned = stats?.basePcEarned ?? getBasePcEarnedForMonth(customer, monthlyInvoices, paymentRows, appSettings);
+      if (basePcEarned <= 0) return;
+
+      let plannedMonthlyBonus = 0;
+      const dueInvoicesPaidOnTime = allDueInvoicesPaidOnTime(customer, invoiceRows, paymentRows, appSettings, month);
+      const paymentScore = stats?.paymentScore && stats.paymentScore > 0
+        ? stats.paymentScore
+        : getPaymentScoreForInvoices(
+            customer,
+            invoiceRows.filter((invoice) => {
+              const dueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, appSettings);
+              return invoice.customerId === customer.id && dueDate.startsWith(`${month}-`);
+            }),
+            paymentRows,
+            appSettings
+          );
+
+      if (paymentBonusAmount > 0 && dueInvoicesPaidOnTime && paymentScore >= paymentScoreThreshold) {
+        const paymentRequestAmount = getCappedBonusAmount(paymentBonusAmount, basePcEarned, plannedMonthlyBonus);
+        plannedMonthlyBonus += paymentRequestAmount;
+        await createBonusRequestIfMissing(
+          getBonusRequestId(customer.id, 'payment', month),
+          customer,
+          'payment',
+          'monthly_payment_discipline',
+          stats?.id || getMonthlyStatsId(customer.id, month),
+          paymentRequestAmount,
+          `Payment discipline bonus for ${month}: no overdue and payment score above threshold.`
+        );
+      }
+
+      const totalSales = stats?.totalSales ?? monthlyInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
+      const totalProfit = stats?.totalProfit ?? monthlyInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalProfit), 0);
+      const orderCount = stats?.orderCount ?? monthlyInvoices.length;
+      const salesTarget = stats?.salesTarget ?? stats?.target ?? 0;
+      const frequencyTarget = stats?.frequencyTarget ?? 0;
+      const salesTargetAchieved = salesTarget > 0 && totalSales >= salesTarget;
+      const frequencyTargetAchieved = frequencyTarget > 0 && orderCount >= frequencyTarget;
+
+      if (targetBonusAmount > 0 && salesTargetAchieved && frequencyTargetAchieved && totalProfit > 0) {
+        const targetRequestAmount = getCappedBonusAmount(targetBonusAmount, basePcEarned, plannedMonthlyBonus);
+        plannedMonthlyBonus += targetRequestAmount;
+        await createBonusRequestIfMissing(
+          getBonusRequestId(customer.id, 'purchase_target', month),
+          customer,
+          'purchase_target',
+          'monthly_purchase_target',
+          stats?.id || getMonthlyStatsId(customer.id, month),
+          targetRequestAmount,
+          `Purchase target bonus for ${month}: sales target and order frequency achieved.`
+        );
+      }
     })
   );
 
@@ -1485,7 +1679,7 @@ export const reviewBonusPcRequest = async (
         points: cleanCoins,
         reason: `${bonusRequest.bonusLabel}: ${bonusRequest.notes || 'Admin approved bonus'}`,
         referenceId: requestId,
-        month: getCurrentMonthKey(),
+        month: getMonthFromBonusRequest(bonusRequest),
         createdAt: timestamp
       });
     }

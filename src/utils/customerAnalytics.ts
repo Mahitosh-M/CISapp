@@ -193,16 +193,21 @@ const tierOrder: Record<CustomerTier, number> = {
 
 const capTier = (tier: CustomerTier, maximumTier: CustomerTier) => (tierOrder[tier] > tierOrder[maximumTier] ? maximumTier : tier);
 
-const getCustomerAgeDays = (customer: Customer, asOfDate: Date) => {
-  if (!customer.createdAt) {
+const getCustomerAgeDays = (customer: Customer, invoices: Invoice[], asOfDate: Date) => {
+  const createdAtDate = customer.createdAt ? parseDate(customer.createdAt) : undefined;
+  const firstInvoiceDate = [...invoices].sort((a, b) => parseDate(a.date).getTime() - parseDate(b.date).getTime())[0]?.date;
+  const activityStartDate = firstInvoiceDate ? parseDate(firstInvoiceDate) : createdAtDate;
+
+  if (!activityStartDate) {
     return Number.POSITIVE_INFINITY;
   }
 
-  return Math.max(0, daysBetween(parseDate(customer.createdAt), asOfDate));
+  return Math.max(0, daysBetween(activityStartDate, asOfDate));
 };
 
-const getOnboardingStage = (customer: Customer, invoiceCount: number, activeMonthCount: number, asOfDate: Date): OnboardingStage => {
-  const customerAgeDays = getCustomerAgeDays(customer, asOfDate);
+const getOnboardingStage = (customer: Customer, invoices: Invoice[], activeMonthCount: number, asOfDate: Date): OnboardingStage => {
+  const invoiceCount = invoices.length;
+  const customerAgeDays = getCustomerAgeDays(customer, invoices, asOfDate);
 
   if (customerAgeDays >= 60 && invoiceCount >= 2 && activeMonthCount >= 2) {
     return 'Stage D';
@@ -563,7 +568,9 @@ const buildScoreBreakdown = (
     score: profitScore,
     weight: breakdownWeights.profit,
     weightedScore: profitScore * breakdownWeights.profit,
-    description: 'Weighted contribution from target-based profit performance.'
+    description: breakdownWeights.profit > 0
+      ? 'Weighted contribution from target-based profit performance.'
+      : 'Not weighted during onboarding.'
   },
   {
     key: 'paymentDiscipline',
@@ -653,12 +660,13 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
   const unrankedScores = scoreInputs.map((entry) => {
     const weights = normalizeScoreWeights(settings);
     const targetSettings = getTierTargetSettings(entry.customer.tier, settings);
-    const onboardingStage = getOnboardingStage(entry.customer, entry.allCustomerInvoices.length, getActiveMonthCount(entry.allCustomerInvoices), window.end);
+    const activeMonthCount = getActiveMonthCount(entry.allCustomerInvoices);
+    const onboardingStage = getOnboardingStage(entry.customer, entry.allCustomerInvoices, activeMonthCount, window.end);
     const isOnboarding = onboardingStage !== 'Stage D';
     const activeBreakdownWeights = isOnboarding
       ? { profit: 0, paymentDiscipline: 0.4, frequency: 0.1, sales: 0.2, loyalty: 0.3 }
       : weights;
-    const confidenceFactor = getConfidenceFactor(entry.allCustomerInvoices.length, getActiveMonthCount(entry.allCustomerInvoices));
+    const confidenceFactor = getConfidenceFactor(entry.allCustomerInvoices.length, activeMonthCount);
     const monthlySalesTarget = getSuggestedMonthlySalesTarget(
       entry,
       targetSettings.monthlySalesTarget,
