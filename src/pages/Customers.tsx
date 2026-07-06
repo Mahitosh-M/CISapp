@@ -88,7 +88,7 @@ const Customers = () => {
   const filteredCustomers = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
-    if (!term) return sortNewestFirst(customers, ['updatedAt', 'createdAt']);
+    if (!term) return [];
 
     return sortNewestFirst(
       customers.filter((customer) =>
@@ -475,13 +475,17 @@ const Customers = () => {
               {showFullTable ? 'Compact View' : 'View Full'}
             </button>
           </div>
-          <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+          <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
+            {searchText.trim() ? latestEntriesNotice : 'Search to show matching customers.'}
+          </div>
           {showFullTable ? (
             <div style={{ ...latestFiveScrollStyle, display: 'grid', gap: 12 }}>
               {loading ? (
                 <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>Loading customers...</div>
               ) : filteredCustomers.length === 0 ? (
-                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>No customers found.</div>
+                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>
+                  {searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}
+                </div>
               ) : (
                 filteredCustomers.map((customer) => {
                   const outstanding = outstandingByCustomerId.get(customer.id);
@@ -542,7 +546,7 @@ const Customers = () => {
                 {loading ? (
                   <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
                 ) : filteredCustomers.length === 0 ? (
-                  <tr><td style={cellStyle} colSpan={4}>No customers found.</td></tr>
+                  <tr><td style={cellStyle} colSpan={4}>{searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}</td></tr>
                 ) : (
                   filteredCustomers.map((customer) => (
                     <tr key={customer.id}>

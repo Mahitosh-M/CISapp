@@ -13,13 +13,15 @@ import {
   updatePaymentRecord
 } from '../services/firestoreService';
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
-const LIST_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 1;
+const LOAD_MORE_PAGE_SIZE = 3;
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -64,7 +66,7 @@ const Payments = () => {
       const [customerRows, invoiceRows, paymentRows] = await Promise.all([
         getCustomers(),
         getInvoices(),
-        getPayments()
+        getPayments({ limitCount: paymentLimit, sortBy: 'createdAt' })
       ]);
 
       setCustomers(customerRows);
@@ -79,7 +81,7 @@ const Payments = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [paymentLimit]);
 
   const getPaidAmountForInvoice = (invoiceId: string, ignoredPaymentId = '') => {
     return payments
@@ -199,7 +201,7 @@ const Payments = () => {
       const matchesMode = modeFilter === 'all' || payment.mode === modeFilter;
 
       return matchesSearch && matchesCustomer && matchesMode;
-    }), ['updatedAt', 'createdAt', 'date']);
+    }), ['createdAt', 'date']);
   }, [customerFilter, modeFilter, payments, searchText]);
 
   const paymentRows = useMemo(() => filteredPaymentRows.slice(0, paymentLimit), [filteredPaymentRows, paymentLimit]);
@@ -391,7 +393,7 @@ const Payments = () => {
 
   const handleLoadMore = () => {
     // Free-tier safety: initial payment screen reads only latest records; older rows load on demand.
-    setPaymentLimit((current) => current + LIST_PAGE_SIZE);
+    setPaymentLimit((current) => current + LOAD_MORE_PAGE_SIZE);
   };
 
   const cardStyle: CSSProperties = {
@@ -485,7 +487,7 @@ const Payments = () => {
             <select style={inputStyle} value={formData.customerId} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
@@ -606,7 +608,7 @@ const Payments = () => {
             <select style={inputStyle} value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)}>
               <option value="all">All customers</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
@@ -682,7 +684,7 @@ const Payments = () => {
             </tbody>
           </table>
         </div>
-        {!loading && filteredPaymentRows.length > paymentLimit ? (
+        {!loading && payments.length >= paymentLimit ? (
           <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
             Load More
           </button>

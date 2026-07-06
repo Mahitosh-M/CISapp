@@ -75,6 +75,7 @@ const BONUS_PC_REQUESTS = 'bonusPcRequests';
 const DEFAULT_LIST_LIMIT = 50;
 const ACTIVE_OFFER_LIMIT = 20;
 const ACTIVE_REWARD_LIMIT = 50;
+const READ_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export interface AuditUser {
   userId?: string;
@@ -86,6 +87,7 @@ interface DateRangeQueryOptions {
   fromDate?: string;
   toDate?: string;
   limitCount?: number;
+  sortBy?: 'date' | 'invoiceNumber' | 'createdAt';
 }
 
 interface CustomerScopedQueryOptions extends DateRangeQueryOptions {
@@ -96,6 +98,41 @@ interface CustomerScopedQueryOptions extends DateRangeQueryOptions {
 const nowIso = () => new Date().toISOString();
 
 const getTodayDateString = () => nowIso().slice(0, 10);
+
+type CacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const readCache = new Map<string, CacheEntry<unknown>>();
+
+const getCached = async <T,>(key: string, loader: () => Promise<T>, ttlMs = READ_CACHE_TTL_MS): Promise<T> => {
+  const cached = readCache.get(key) as CacheEntry<T> | undefined;
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const value = await loader();
+  readCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  return value;
+};
+
+export const clearFirestoreSessionCache = (prefix?: string) => {
+  if (!prefix) {
+    readCache.clear();
+    appSettingsCache = undefined;
+    return;
+  }
+
+  [...readCache.keys()].forEach((key) => {
+    if (key.startsWith(prefix)) readCache.delete(key);
+  });
+
+  if (prefix === SETTINGS) appSettingsCache = undefined;
+};
+
+const cacheKey = (collectionName: string, options?: unknown) => `${collectionName}:${JSON.stringify(options ?? {})}`;
 
 const withoutUndefined = <T extends Record<string, unknown>>(payload: T) => {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)) as Partial<T>;
@@ -296,7 +333,9 @@ const buildInvoiceQueryConstraints = (options?: CustomerScopedQueryOptions) => {
 
   // Free-tier safety: filter by date/customer in Firestore before React receives rows.
   applyDateRangeConstraints(constraints, 'date', options);
-  constraints.push(orderBy('date', 'desc'));
+
+  const hasDateRange = Boolean(options?.fromDate || options?.toDate);
+  constraints.push(orderBy(!hasDateRange && options?.sortBy === 'invoiceNumber' ? 'invoiceNumber' : 'date', 'desc'));
   applyLimitConstraint(constraints, options?.limitCount);
 
   return constraints;
@@ -309,7 +348,9 @@ const buildPaymentQueryConstraints = (options?: CustomerScopedQueryOptions) => {
   if (options?.customerName && !options.customerId) constraints.push(where('customerName', '==', options.customerName));
 
   applyDateRangeConstraints(constraints, 'date', options);
-  constraints.push(orderBy('date', 'desc'));
+
+  const hasDateRange = Boolean(options?.fromDate || options?.toDate);
+  constraints.push(orderBy(!hasDateRange && options?.sortBy === 'createdAt' ? 'createdAt' : 'date', 'desc'));
   applyLimitConstraint(constraints, options?.limitCount);
 
   return constraints;
@@ -589,9 +630,11 @@ export const mapUserProfileDoc = (id: string, data: Record<string, unknown>): Us
 });
 
 export const getCustomers = async () => {
-  const customersQuery = query(collection(db, CUSTOMERS), orderBy('name', 'asc'));
-  const snapshot = await getDocs(customersQuery);
-  return snapshot.docs.map((customerDoc) => mapCustomerDoc(customerDoc.id, customerDoc.data()));
+  return getCached(cacheKey(CUSTOMERS), async () => {
+    const customersQuery = query(collection(db, CUSTOMERS), orderBy('name', 'asc'));
+    const snapshot = await getDocs(customersQuery);
+    return snapshot.docs.map((customerDoc) => mapCustomerDoc(customerDoc.id, customerDoc.data()));
+  });
 };
 
 export const getCustomerById = async (customerId: string) => {
@@ -626,6 +669,7 @@ export const createCustomer = async (customer: CustomerFormData, auditUser?: Aud
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
   return docRef;
 };
 
@@ -640,6 +684,7 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
 };
 
 export const syncCustomerPartnerLevelsFromFirestore = async () => {
@@ -669,12 +714,15 @@ export const syncCustomerPartnerLevelsFromFirestore = async () => {
 
 export const deleteCustomerRecord = async (customerId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, CUSTOMERS, customerId));
+  clearFirestoreSessionCache();
 };
 
 export const getInvoices = async (options?: DateRangeQueryOptions) => {
-  const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints(options));
-  const snapshot = await getDocs(invoicesQuery);
-  return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
+  return getCached(cacheKey(INVOICES, options), async () => {
+    const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints(options));
+    const snapshot = await getDocs(invoicesQuery);
+    return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
+  });
 };
 
 export const getInvoicesByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
@@ -752,7 +800,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     updatedAt: nowIso()
   });
 
-  return docRef;
+  clearFirestoreSessionCache();
+  return { id: docRef.id, invoiceNumber, ref: docRef };
 };
 
 export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFormData, auditUser?: AuditUser) => {
@@ -761,6 +810,7 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
 };
 
 export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUser) => {
@@ -829,13 +879,16 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
     throw new Error('Invoice delete did not complete. Refresh the list and try again.');
   }
 
+  clearFirestoreSessionCache();
   return { deletedPaymentCount };
 };
 
 export const getPayments = async (options?: DateRangeQueryOptions) => {
-  const paymentsQuery = query(collection(db, PAYMENTS), ...buildPaymentQueryConstraints(options));
-  const snapshot = await getDocs(paymentsQuery);
-  return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+  return getCached(cacheKey(PAYMENTS, options), async () => {
+    const paymentsQuery = query(collection(db, PAYMENTS), ...buildPaymentQueryConstraints(options));
+    const snapshot = await getDocs(paymentsQuery);
+    return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+  });
 };
 
 export const getPaymentsByInvoiceId = async (invoiceId: string, options?: Pick<DateRangeQueryOptions, 'limitCount'>) => {
@@ -930,6 +983,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     });
   });
 
+  clearFirestoreSessionCache();
   return paymentRef;
 };
 
@@ -979,6 +1033,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
     });
   });
 
+  clearFirestoreSessionCache();
 };
 
 export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUser) => {
@@ -1016,11 +1071,34 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
   if (deletedPaymentSnapshot.exists()) {
     throw new Error('Payment delete did not complete. Refresh the list and try again.');
   }
+
+  clearFirestoreSessionCache();
 };
 
 export const getAppSettings = async (forceRefresh = false) => {
   if (appSettingsCache && !forceRefresh) {
     return appSettingsCache;
+  }
+
+  if (!forceRefresh) {
+    const cachedSettings = await getCached(cacheKey(SETTINGS, { key: 'erpSettings' }), async () => {
+      const preferredSettingsDoc = await getDoc(doc(db, SETTINGS, APP_SETTINGS_DOC_ID));
+
+      if (preferredSettingsDoc.exists()) {
+        return mapSettingsDoc(preferredSettingsDoc.id, preferredSettingsDoc.data());
+      }
+
+      const settingsQuery = query(collection(db, SETTINGS), where('key', '==', 'erpSettings'));
+      const snapshot = await getDocs(settingsQuery);
+      const existingSettings = snapshot.docs[0];
+
+      return existingSettings ? mapSettingsDoc(existingSettings.id, existingSettings.data()) : undefined;
+    });
+
+    if (cachedSettings) {
+      appSettingsCache = cachedSettings;
+      return appSettingsCache;
+    }
   }
 
   const preferredSettingsDoc = await getDoc(doc(db, SETTINGS, APP_SETTINGS_DOC_ID));
@@ -1070,6 +1148,7 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
       updatedAt: timestamp
     });
 
+    clearFirestoreSessionCache();
     appSettingsCache = { ...appSettings, id: docRef.id, updatedAt: timestamp };
     return docRef;
   }
@@ -1080,17 +1159,20 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
     updatedAt: timestamp
   });
 
+  clearFirestoreSessionCache();
   appSettingsCache = { ...appSettings, id: settings.id, updatedAt: timestamp };
 };
 
 export const getGiftHistory = async (options?: DateRangeQueryOptions) => {
-  const constraints: QueryConstraint[] = [];
-  applyDateRangeConstraints(constraints, 'giftedDate', options);
-  constraints.push(orderBy('giftedDate', 'desc'));
-  applyLimitConstraint(constraints, options?.limitCount);
-  const giftQuery = query(collection(db, GIFT_HISTORY), ...constraints);
-  const snapshot = await getDocs(giftQuery);
-  return snapshot.docs.map((giftDoc) => mapGiftHistoryDoc(giftDoc.id, giftDoc.data()));
+  return getCached(cacheKey(GIFT_HISTORY, options), async () => {
+    const constraints: QueryConstraint[] = [];
+    applyDateRangeConstraints(constraints, 'giftedDate', options);
+    constraints.push(orderBy('giftedDate', 'desc'));
+    applyLimitConstraint(constraints, options?.limitCount);
+    const giftQuery = query(collection(db, GIFT_HISTORY), ...constraints);
+    const snapshot = await getDocs(giftQuery);
+    return snapshot.docs.map((giftDoc) => mapGiftHistoryDoc(giftDoc.id, giftDoc.data()));
+  });
 };
 
 export const getGiftHistoryByCustomerId = async (customerId: string) => {
@@ -1108,6 +1190,7 @@ export const createGiftHistoryRecord = async (gift: GiftHistoryFormData, auditUs
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
   return docRef;
 };
 
@@ -1117,16 +1200,20 @@ export const updateGiftHistoryRecord = async (giftId: string, gift: Partial<Gift
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
 };
 
 export const deleteGiftHistoryRecord = async (giftId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, GIFT_HISTORY, giftId));
+  clearFirestoreSessionCache();
 };
 
 export const getGiftItems = async () => {
-  const giftItemsQuery = query(collection(db, GIFT_ITEMS), orderBy('giftItemName', 'asc'));
-  const snapshot = await getDocs(giftItemsQuery);
-  return snapshot.docs.map((giftItemDoc) => mapGiftItemDoc(giftItemDoc.id, giftItemDoc.data()));
+  return getCached(cacheKey(GIFT_ITEMS), async () => {
+    const giftItemsQuery = query(collection(db, GIFT_ITEMS), orderBy('giftItemName', 'asc'));
+    const snapshot = await getDocs(giftItemsQuery);
+    return snapshot.docs.map((giftItemDoc) => mapGiftItemDoc(giftItemDoc.id, giftItemDoc.data()));
+  });
 };
 
 export const createGiftItem = async (giftItem: GiftItemFormData, auditUser?: AuditUser) => {
@@ -1137,6 +1224,7 @@ export const createGiftItem = async (giftItem: GiftItemFormData, auditUser?: Aud
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
   return docRef;
 };
 
@@ -1148,10 +1236,12 @@ export const updateGiftItemRecord = async (giftItemId: string, giftItem: GiftIte
     updatedAt: nowIso()
   });
 
+  clearFirestoreSessionCache();
 };
 
 export const deleteGiftItemRecord = async (giftItemId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, GIFT_ITEMS, giftItemId));
+  clearFirestoreSessionCache();
 };
 
 export const getUserProfiles = async () => {
@@ -1208,17 +1298,21 @@ export const deleteUserProfileRecord = async (profileId: string, auditUser?: Aud
 };
 
 export const getOffers = async () => {
-  const offersQuery = query(collection(db, OFFERS), orderBy('createdAt', 'desc'), firestoreLimit(DEFAULT_LIST_LIMIT));
-  const snapshot = await getDocs(offersQuery);
-  return snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
+  return getCached(cacheKey(OFFERS, { limitCount: DEFAULT_LIST_LIMIT }), async () => {
+    const offersQuery = query(collection(db, OFFERS), orderBy('createdAt', 'desc'), firestoreLimit(DEFAULT_LIST_LIMIT));
+    const snapshot = await getDocs(offersQuery);
+    return snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
+  });
 };
 
 export const getActiveOffers = async () => {
-  // Free-tier safety: customers only read active offer docs. Sorting stays local so this
-  // customer portal query does not require a composite Firestore index.
-  const offersQuery = query(collection(db, OFFERS), where('isActive', '==', true));
-  const snapshot = await getDocs(offersQuery);
-  const offers = snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
+  const offers = await getCached(cacheKey(OFFERS, { isActive: true }), async () => {
+    // Free-tier safety: customers only read active offer docs. Sorting stays local so this
+    // customer portal query does not require a composite Firestore index.
+    const offersQuery = query(collection(db, OFFERS), where('isActive', '==', true));
+    const snapshot = await getDocs(offersQuery);
+    return snapshot.docs.map((offerDoc) => mapOfferDoc(offerDoc.id, offerDoc.data()));
+  });
 
   // Inactive offer filtering: customers only receive active offers inside any valid date window.
   return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer, getTodayDateString()))).slice(0, ACTIVE_OFFER_LIMIT);
@@ -1234,6 +1328,7 @@ export const createOffer = async (offer: OfferFormData, auditUser?: AuditUser) =
     createdBy: auditUser?.userEmail || auditUser?.userId || ''
   });
 
+  clearFirestoreSessionCache();
   return docRef;
 };
 
@@ -1244,10 +1339,12 @@ export const updateOfferRecord = async (offerId: string, offer: OfferFormData, a
     ...payload,
     updatedAt: nowIso()
   });
+  clearFirestoreSessionCache();
 };
 
 export const deleteOfferRecord = async (offerId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, OFFERS, offerId));
+  clearFirestoreSessionCache();
 };
 
 export const getMonthlyCustomerStats = async (customerId: string, month = getCurrentMonthKey()) => {
@@ -1304,31 +1401,40 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
     })
   );
 
+  clearFirestoreSessionCache();
   return statsRows;
 };
 
 export const getOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const requestsQuery = query(collection(db, OVERDUE_PC_REQUESTS), orderBy('generatedAt', 'desc'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+  return getCached(cacheKey(OVERDUE_PC_REQUESTS, { status: 'Pending', limitCount }), async () => {
+    const requestsQuery = query(collection(db, OVERDUE_PC_REQUESTS), where('status', '==', 'Pending'), firestoreLimit(limitCount));
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs
+      .map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()))
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  });
 };
 
 export const getApprovedOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const requestsQuery = query(collection(db, OVERDUE_PC_REQUESTS), where('status', '==', 'Approved'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+  return getCached(cacheKey(OVERDUE_PC_REQUESTS, { status: 'Approved', limitCount }), async () => {
+    const requestsQuery = query(collection(db, OVERDUE_PC_REQUESTS), where('status', '==', 'Approved'), firestoreLimit(limitCount));
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+  });
 };
 
 export const getApprovedOverduePcRequestsForCustomer = async (customerId: string, limitCount = DEFAULT_LIST_LIMIT) => {
   if (!customerId) return [];
-  const requestsQuery = query(
-    collection(db, OVERDUE_PC_REQUESTS),
-    where('customerId', '==', customerId),
-    where('status', '==', 'Approved'),
-    firestoreLimit(limitCount)
-  );
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+  return getCached(cacheKey(OVERDUE_PC_REQUESTS, { customerId, status: 'Approved', limitCount }), async () => {
+    const requestsQuery = query(
+      collection(db, OVERDUE_PC_REQUESTS),
+      where('customerId', '==', customerId),
+      where('status', '==', 'Approved'),
+      firestoreLimit(limitCount)
+    );
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs.map((requestDoc) => mapOverduePcRequestDoc(requestDoc.id, requestDoc.data()));
+  });
 };
 
 export const generateOverduePcRequests = async (auditUser?: AuditUser, options?: DateRangeQueryOptions) => {
@@ -1382,6 +1488,7 @@ export const generateOverduePcRequests = async (auditUser?: AuditUser, options?:
     })
   );
 
+  clearFirestoreSessionCache();
   return { createdCount };
 };
 
@@ -1430,32 +1537,40 @@ export const reviewOverduePcRequest = async (
       });
     }
   });
+
+  clearFirestoreSessionCache();
 };
 
 export const getBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), where('status', '==', 'Pending'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs
-    .map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()))
-    .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  return getCached(cacheKey(BONUS_PC_REQUESTS, { status: 'Pending', limitCount }), async () => {
+    const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), where('status', '==', 'Pending'), firestoreLimit(limitCount));
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs
+      .map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()))
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  });
 };
 
 export const getApprovedBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), where('status', '==', 'Approved'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+  return getCached(cacheKey(BONUS_PC_REQUESTS, { status: 'Approved', limitCount }), async () => {
+    const requestsQuery = query(collection(db, BONUS_PC_REQUESTS), where('status', '==', 'Approved'), firestoreLimit(limitCount));
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+  });
 };
 
 export const getApprovedBonusPcRequestsForCustomer = async (customerId: string, limitCount = DEFAULT_LIST_LIMIT) => {
   if (!customerId) return [];
-  const requestsQuery = query(
-    collection(db, BONUS_PC_REQUESTS),
-    where('customerId', '==', customerId),
-    where('status', '==', 'Approved'),
-    firestoreLimit(limitCount)
-  );
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+  return getCached(cacheKey(BONUS_PC_REQUESTS, { customerId, status: 'Approved', limitCount }), async () => {
+    const requestsQuery = query(
+      collection(db, BONUS_PC_REQUESTS),
+      where('customerId', '==', customerId),
+      where('status', '==', 'Approved'),
+      firestoreLimit(limitCount)
+    );
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
+  });
 };
 
 export const generateBonusPcRequests = async (auditUser?: AuditUser, month = getCurrentMonthKey()) => {
@@ -1599,6 +1714,7 @@ export const generateBonusPcRequests = async (auditUser?: AuditUser, month = get
     })
   );
 
+  clearFirestoreSessionCache();
   return { createdCount };
 };
 
@@ -1647,6 +1763,8 @@ export const reviewBonusPcRequest = async (
       });
     }
   });
+
+  clearFirestoreSessionCache();
 };
 
 export const markBonusPcRequestSeen = async (requestId: string) => {
@@ -1654,19 +1772,25 @@ export const markBonusPcRequestSeen = async (requestId: string) => {
   await updateDoc(doc(db, BONUS_PC_REQUESTS, requestId), {
     customerSeenAt: nowIso()
   });
+  clearFirestoreSessionCache(BONUS_PC_REQUESTS);
 };
 
 export const getRewardItems = async () => {
-  const rewardsQuery = query(collection(db, REWARD_ITEMS), orderBy('requiredPoints', 'asc'), firestoreLimit(ACTIVE_REWARD_LIMIT));
-  const snapshot = await getDocs(rewardsQuery);
-  return snapshot.docs.map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()));
+  return getCached(cacheKey(REWARD_ITEMS, { order: 'requiredPoints', limitCount: ACTIVE_REWARD_LIMIT }), async () => {
+    const rewardsQuery = query(collection(db, REWARD_ITEMS), orderBy('requiredPoints', 'asc'), firestoreLimit(ACTIVE_REWARD_LIMIT));
+    const snapshot = await getDocs(rewardsQuery);
+    return snapshot.docs.map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()));
+  });
 };
 
 export const getActiveRewardItems = async () => {
-  const rewardsQuery = query(collection(db, REWARD_ITEMS), where('isActive', '==', true));
-  const snapshot = await getDocs(rewardsQuery);
-  return snapshot.docs
-    .map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()))
+  const rewards = await getCached(cacheKey(REWARD_ITEMS, { isActive: true }), async () => {
+    const rewardsQuery = query(collection(db, REWARD_ITEMS), where('isActive', '==', true));
+    const snapshot = await getDocs(rewardsQuery);
+    return snapshot.docs.map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()));
+  });
+
+  return rewards
     .sort((left, right) => left.requiredPoints - right.requiredPoints)
     .slice(0, ACTIVE_REWARD_LIMIT);
 };
@@ -1698,6 +1822,7 @@ export const createRewardItem = async (reward: RewardFormData, auditUser?: Audit
     updatedAt: timestamp
   });
 
+  clearFirestoreSessionCache();
   return docRef;
 };
 
@@ -1707,28 +1832,34 @@ export const updateRewardItemRecord = async (rewardId: string, reward: RewardFor
     ...payload,
     updatedAt: nowIso()
   });
+  clearFirestoreSessionCache();
 };
 
 export const deleteRewardItemRecord = async (rewardId: string, auditUser?: AuditUser) => {
   await deleteDoc(doc(db, REWARD_ITEMS, rewardId));
+  clearFirestoreSessionCache();
 };
 
 export const getRedemptionRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
-  const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), orderBy('requestedAt', 'desc'), firestoreLimit(limitCount));
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs
-    .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
-    .filter((request) => request.status !== 'Rejected');
+  return getCached(cacheKey(REDEMPTION_REQUESTS, { order: 'requestedAt', limitCount }), async () => {
+    const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), orderBy('requestedAt', 'desc'), firestoreLimit(limitCount));
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs
+      .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
+      .filter((request) => request.status !== 'Rejected');
+  });
 };
 
 export const getRedemptionRequestsForCustomer = async (customerId: string, limitCount = 20) => {
   if (!customerId) return [];
-  const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), where('customerId', '==', customerId), firestoreLimit(limitCount));
-  const snapshot = await getDocs(requestsQuery);
-  return snapshot.docs
-    .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
-    .filter((request) => request.status !== 'Rejected')
-    .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt));
+  return getCached(cacheKey(REDEMPTION_REQUESTS, { customerId, limitCount }), async () => {
+    const requestsQuery = query(collection(db, REDEMPTION_REQUESTS), where('customerId', '==', customerId), firestoreLimit(limitCount));
+    const snapshot = await getDocs(requestsQuery);
+    return snapshot.docs
+      .map((requestDoc) => mapRedemptionRequestDoc(requestDoc.id, requestDoc.data()))
+      .filter((request) => request.status !== 'Rejected')
+      .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt));
+  });
 };
 
 export const createRedemptionRequest = async (customer: Customer, reward: RewardItem) => {
@@ -1745,6 +1876,7 @@ export const createRedemptionRequest = async (customer: Customer, reward: Reward
     status: 'Pending',
     requestedAt: timestamp
   });
+  clearFirestoreSessionCache();
 };
 
 export const reviewRedemptionRequest = async (
@@ -1781,6 +1913,8 @@ export const reviewRedemptionRequest = async (
       notes
     });
   });
+
+  clearFirestoreSessionCache();
 };
 
 export const removeRedemptionApproval = async (requestId: string, auditUser?: AuditUser) => {
@@ -1808,6 +1942,8 @@ export const removeRedemptionApproval = async (requestId: string, auditUser?: Au
 
     transaction.delete(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`));
   });
+
+  clearFirestoreSessionCache();
 };
 
 export const markRedemptionRequestGifted = async (requestId: string, auditUser?: AuditUser) => {
@@ -1877,4 +2013,6 @@ export const markRedemptionRequestGifted = async (requestId: string, auditUser?:
       createdAt: timestamp
     });
   });
+
+  clearFirestoreSessionCache();
 };

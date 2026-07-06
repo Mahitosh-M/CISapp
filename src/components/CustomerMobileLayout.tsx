@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom
 import { Award, Bell, Coins, FileText, Home, Tags, Wallet, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import ExternalImage from './ExternalImage';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { markBonusPcRequestSeen } from '../services/firestoreService';
@@ -149,7 +150,7 @@ const CustomerMobileLayout = () => {
               Active Offer
             </div>
             {latestUnreadOffer.imageUrl ? (
-              <img loading="lazy" src={latestUnreadOffer.imageUrl} alt={latestUnreadOffer.title} style={{ width: '100%', borderRadius: 16, marginBottom: 14, maxHeight: 190, objectFit: 'cover' }} />
+              <ExternalImage src={latestUnreadOffer.imageUrl} alt={latestUnreadOffer.title} style={{ width: '100%', borderRadius: 16, marginBottom: 14, maxHeight: 190, objectFit: 'cover' }} />
             ) : null}
             <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 8 }}>Latest Offer</div>
             <div style={{ fontWeight: 900, fontSize: 22 }}>{latestUnreadOffer.title}</div>

@@ -9,6 +9,7 @@ interface DateRangeShortcutsProps {
 
 const shortcuts: { key: DateRangeShortcutKey; label: string }[] = [
   { key: 'this_month', label: 'This Month' },
+  { key: 'this_year', label: 'This Year' },
   { key: 'last_month', label: 'Last Month' },
   { key: 'last_quarter', label: 'Last Quarter' },
   { key: 'last_6_months', label: 'Last 6 Months' },

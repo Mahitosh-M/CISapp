@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Award } from 'lucide-react';
+import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { createRedemptionRequest } from '../../services/firestoreService';
 import { formatApc } from '../../utils/loyalty';
@@ -44,7 +45,7 @@ const CustomerPartnerPoints = () => {
       <section style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 12 }}>
           <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>Ashoka Partner Points</div>
+            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>Partner Points</div>
             <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Rewards and partner level</div>
           </div>
           <Award size={26} color="#0B1F3A" />
@@ -114,7 +115,7 @@ const CustomerPartnerPoints = () => {
             </div>
           </>
         ) : (
-          <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>Your Ashoka Partner Points will appear after your account refreshes.</div>
+          <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>Your Partner Points will appear after your account refreshes.</div>
         )}
       </section>
 
@@ -137,8 +138,7 @@ const CustomerPartnerPoints = () => {
               return (
                 <div key={reward.id} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 10 }}>
                   {reward.imageUrl ? (
-                    <img
-                      loading="lazy"
+                    <ExternalImage
                       src={reward.imageUrl}
                       alt={reward.name}
                       style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 12, display: 'block', marginBottom: 10 }}

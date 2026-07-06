@@ -8,33 +8,38 @@ import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildIntelligenceSummary, buildMonthlyRankings } from '../utils/customerAnalytics';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
-import { normalizeScoreWeights } from '../utils/settings';
 import type { CustomerScore } from '../types';
-
-type StaffListKey = 'top' | 'risk';
 
 const Intelligence = () => {
   const { userProfile } = useAuth();
   const { customers, invoices, payments, settings, customerScores, loading, error } = useErpData();
   const isMobile = useIsMobile();
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  const [activeStaffList, setActiveStaffList] = useState<StaffListKey>('top');
+  const [selectedRankingMonth, setSelectedRankingMonth] = useState('');
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
-  const monthlyRankings = useMemo(() => buildMonthlyRankings(customers, invoices, payments, new Date(), settings), [customers, invoices, payments, settings]);
-  const scoreWeights = normalizeScoreWeights(settings);
   const formatWholeOrders = (value: number) => String(Math.round(value));
   const isStaff = userProfile?.role === 'Staff';
   const selectedCustomerScore = customerScores.find((customer) => customer.customerId === selectedCustomerId);
+  const rankingMonthOptions = useMemo(() => {
+    const referenceDate = new Date();
+    return [0, 1].map((monthsAgo) => {
+      const monthStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - monthsAgo, 1);
+      const monthKey = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = monthStart.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+      return { monthKey, monthLabel };
+    });
+  }, []);
+  const selectedMonthlyRanking = useMemo(() => {
+    if (!selectedRankingMonth) return undefined;
+    return buildMonthlyRankings(customers, invoices, payments, new Date(), settings)
+      .find((month) => month.monthKey === selectedRankingMonth);
+  }, [customers, invoices, payments, selectedRankingMonth, settings]);
 
   const topCustomers = customerScores;
-  const riskCustomers = customerScores
-    .filter((customer) => customer.riskLevel === 'High' || customer.overdueStatus === 'Overdue' || customer.paymentDisciplineScore < 65);
-  const profitableCustomers = [...customerScores].sort((a, b) => b.totalProfit - a.totalProfit);
-  const disciplinedCustomers = [...customerScores]
-    .filter((customer) => customer.invoiceCount > 0)
-    .sort((a, b) => b.paymentDisciplineScore - a.paymentDisciplineScore);
 
   const metricGridStyle: CSSProperties = {
     display: 'grid',
@@ -97,15 +102,6 @@ const Intelligence = () => {
     color: '#0B1F3A'
   };
 
-  const staffListButtonStyle: CSSProperties = {
-    border: '1px solid #D8DEE9',
-    borderRadius: 10,
-    padding: '10px 14px',
-    fontWeight: 900,
-    cursor: 'pointer',
-    transition: 'background 180ms ease, color 180ms ease, border-color 180ms ease'
-  };
-
   const renderCustomerRow = (
     customer: CustomerScore,
     value: string,
@@ -143,38 +139,6 @@ const Intelligence = () => {
     </div>
   );
 
-  const staffListConfigs: Record<StaffListKey, { title: string; panel: JSX.Element }> = {
-    top: {
-      title: 'Top Customers',
-      panel: renderCustomerListPanel(
-        'Top Customers',
-        topCustomers,
-        'Add Firestore invoices to generate customer rankings.',
-        (customer) =>
-          renderCustomerRow(
-            customer,
-            `#${customer.rank}`,
-            `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${formatWholeOrders(customer.customerMonthlyOrders)} / ${formatWholeOrders(customer.monthlyOrderTarget)}`
-          )
-      )
-    },
-    risk: {
-      title: 'Risk Customers',
-      panel: renderCustomerListPanel(
-        'Risk Customers',
-        riskCustomers,
-        'No risk customers in the current rolling window.',
-        (customer) =>
-          renderCustomerRow(
-            customer,
-            formatMoney(customer.outstanding),
-            `${customer.riskLevel} risk | ${customer.overdueStatus} | Pay score ${customer.paymentDisciplineScore}`,
-            '#F2994A'
-          )
-      )
-    }
-  };
-
   if (loading) {
     return <SectionHeader title="Customer Intelligence" description="Loading Firestore intelligence data..." />;
   }
@@ -195,57 +159,24 @@ const Intelligence = () => {
 
       {!isStaff ? (
         <div style={metricGridStyle}>
-          <StatCard title="Rolling Sales" value={formatMoney(summary.totalSales)} subtitle="Current 2-month window" />
-          <StatCard title="Rolling Profit" value={formatMoney(summary.totalProfit)} subtitle="Profit contribution" />
-          <StatCard title="Total Payments" value={formatMoney(summary.totalPayments)} subtitle="Collected against scored invoices" />
           <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Weighted score" />
           <StatCard title="Partner Coin" value={`${formatMoney(summary.giftBudget)} PC`} subtitle="Mapped from available PC rules" />
         </div>
       ) : null}
 
-      {!isStaff ? (
-        <div style={panelGridStyle}>
-          <div style={whiteCardStyle}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Profit Contribution</div>
-            <div style={{ color: '#D4AF37', fontSize: 28, fontWeight: 800 }}>{Math.round(scoreWeights.profit * 100)}%</div>
-            <div style={{ color: '#5C6A84', marginTop: 8 }}>Primary driver because pharma customer quality depends on profit, not only sales.</div>
-          </div>
-          <div style={whiteCardStyle}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Payment Discipline</div>
-            <div style={{ color: '#D4AF37', fontSize: 28, fontWeight: 800 }}>{Math.round(scoreWeights.paymentDiscipline * 100)}%</div>
-            <div style={{ color: '#5C6A84', marginTop: 8 }}>Rewards timely settlement and protects working capital.</div>
-          </div>
-          <div style={whiteCardStyle}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Frequency + Sales + Loyalty</div>
-            <div style={{ color: '#D4AF37', fontSize: 28, fontWeight: 800 }}>{Math.round((scoreWeights.frequency + scoreWeights.sales + scoreWeights.loyalty) * 100)}%</div>
-            <div style={{ color: '#5C6A84', marginTop: 8 }}>Targets are based on recent average and capped to avoid sudden jumps.</div>
-          </div>
-        </div>
-      ) : null}
-
       {isStaff ? (
         <div style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-            {(Object.keys(staffListConfigs) as StaffListKey[]).map((key) => {
-              const isActive = activeStaffList === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  style={{
-                    ...staffListButtonStyle,
-                    background: isActive ? '#0B1F3A' : '#FFFFFF',
-                    borderColor: isActive ? '#0B1F3A' : '#D8DEE9',
-                    color: isActive ? '#FFFFFF' : '#0B1F3A'
-                  }}
-                  onClick={() => setActiveStaffList(key)}
-                >
-                  {staffListConfigs[key].title}
-                </button>
-              );
-            })}
-          </div>
-          {staffListConfigs[activeStaffList].panel}
+          {renderCustomerListPanel(
+            'Top Customers',
+            topCustomers,
+            'Add Firestore invoices to generate customer rankings.',
+            (customer) =>
+              renderCustomerRow(
+                customer,
+                `#${customer.rank}`,
+                `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${formatWholeOrders(customer.customerMonthlyOrders)} / ${formatWholeOrders(customer.monthlyOrderTarget)}`
+              )
+          )}
         </div>
       ) : (
         <div style={panelGridStyle}>
@@ -260,72 +191,29 @@ const Intelligence = () => {
                 `Score ${customer.intelligenceScore} | Sales ${formatMoney(customer.customerMonthlySales)} / ${formatMoney(customer.monthlySalesTarget)} | Orders ${formatWholeOrders(customer.customerMonthlyOrders)} / ${formatWholeOrders(customer.monthlyOrderTarget)}`
               )
           )}
-
-          {renderCustomerListPanel(
-            'Risk Customers',
-            riskCustomers,
-            'No risk customers in the current rolling window.',
-            (customer) =>
-              renderCustomerRow(
-                customer,
-                formatMoney(customer.outstanding),
-                `${customer.riskLevel} risk | ${customer.overdueStatus} | Pay score ${customer.paymentDisciplineScore}`,
-                '#F2994A'
-              )
-          )}
-
-          {renderCustomerListPanel(
-            'Most Profitable',
-            profitableCustomers,
-            'No profit activity in the current rolling window.',
-            (customer) => renderCustomerRow(customer, formatMoney(customer.totalProfit), `Profit from ${customer.invoiceCount} invoice(s)`)
-          )}
-
-          {renderCustomerListPanel(
-            'Best Payment Discipline',
-            disciplinedCustomers,
-            'No paid invoice activity in the current rolling window.',
-            (customer) => renderCustomerRow(customer, `${customer.paymentDisciplineScore}`, `${formatMoney(customer.totalPayments)} collected`, '#56CCF2')
-          )}
         </div>
       )}
 
-      {isStaff ? (
-        <div style={{ ...whiteCardStyle, marginBottom: 24 }}>
-          <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Select Customer</div>
-          <select style={inputStyle} value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)}>
-            <option value="">Select customer</option>
-            {customerScores.map((customer) => (
-              <option key={customer.customerId} value={customer.customerId}>{customer.customerName}</option>
-            ))}
-          </select>
-          {selectedCustomerScore ? (
-            <div style={{ marginTop: 18 }}>
-              <CustomerScoreCard customer={selectedCustomerScore} />
-            </div>
-          ) : (
-            <div style={{ color: '#67738E', marginTop: 12 }}>Select a customer to view score breakdown.</div>
-          )}
-        </div>
-      ) : (
-        <>
-          <SectionHeader
-            title="Score Breakdown"
-            description="Each card shows the weighted score used for ranking, partner level, and PC point decisions."
-          />
-          <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 8 }}>
-            Outstanding penalty includes unpaid invoices and previous outstanding. New customers use onboarding mode until enough history is available.
+      <SectionHeader
+        title="Score Breakdown"
+        description="Select a customer to load only that customer's score details on screen."
+      />
+      <div style={{ ...whiteCardStyle, marginBottom: 24 }}>
+        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Select Customer</div>
+        <select style={inputStyle} value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)}>
+          <option value="">Select customer</option>
+          {customerScores.map((customer) => (
+            <option key={customer.customerId} value={customer.customerId}>{formatCustomerSelectLabel(customer)}</option>
+          ))}
+        </select>
+        {selectedCustomerScore ? (
+          <div style={{ ...scoreCardGridStyle, marginTop: 18, marginBottom: 0 }}>
+            <CustomerScoreCard customer={selectedCustomerScore} />
           </div>
-          <div style={{ color: '#BFC8D9', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
-          <div style={{ ...latestFiveScrollStyle, maxHeight: 520 }}>
-            <div style={scoreCardGridStyle}>
-              {customerScores.map((customer) => (
-                <CustomerScoreCard key={customer.customerId} customer={customer} />
-              ))}
-            </div>
-          </div>
-        </>
-      )}
+        ) : (
+          <div style={{ color: '#67738E', marginTop: 12 }}>Select a customer to view score breakdown.</div>
+        )}
+      </div>
 
       {!isStaff ? (
         <>
@@ -333,40 +221,52 @@ const Intelligence = () => {
             title="Monthly Rankings"
             description="Each ranking uses rolling 2-month data, so one quiet month does not unfairly punish a customer."
           />
-          <div style={panelGridStyle}>
-            {monthlyRankings.map((month) => (
-              <div key={month.monthKey} style={panelStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                  <div>
-                    <div style={{ color: '#D4AF37', fontWeight: 800 }}>{month.monthLabel}</div>
-                    <div style={mutedTextStyle}>{month.periodLabel}</div>
+          <div style={{ ...whiteCardStyle, marginBottom: 18 }}>
+            <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Select Month</div>
+            <select style={inputStyle} value={selectedRankingMonth} onChange={(event) => setSelectedRankingMonth(event.target.value)}>
+              <option value="">Select month</option>
+              {rankingMonthOptions.map((month) => (
+                <option key={month.monthKey} value={month.monthKey}>{month.monthLabel}</option>
+              ))}
+            </select>
+            {!selectedRankingMonth ? (
+              <div style={{ color: '#67738E', marginTop: 12 }}>Select a month to load rankings.</div>
+            ) : null}
+          </div>
+          {selectedMonthlyRanking ? (
+            <div style={panelGridStyle}>
+              <div style={panelStyle}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <div style={{ color: '#D4AF37', fontWeight: 800 }}>{selectedMonthlyRanking.monthLabel}</div>
+                      <div style={mutedTextStyle}>{selectedMonthlyRanking.periodLabel}</div>
+                    </div>
+                    <div style={{ color: '#BFC8D9', fontWeight: 700 }}>{selectedMonthlyRanking.rankings.length} ranked</div>
                   </div>
-                  <div style={{ color: '#BFC8D9', fontWeight: 700 }}>{month.rankings.length} ranked</div>
-                </div>
 
-                {month.rankings.length === 0 ? (
-                  <div style={{ color: '#BFC8D9' }}>No invoice activity for this ranking period.</div>
-                ) : (
-                  <div style={latestFiveScrollStyle}>
-                    {month.rankings.map((ranking) => (
-                      <div key={`${month.monthKey}-${ranking.customerId}`} style={rowStyle}>
-                        <div>
-                          <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
-                          <div style={mutedTextStyle}>
-                            {formatMoney(ranking.totalSales)} sales | {formatMoney(ranking.giftBudget)} PC
+                  {selectedMonthlyRanking.rankings.length === 0 ? (
+                    <div style={{ color: '#BFC8D9' }}>No invoice activity for this ranking period.</div>
+                  ) : (
+                    <div style={latestFiveScrollStyle}>
+                      {selectedMonthlyRanking.rankings.map((ranking) => (
+                        <div key={`${selectedMonthlyRanking.monthKey}-${ranking.customerId}`} style={rowStyle}>
+                          <div>
+                            <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
+                            <div style={mutedTextStyle}>
+                              {formatMoney(ranking.totalSales)} sales | {formatMoney(ranking.giftBudget)} PC
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ color: '#D4AF37', fontWeight: 800 }}>#{ranking.rank}</div>
+                            <div style={{ color: '#BFC8D9', fontSize: 13 }}>Score {ranking.intelligenceScore}</div>
                           </div>
                         </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ color: '#D4AF37', fontWeight: 800 }}>#{ranking.rank}</div>
-                          <div style={{ color: '#BFC8D9', fontSize: 13 }}>Score {ranking.intelligenceScore}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            ))}
-          </div>
+            ) : null}
         </>
       ) : null}
     </div>

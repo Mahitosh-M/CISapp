@@ -14,7 +14,7 @@ export interface DateRange {
   toDate: string;
 }
 
-export type DateRangeShortcutKey = 'this_month' | 'last_month' | 'last_quarter' | 'last_6_months' | 'last_year';
+export type DateRangeShortcutKey = 'this_month' | 'this_year' | 'last_month' | 'last_quarter' | 'last_6_months' | 'last_year';
 
 export const addDaysToDateString = (dateString: string, days: number) => {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -41,6 +41,16 @@ export const getCurrentMonthRange = () => {
   // Manual formatting avoids timezone shifts around midnight in date input values.
   return {
     fromDate: formatDateInputValue(firstDayOfCurrentMonth),
+    toDate: formatDateInputValue(today)
+  };
+};
+
+export const getThisYearRange = () => {
+  const today = new Date();
+  const firstDayOfCurrentYear = new Date(today.getFullYear(), 0, 1);
+
+  return {
+    fromDate: formatDateInputValue(firstDayOfCurrentYear),
     toDate: formatDateInputValue(today)
   };
 };
@@ -102,6 +112,7 @@ export const getLastFinancialYearRange = () => {
 
 export const getDateRangeShortcut = (shortcut: DateRangeShortcutKey): DateRange => {
   if (shortcut === 'this_month') return getCurrentMonthRange();
+  if (shortcut === 'this_year') return getThisYearRange();
   if (shortcut === 'last_quarter') return getLastFinancialQuarterRange();
   if (shortcut === 'last_6_months') return getLastSixMonthsRange();
   if (shortcut === 'last_year') return getLastFinancialYearRange();

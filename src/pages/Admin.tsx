@@ -10,6 +10,7 @@ import {
 } from '../services/firestoreService';
 import { useErpData } from '../hooks/useErpData';
 import type { UserProfile, UserRole } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 
 const Admin = () => {
@@ -262,7 +263,7 @@ const Admin = () => {
             <select style={inputStyle} value={customerLoginId} onChange={(event) => setCustomerLoginId(event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name} - {customer.mobile}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer, true)}</option>
               ))}
             </select>
           </label>

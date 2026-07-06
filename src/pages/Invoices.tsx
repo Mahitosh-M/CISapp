@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   calculateDueDate,
+  createPayment,
   createInvoice,
   deleteInvoiceRecord,
   getAppSettings,
@@ -16,10 +17,11 @@ import {
   syncCustomerPartnerLevelsFromFirestore,
   updateInvoiceRecord
 } from '../services/firestoreService';
-import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '../types';
+import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment, PaymentMode } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
-import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
 
@@ -37,7 +39,21 @@ const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   notes: ''
 });
 
-const LIST_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 1;
+const LOAD_MORE_PAGE_SIZE = 3;
+const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Card', 'Other'];
+
+const getInvoiceNumberRank = (invoiceNumber: string) => {
+  const match = invoiceNumber.match(/(\d+)(?!.*\d)/);
+  return match ? Number(match[1]) : 0;
+};
+
+const sortByLatestInvoiceNumber = <T extends { invoiceNumber: string }>(rows: T[]) => {
+  return [...rows].sort((left, right) => {
+    const numberDifference = getInvoiceNumberRank(right.invoiceNumber) - getInvoiceNumberRank(left.invoiceNumber);
+    return numberDifference || right.invoiceNumber.localeCompare(left.invoiceNumber);
+  });
+};
 
 const getInvoiceStatus = (dueDate: string, totalSales: number, paidAmount: number) => {
   const outstanding = getPendingAmount(totalSales, paidAmount);
@@ -56,6 +72,27 @@ const escapeHtml = (value: string | number) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
+const getDaysBetweenDateStrings = (fromDate: string, toDate: string) => {
+  const fromTime = new Date(`${fromDate}T00:00:00`).getTime();
+  const toTime = new Date(`${toDate}T00:00:00`).getTime();
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime)) return 0;
+  return Math.ceil((toTime - fromTime) / (24 * 60 * 60 * 1000));
+};
+
+const formatWhatsAppPhoneNumber = (mobile: string) => {
+  const digits = mobile.replace(/\D/g, '');
+
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith('0')) return `91${digits.slice(1)}`;
+  if (digits.length >= 11 && digits.length <= 15 && !digits.startsWith('0')) return digits;
+
+  return '';
+};
+
+const formatReminderAmount = (amount: number) => {
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.max(0, Math.round(amount)));
+};
+
 const Invoices = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -63,6 +100,9 @@ const Invoices = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('INV-0001');
   const [formData, setFormData] = useState<InvoiceFormData>(buildEmptyInvoiceForm());
+  const [sameDayPaymentAmount, setSameDayPaymentAmount] = useState(0);
+  const [sameDayCashDiscount, setSameDayCashDiscount] = useState(0);
+  const [sameDayPaymentMode, setSameDayPaymentMode] = useState<PaymentMode>('Cash');
   const [editingInvoiceId, setEditingInvoiceId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
@@ -87,7 +127,7 @@ const Invoices = () => {
 
       const [customerRows, invoiceRows, invoiceNumber, appSettings] = await Promise.all([
         getCustomers(),
-        getInvoices({ limitCount: invoiceLimit }),
+        getInvoices({ limitCount: invoiceLimit, sortBy: 'invoiceNumber' }),
         getNextInvoiceNumber(),
         getAppSettings()
       ]);
@@ -129,6 +169,7 @@ const Invoices = () => {
         return {
           ...invoice,
           effectiveDueDate,
+          customerMobile: customer?.mobile ?? '',
           paidAmount,
           outstanding,
           status
@@ -141,7 +182,7 @@ const Invoices = () => {
         return matchesSearch && matchesCustomer && matchesStatus;
       });
 
-    return sortNewestFirst(rows, ['updatedAt', 'createdAt', 'date']);
+    return sortByLatestInvoiceNumber(rows);
   }, [customerFilter, customers, invoices, payments, searchText, settings, statusFilter]);
 
   const recalculateTotals = (nextFormData: InvoiceFormData): InvoiceFormData => {
@@ -197,6 +238,9 @@ const Invoices = () => {
 
   const resetForm = () => {
     setFormData(buildEmptyInvoiceForm());
+    setSameDayPaymentAmount(0);
+    setSameDayCashDiscount(0);
+    setSameDayPaymentMode('Cash');
     setEditingInvoiceId('');
   };
 
@@ -221,8 +265,25 @@ const Invoices = () => {
         await updateInvoiceRecord(editingInvoiceId, formData, auditUser);
         setMessage('Invoice updated successfully.');
       } else {
-        await createInvoice(formData, auditUser);
-        setMessage('Invoice created successfully.');
+        const createdInvoice = await createInvoice(formData, auditUser);
+        const cleanPaymentAmount = Math.max(0, Number(sameDayPaymentAmount) || 0);
+        const cleanCashDiscount = Math.max(0, Number(sameDayCashDiscount) || 0);
+
+        if (cleanPaymentAmount > 0) {
+          await createPayment({
+            customerId: formData.customerId,
+            customerName: formData.customerName,
+            invoiceId: createdInvoice.id,
+            invoiceNumber: createdInvoice.invoiceNumber,
+            date: formData.date,
+            amount: cleanPaymentAmount,
+            cashDiscount: cleanCashDiscount,
+            mode: sameDayPaymentMode,
+            notes: 'Payment entered during invoice creation'
+          }, auditUser);
+        }
+
+        setMessage(cleanPaymentAmount > 0 ? 'Invoice and same-day payment created successfully.' : 'Invoice created successfully.');
       }
 
       await syncCustomerPartnerLevelsFromFirestore();
@@ -242,6 +303,9 @@ const Invoices = () => {
     }
 
     setEditingInvoiceId(invoice.id);
+    setSameDayPaymentAmount(0);
+    setSameDayCashDiscount(0);
+    setSameDayPaymentMode('Cash');
     setFormData({
       customerId: invoice.customerId,
       customerName: invoice.customerName,
@@ -336,9 +400,34 @@ const Invoices = () => {
     printWindow.print();
   };
 
+  const handleWhatsAppReminder = (invoice: Invoice & { effectiveDueDate: string; outstanding: number; customerMobile?: string }) => {
+    const phoneNumber = formatWhatsAppPhoneNumber(invoice.customerMobile || '');
+
+    if (!phoneNumber) {
+      setError(`Customer mobile number is missing or invalid for ${invoice.customerName}. Add a valid phone number before sending a WhatsApp reminder.`);
+      return;
+    }
+
+    const daysRemaining = getDaysBetweenDateStrings(getTodayDateString(), invoice.effectiveDueDate);
+    const reminderMessage = [
+      'Namaste Sir,',
+      '',
+      `Invoice No. ${invoice.invoiceNumber} dated ${formatDate(invoice.date)} is due in ${daysRemaining} days.`,
+      '',
+      `Outstanding amount: ₹${formatReminderAmount(invoice.outstanding)}`,
+      '',
+      "Please make the payment on time so you don't miss out on your Partner Coin (PC) benefit.",
+      '',
+      'Thank you'
+    ].join('\n');
+
+    setError('');
+    window.open(`https://wa.me/${phoneNumber}?text=${encodeURIComponent(reminderMessage)}`, '_blank', 'noopener,noreferrer');
+  };
+
   const handleLoadMore = () => {
     // Free-tier safety: older rows are fetched only when the user asks for them.
-    setInvoiceLimit((current) => current + LIST_PAGE_SIZE);
+    setInvoiceLimit((current) => current + LOAD_MORE_PAGE_SIZE);
   };
 
   const cardStyle: CSSProperties = {
@@ -427,7 +516,7 @@ const Invoices = () => {
             <select style={inputStyle} value={formData.customerId} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
@@ -461,6 +550,41 @@ const Invoices = () => {
             Notes
             <input style={inputStyle} value={formData.notes} onChange={(event) => handleFieldChange('notes', event.target.value)} />
           </label>
+
+          {!editingInvoiceId ? (
+            <>
+              <label style={labelStyle}>
+                Payment Received
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="0"
+                  value={sameDayPaymentAmount}
+                  onChange={(event) => setSameDayPaymentAmount(Number(event.target.value) || 0)}
+                />
+              </label>
+
+              <label style={labelStyle}>
+                Cash Discount
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="0"
+                  value={sameDayCashDiscount}
+                  onChange={(event) => setSameDayCashDiscount(Number(event.target.value) || 0)}
+                />
+              </label>
+
+              <label style={labelStyle}>
+                Payment Mode
+                <select style={inputStyle} value={sameDayPaymentMode} onChange={(event) => setSameDayPaymentMode(event.target.value as PaymentMode)}>
+                  {paymentModes.map((mode) => (
+                    <option key={mode} value={mode}>{mode}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
         </div>
 
         {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
@@ -489,7 +613,7 @@ const Invoices = () => {
             <select style={inputStyle} value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)}>
               <option value="all">All customers</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
@@ -554,6 +678,15 @@ const Invoices = () => {
                       <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }} onClick={() => handlePrint(invoice)}>
                         Print
                       </button>
+                      {invoice.outstanding > 0 ? (
+                        <button
+                          type="button"
+                          style={{ ...buttonStyle, background: '#25D366', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }}
+                          onClick={() => handleWhatsAppReminder(invoice)}
+                        >
+                          Send WhatsApp Reminder
+                        </button>
+                      ) : null}
                       {canDeleteRecords ? (
                         <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(invoice)}>
                           Delete
