@@ -141,6 +141,13 @@ const Settings = () => {
     }));
   };
 
+  const handleBusinessCostChange = (field: 'fixedMonthlyCosts', value: string) => {
+    setSettings((current) => ({
+      ...current,
+      [field]: Number(value) || 0
+    }));
+  };
+
   const handleStaffPermissionChange = (field: keyof AppSettings['staffPermissions'], value: boolean) => {
     setSettings((current) => ({
       ...current,
@@ -380,6 +387,24 @@ const Settings = () => {
           Reset Targets to Defaults
         </button>
 
+        <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Business Cost Settings</div>
+        <div style={gridStyle}>
+          <label style={labelStyle}>
+            Fixed Monthly Costs Per Month
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              step="0.01"
+              value={settings.fixedMonthlyCosts}
+              onChange={(event) => handleBusinessCostChange('fixedMonthlyCosts', event.target.value)}
+            />
+          </label>
+        </div>
+        <div style={{ color: '#5C6A84', fontSize: 13, marginTop: 8 }}>
+          Enter the cost for one full month only. Analytics allocates it to the selected date range automatically.
+        </div>
+
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>ERP Control Settings</div>
         <div style={gridStyle}>
           <label style={labelStyle}>
@@ -422,14 +447,6 @@ const Settings = () => {
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Staff Permissions</div>
         <div style={gridStyle}>
-          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input
-              type="checkbox"
-              checked={settings.staffPermissions.canViewDashboard}
-              onChange={(event) => handleStaffPermissionChange('canViewDashboard', event.target.checked)}
-            />
-            Staff can view dashboard
-          </label>
           <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
             <input
               type="checkbox"

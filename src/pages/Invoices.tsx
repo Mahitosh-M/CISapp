@@ -114,7 +114,7 @@ const Invoices = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const { canDeleteRecords, canEditRecords, userProfile } = useAuth();
+  const { canDeleteRecords, userProfile } = useAuth();
   const isMobile = useIsMobile();
   const auditUser = {
     userId: userProfile?.uid,
@@ -255,10 +255,7 @@ const Invoices = () => {
     setEditingInvoiceId('');
   };
 
-  const canEditInvoice = (invoice: Invoice) => {
-    if (canEditRecords) return true;
-    return (invoice.createdAt || '').slice(0, 10) === getTodayDateString();
-  };
+  const canEditInvoice = (_invoice: Invoice) => true;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -308,11 +305,6 @@ const Invoices = () => {
   };
 
   const handleEdit = (invoice: Invoice) => {
-    if (!canEditInvoice(invoice)) {
-      setError('Staff can only edit invoices created today. Ask an Admin to edit old invoices.');
-      return;
-    }
-
     setEditingInvoiceId(invoice.id);
     setSameDayPaymentAmount(0);
     setSameDayCashDiscount(0);

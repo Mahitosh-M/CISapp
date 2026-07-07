@@ -12,11 +12,11 @@ import {
   getPaymentsForCustomerViewer,
   getRedemptionRequestsForCustomer
 } from '../services/firestoreService';
-import type { AppSettings, BonusPcRequest, Customer, CustomerApcSummary, Invoice, Offer, Payment, RedemptionRequest, RewardItem } from '../types';
+import type { AppSettings, BonusPcRequest, Customer, CustomerApcSummary, Invoice, Offer, OverduePcRequest, Payment, RedemptionRequest, RewardItem } from '../types';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { calculateDueStatus, calculateInvoiceApcInfo, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
 import { calculateCustomerApcBonuses } from '../utils/giftUtils';
-import { canViewRewardAtLevel, getIntelligenceScoreProgressPercent, getNextPartnerLevel, getPartnerLevelForTier, getScoreNeededForNextPartnerLevel } from '../utils/loyalty';
+import { canViewRewardAtLevel, getNextPartnerLevel, getPartnerLevelForTier, getPcThresholdProgress } from '../utils/loyalty';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
@@ -47,6 +47,7 @@ export const useCustomerPortalData = () => {
   const [availableRewards, setAvailableRewards] = useState<RewardItem[]>([]);
   const [redemptionRequests, setRedemptionRequests] = useState<RedemptionRequest[]>([]);
   const [bonusPcRequests, setBonusPcRequests] = useState<BonusPcRequest[]>([]);
+  const [overduePcRequests, setOverduePcRequests] = useState<OverduePcRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -103,20 +104,20 @@ export const useCustomerPortalData = () => {
         : 0;
       const currentLevel = getPartnerLevelForTier(customerWithIntelligenceTier?.tier);
       const nextLevel = getNextPartnerLevel(currentLevel);
-      const eligibleRewards = activeRewards.filter((reward) => reward.requiredPoints <= apcBalance && canViewRewardAtLevel(currentLevel, reward.levelRequired));
+      const levelEligibleRewards = activeRewards.filter((reward) => canViewRewardAtLevel(currentLevel, reward.levelRequired));
       const eligibleOffers = activeOffers.filter((offer) => canViewRewardAtLevel(currentLevel, offer.levelRequired || 'Active Partner'));
       const nextReward = activeRewards.find((reward) => reward.requiredPoints > apcBalance && canViewRewardAtLevel(currentLevel, reward.levelRequired));
-      const intelligenceScore = Math.round(intelligenceResult?.intelligenceScore ?? 0);
-      const pointsNeededForNextLevel = nextLevel ? getScoreNeededForNextPartnerLevel(intelligenceScore, currentLevel) : 0;
+      const rewardAvailable = levelEligibleRewards.some((reward) => reward.requiredPoints <= apcBalance);
+      const pcProgress = getPcThresholdProgress(apcBalance, currentLevel, appSettings);
       const apcData: CustomerApcSummary = {
         currentLevel,
         apcBalance,
         monthlyApcEarned,
-        progressPercent: getIntelligenceScoreProgressPercent(intelligenceScore, currentLevel),
+        progressPercent: pcProgress.progressPercent,
         nextLevel,
-        pointsNeededForNextLevel,
+        pointsNeededForNextLevel: pcProgress.pointsNeededForNextLevel,
         pointsNeededForNextReward: nextReward ? Math.max(0, Math.round(nextReward.requiredPoints - apcBalance)) : 0,
-        rewardAvailable: eligibleRewards.length > 0
+        rewardAvailable
       };
 
       setCustomer(customerWithIntelligenceTier);
@@ -125,9 +126,10 @@ export const useCustomerPortalData = () => {
       setSettings(appSettings);
       setOffers(eligibleOffers);
       setApcSummary(apcData);
-      setAvailableRewards(eligibleRewards);
+      setAvailableRewards(levelEligibleRewards);
       setRedemptionRequests(redemptions);
       setBonusPcRequests(approvedBonusPcRequests);
+      setOverduePcRequests(approvedOverduePcRequests);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load customer portal data.');
     } finally {
@@ -156,6 +158,7 @@ export const useCustomerPortalData = () => {
     availableRewards,
     redemptionRequests,
     bonusPcRequests,
+    overduePcRequests,
     loading,
     error,
     refreshData

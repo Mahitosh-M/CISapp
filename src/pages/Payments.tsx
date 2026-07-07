@@ -24,6 +24,7 @@ import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
 const LIST_PAGE_SIZE = 10;
 const LOAD_MORE_PAGE_SIZE = 10;
+const splitPaymentPattern = /Split payment\s+(\d+)\/(\d+)/i;
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -35,6 +36,24 @@ const emptyPaymentForm: PaymentFormData = {
   cashDiscount: 0,
   mode: 'Cash',
   notes: ''
+};
+
+const getSplitPaymentFallbackKey = (payment: Payment) => {
+  const match = payment.notes.match(splitPaymentPattern);
+  if (!match) return '';
+
+  const baseNotes = payment.notes.replace(/\s*\|?\s*Split payment\s+\d+\/\d+/i, '').trim();
+  const splitCount = match[2] || '';
+
+  return [payment.customerId, payment.date, payment.mode, baseNotes, splitCount].join('|');
+};
+
+const createSplitPaymentGroupId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `split_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 };
 
 const Payments = () => {
@@ -52,7 +71,7 @@ const Payments = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const { canDeleteRecords, canEditRecords, userProfile } = useAuth();
+  const { canDeleteRecords, userProfile } = useAuth();
   const isMobile = useIsMobile();
   const auditUser = {
     userId: userProfile?.uid,
@@ -166,6 +185,32 @@ const Payments = () => {
   }, [formData.amount, formData.cashDiscount, paymentEffect, selectedInvoiceOptions]);
 
   const appliedTotalPreview = allocationPreview.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
+
+  const splitPaymentTotalById = useMemo(() => {
+    const totals = new Map<string, number>();
+    const fallbackGroups = new Map<string, Payment[]>();
+
+    payments.forEach((payment) => {
+      if ((payment.splitPaymentTotalAmount ?? 0) > 0) {
+        totals.set(payment.id, payment.splitPaymentTotalAmount ?? 0);
+        return;
+      }
+
+      const fallbackKey = getSplitPaymentFallbackKey(payment);
+      if (!fallbackKey) return;
+
+      const group = fallbackGroups.get(fallbackKey) ?? [];
+      group.push(payment);
+      fallbackGroups.set(fallbackKey, group);
+    });
+
+    fallbackGroups.forEach((group) => {
+      const total = group.reduce((sum, payment) => sum + payment.amount, 0);
+      group.forEach((payment) => totals.set(payment.id, total));
+    });
+
+    return totals;
+  }, [payments]);
 
   useEffect(() => {
     if (editingPaymentId || !formData.customerId) return;
@@ -297,10 +342,7 @@ const Payments = () => {
     });
   };
 
-  const canEditPayment = (payment: Payment) => {
-    if (canEditRecords) return true;
-    return (payment.createdAt || '').slice(0, 10) === getTodayDateString();
-  };
+  const canEditPayment = (_payment: Payment) => true;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -336,6 +378,7 @@ const Payments = () => {
         setMessage(`Payment updated. ${formatMoney(amountAppliedToInvoicePreview)} applied to ${formData.invoiceNumber}.`);
       } else {
         const payableAllocations = allocationPreview.filter((allocation) => allocation.appliedTotal > 0);
+        const splitPaymentGroupId = payableAllocations.length > 1 ? createSplitPaymentGroupId() : '';
         await Promise.all(
           payableAllocations.map((allocation, index) =>
             createPayment({
@@ -346,6 +389,10 @@ const Payments = () => {
               customerName: allocation.invoice.customerName,
               amount: allocation.amount,
               cashDiscount: allocation.cashDiscount,
+              splitPaymentGroupId: splitPaymentGroupId || undefined,
+              splitPaymentTotalAmount: payableAllocations.length > 1 ? formData.amount : undefined,
+              splitPaymentPart: payableAllocations.length > 1 ? index + 1 : undefined,
+              splitPaymentCount: payableAllocations.length > 1 ? payableAllocations.length : undefined,
               notes:
                 selectedInvoiceIds.length > 1
                   ? [formData.notes, `Split payment ${index + 1}/${payableAllocations.length}`].filter(Boolean).join(' | ')
@@ -368,11 +415,6 @@ const Payments = () => {
   };
 
   const handleEdit = (payment: Payment) => {
-    if (!canEditPayment(payment)) {
-      setError('Staff can only edit payments created today. Ask an Admin to edit old payments.');
-      return;
-    }
-
     setEditingPaymentId(payment.id);
     setSelectedInvoiceIds([payment.invoiceId]);
     setFormData({
@@ -667,6 +709,7 @@ const Payments = () => {
                 paymentRows.map((payment) => {
                   const linkedInvoice = invoices.find((invoice) => invoice.id === payment.invoiceId);
                   const invoiceLabel = linkedInvoice ? getInvoiceDisplayNumber(linkedInvoice) : payment.invoiceNumber;
+                  const splitPaymentTotal = splitPaymentTotalById.get(payment.id);
 
                   return (
                   <tr key={payment.id}>
@@ -677,7 +720,7 @@ const Payments = () => {
                       {formatMoney(payment.amount)}
                       {(payment.notes || '').includes('Split payment') ? (
                         <div style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>
-                          Split paid: {formatMoney(payment.amount)}
+                          Split paid: {formatMoney(splitPaymentTotal ?? payment.amount)}
                         </div>
                       ) : null}
                       {payment.cashDiscount > 0 ? (

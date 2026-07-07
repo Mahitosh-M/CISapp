@@ -12,11 +12,10 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { to: '/', mobileTo: '/dashboard', label: 'Dashboard' },
   { to: '/customers', label: 'Customers' },
   { to: '/invoices', label: 'Invoices' },
   { to: '/payments', label: 'Payments' },
-  { to: '/intelligence', label: 'Intelligence' },
+  { to: '/intelligence', label: 'Intelligence', adminOnly: true },
   { to: '/analytics', label: 'Analytics', adminOnly: true },
   { to: '/loyalty', label: 'Loyalty', adminOnly: true },
   { to: '/overdue-pc-requests', label: 'PC', adminOnly: true },

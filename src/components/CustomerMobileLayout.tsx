@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
-import { Award, Bell, Coins, FileText, Home, Tags, Wallet } from 'lucide-react';
+import { Bell, Coins, FileText, Gift, Home, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ExternalImage from './ExternalImage';
@@ -12,7 +12,7 @@ import { getTierDisplayName } from '../utils/tiers';
 const navItems = [
   { to: '/customer', label: 'Dashboard', icon: Home, end: true },
   { to: '/customer/invoices', label: 'Invoices', icon: FileText },
-  { to: '/customer/partner-points', label: 'Points', icon: Award },
+  { to: '/customer/partner-points', label: 'Rewards', icon: Gift },
   { to: '/customer/offers', label: 'Offers', icon: Tags }
 ];
 

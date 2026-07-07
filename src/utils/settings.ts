@@ -34,6 +34,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     loyalty: 5
   },
   highOutstandingThreshold: 100000,
+  fixedMonthlyCosts: 0,
   invoicePrefix: 'INV',
   financialYearReset: true,
   defaultReportPeriod: 'current_month',
@@ -103,6 +104,7 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   ...DEFAULT_SETTINGS,
   ...settings,
   highOutstandingThreshold: settings?.highOutstandingThreshold ?? DEFAULT_SETTINGS.highOutstandingThreshold,
+  fixedMonthlyCosts: settings?.fixedMonthlyCosts ?? DEFAULT_SETTINGS.fixedMonthlyCosts,
   invoicePrefix: settings?.invoicePrefix || DEFAULT_SETTINGS.invoicePrefix,
   financialYearReset: settings?.financialYearReset ?? DEFAULT_SETTINGS.financialYearReset,
   defaultReportPeriod: settings?.defaultReportPeriod ?? DEFAULT_SETTINGS.defaultReportPeriod,
@@ -224,6 +226,10 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
 
   if (!Number.isFinite(Number(activeSettings.highOutstandingThreshold)) || Number(activeSettings.highOutstandingThreshold) < 0) {
     errors.push('High outstanding threshold cannot be negative.');
+  }
+
+  if (!Number.isFinite(Number(activeSettings.fixedMonthlyCosts)) || Number(activeSettings.fixedMonthlyCosts) < 0) {
+    errors.push('Fixed monthly costs cannot be negative.');
   }
 
   if (!activeSettings.invoicePrefix.trim()) {

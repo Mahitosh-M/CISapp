@@ -1,25 +1,90 @@
-import { useState } from 'react';
-import { Award } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, Award, Coins, Gift, ReceiptText, Trophy, Wallet } from 'lucide-react';
 import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { createRedemptionRequest } from '../../services/firestoreService';
+import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate, isCurrentMonth } from '../../utils/customerPortal';
+import { formatDate } from '../../utils/formatters';
 import { formatApc } from '../../utils/loyalty';
+import { getBusinessInvoices, getInvoiceDisplayNumber } from '../../utils/openingBalance';
 import { sortNewestFirst } from '../../utils/listDisplay';
 
+type PcHistoryFilter = 'all' | 'purchase' | 'bonus' | 'overdue';
+
+interface PcHistoryItem {
+  id: string;
+  type: Exclude<PcHistoryFilter, 'all'>;
+  title: string;
+  detail: string;
+  points: number;
+  date: string;
+}
+
 const CustomerPartnerPoints = () => {
-  const { customer, apcSummary, availableRewards, redemptionRequests, refreshData } = useCustomerPortalContext();
+  const { customer, invoices, payments, settings, apcSummary, availableRewards, redemptionRequests, bonusPcRequests, overduePcRequests, refreshData } = useCustomerPortalContext();
   const [redemptionMessage, setRedemptionMessage] = useState('');
   const [redemptionError, setRedemptionError] = useState('');
   const [requestingRewardId, setRequestingRewardId] = useState('');
-  const latestRedemption = sortNewestFirst(redemptionRequests, ['reviewedAt', 'requestedAt'])[0];
+  const [pcHistoryFilter, setPcHistoryFilter] = useState<PcHistoryFilter>('all');
+  const [showPcHistory, setShowPcHistory] = useState(false);
   const latestRequestByRewardId = sortNewestFirst(redemptionRequests, ['reviewedAt', 'requestedAt']).reduce((requestMap, request) => {
     if (!requestMap.has(request.rewardId)) {
       requestMap.set(request.rewardId, request);
     }
     return requestMap;
   }, new Map<string, (typeof redemptionRequests)[number]>());
-  const progressPercent = apcSummary?.progressPercent ?? 0;
-  const progressDegrees = Math.round((progressPercent / 100) * 360);
+  const currentMonthBonusRequests = bonusPcRequests.filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)));
+  const currentMonthPcHistory = useMemo<PcHistoryItem[]>(() => {
+    const purchaseItems = customer
+      ? getBusinessInvoices(invoices)
+          .map((invoice): PcHistoryItem | undefined => {
+            const pcInfo = calculateInvoiceApcInfo(invoice, payments, customer.tier, settings);
+            const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
+
+            if (pcInfo.earnedApc <= 0 || !fullPaymentDate || !isCurrentMonth(fullPaymentDate)) return undefined;
+
+            return {
+              id: `purchase-${invoice.id}`,
+              type: 'purchase',
+              title: `Invoice ${getInvoiceDisplayNumber(invoice)}`,
+              detail: `On-time payment credited on ${formatDate(fullPaymentDate)}`,
+              points: pcInfo.earnedApc,
+              date: fullPaymentDate
+            };
+          })
+          .filter((item): item is PcHistoryItem => Boolean(item))
+      : [];
+    const bonusItems = currentMonthBonusRequests.map((request): PcHistoryItem => ({
+      id: `bonus-${request.id}`,
+      type: 'bonus',
+      title: request.bonusLabel,
+      detail: request.notes || `Approved on ${formatDate((request.reviewedAt || request.generatedAt).slice(0, 10))}`,
+      points: request.approvedCoins,
+      date: (request.reviewedAt || request.generatedAt).slice(0, 10)
+    }));
+    const overdueItems = overduePcRequests
+      .filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)))
+      .map((request): PcHistoryItem => ({
+        id: `overdue-${request.id}`,
+        type: 'overdue',
+        title: `Overdue PC: ${request.invoiceNumber}`,
+        detail: `Approved on ${formatDate((request.reviewedAt || request.generatedAt).slice(0, 10))}`,
+        points: request.approvedCoins,
+        date: (request.reviewedAt || request.generatedAt).slice(0, 10)
+      }));
+
+    return [...purchaseItems, ...bonusItems, ...overdueItems]
+      .filter((item) => item.points > 0)
+      .sort((left, right) => right.date.localeCompare(left.date));
+  }, [currentMonthBonusRequests, customer, invoices, overduePcRequests, payments, settings]);
+  const currentMonthTotalPc = currentMonthPcHistory.reduce((sum, item) => sum + item.points, 0);
+  const visiblePcHistory = pcHistoryFilter === 'all' ? currentMonthPcHistory : currentMonthPcHistory.filter((item) => item.type === pcHistoryFilter);
+  const pcHistoryFilters: { key: PcHistoryFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'purchase', label: 'Purchase' },
+    { key: 'bonus', label: 'Bonus' },
+    { key: 'overdue', label: 'Overdue' }
+  ];
 
   const handleRewardRequest = async (rewardId: string) => {
     if (!customer) return;
@@ -42,89 +107,142 @@ const CustomerPartnerPoints = () => {
 
   return (
     <div>
-      <section style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+      <section style={{ background: '#0B1F3A', color: '#FFFFFF', borderRadius: 22, padding: 16, boxShadow: '0 16px 32px rgba(11,31,58,0.18)', marginBottom: 16, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', right: -28, top: -28, width: 120, height: 120, borderRadius: '50%', border: '18px solid rgba(212,175,55,0.16)' }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', position: 'relative' }}>
           <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>Partner Points</div>
-            <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Rewards and partner level</div>
+            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 20 }}>Rewards</div>
+            <div style={{ color: '#DDE6F2', fontSize: 12, fontWeight: 800, marginTop: 4 }}>Redeem your Partner Coins</div>
           </div>
-          <Award size={26} color="#0B1F3A" />
+          <div style={{ width: 58, height: 58, borderRadius: 18, background: '#FFF7D6', color: '#0B1F3A', display: 'grid', placeItems: 'center', position: 'relative' }}>
+            <Gift size={28} />
+            <div style={{ position: 'absolute', right: -5, top: -6, width: 26, height: 26, borderRadius: '50%', background: '#D4AF37', display: 'grid', placeItems: 'center', border: '2px solid #0B1F3A' }}>
+              <Coins size={14} />
+            </div>
+          </div>
         </div>
 
-        {apcSummary ? (
-          <>
-            <div style={{ display: 'grid', placeItems: 'center', margin: '8px 0 16px' }}>
-              <div
-                style={{
-                  width: 168,
-                  height: 168,
-                  borderRadius: '50%',
-                  background: `conic-gradient(#166534 0deg ${progressDegrees}deg, #DC2626 ${progressDegrees}deg 360deg)`,
-                  display: 'grid',
-                  placeItems: 'center',
-                  boxShadow: '0 14px 30px rgba(11,31,58,0.12)'
-                }}
-              >
-                <div style={{ width: 118, height: 118, borderRadius: '50%', background: '#FFFFFF', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 10, boxSizing: 'border-box' }}>
-                  <div>
-                    <div style={{ color: '#166534', fontSize: 30, fontWeight: 900, lineHeight: 1 }}>{progressPercent}%</div>
-                    <div style={{ color: '#67738E', fontSize: 11, fontWeight: 900, marginTop: 5 }}>to next level</div>
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap', marginTop: 12, fontSize: 12, fontWeight: 900 }}>
-                <span style={{ color: '#166534' }}>Green achieved</span>
-                <span style={{ color: '#DC2626' }}>Red remaining</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-              <div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Current Level</div>
-                <div style={{ fontWeight: 900 }}>{apcSummary.currentLevel}</div>
-              </div>
-              <div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>PC Balance</div>
-                <div style={{ color: '#166534', fontWeight: 900 }}>{formatApc(apcSummary.apcBalance)}</div>
-              </div>
-              <div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>This Month Earned PC</div>
-                <div style={{ fontWeight: 900 }}>You earned {formatApc(apcSummary.monthlyApcEarned)} PC</div>
-              </div>
-              <div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Reward Status</div>
-                <div style={{ fontWeight: 900 }}>{latestRedemption ? latestRedemption.status : 'No request'}</div>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#67738E', fontWeight: 800, marginBottom: 5 }}>
-                <span>Next Level</span>
-                <span>{apcSummary.nextLevel || 'Top level'}</span>
-              </div>
-              <div style={{ height: 9, borderRadius: 999, background: '#E8EDF4', overflow: 'hidden' }}>
-                <div style={{ width: `${progressPercent}%`, height: '100%', background: '#166534' }} />
-              </div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 6 }}>
-                {apcSummary.nextLevel ? `${formatApc(apcSummary.pointsNeededForNextLevel)} more score points needed for ${apcSummary.nextLevel}` : 'You are already at the highest partner level.'}
-              </div>
-            </div>
-
-            <div style={{ color: apcSummary.rewardAvailable ? '#166534' : '#B42318', fontSize: 12, fontWeight: 900 }}>
-              {apcSummary.rewardAvailable ? 'Reward available' : `You need ${formatApc(apcSummary.pointsNeededForNextReward)} more PC to unlock your next reward.`}
-            </div>
-          </>
-        ) : (
-          <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>Your Partner Points will appear after your account refreshes.</div>
-        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14, position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setShowPcHistory((current) => !current)}
+            style={{
+              background: 'rgba(255,255,255,0.10)',
+              border: '1px solid rgba(255,255,255,0.14)',
+              borderRadius: 16,
+              padding: 12,
+              textAlign: 'left',
+              cursor: 'pointer'
+            }}
+          >
+            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 800 }}>Available PC</div>
+            <div style={{ color: '#FDE68A', fontSize: 25, fontWeight: 900, marginTop: 4 }}>{formatApc(apcSummary?.apcBalance ?? 0)}</div>
+            <div style={{ color: '#DDE6F2', fontSize: 11, fontWeight: 900, marginTop: 5 }}>{showPcHistory ? 'Hide monthly history' : 'Tap for monthly history'}</div>
+          </button>
+          <div style={{ background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 16, padding: 12 }}>
+            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 800 }}>Current Level</div>
+            <div style={{ color: '#FFFFFF', fontSize: 15, fontWeight: 900, marginTop: 7 }}>{apcSummary?.currentLevel ?? 'Active Partner'}</div>
+          </div>
+        </div>
       </section>
 
+      {showPcHistory ? (
+      <section style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+          <div>
+            <div style={{ color: '#D4AF37', fontWeight: 900 }}>This Month PC History</div>
+            <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 3 }}>All Partner Coins credited this month</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ color: '#166534', fontSize: 22, fontWeight: 900 }}>+{formatApc(currentMonthTotalPc)}</div>
+            <div style={{ color: '#67738E', fontSize: 11, fontWeight: 900 }}>PC earned</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 12 }}>
+          {pcHistoryFilters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => setPcHistoryFilter(filter.key)}
+              style={{
+                border: 0,
+                borderRadius: 999,
+                background: pcHistoryFilter === filter.key ? '#0B1F3A' : '#EEF2F7',
+                color: pcHistoryFilter === filter.key ? '#FFFFFF' : '#0B1F3A',
+                padding: '8px 11px',
+                fontSize: 12,
+                fontWeight: 900,
+                whiteSpace: 'nowrap',
+                cursor: 'pointer'
+              }}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+
+        {visiblePcHistory.length === 0 ? (
+          <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 14, padding: 12, color: '#67738E', fontSize: 13, fontWeight: 800 }}>
+            No PC credits in this category for the current month.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 9, maxHeight: 250, overflowY: 'auto', paddingRight: 3 }}>
+            {visiblePcHistory.map((item) => {
+              const Icon = item.type === 'purchase' ? ReceiptText : item.type === 'bonus' ? Trophy : AlertTriangle;
+              const iconBackground = item.type === 'purchase' ? '#EAF7EE' : item.type === 'bonus' ? '#FFF7D6' : '#FDECEC';
+              const iconColor = item.type === 'purchase' ? '#166534' : item.type === 'bonus' ? '#0B1F3A' : '#B42318';
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  style={{
+                    width: '100%',
+                    border: '1px solid #E8EDF4',
+                    borderRadius: 16,
+                    background: '#FFFFFF',
+                    padding: 11,
+                    display: 'grid',
+                    gridTemplateColumns: '42px 1fr auto',
+                    alignItems: 'center',
+                    gap: 10,
+                    textAlign: 'left',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ width: 42, height: 42, borderRadius: 14, background: iconBackground, color: iconColor, display: 'grid', placeItems: 'center' }}>
+                    <Icon size={20} />
+                  </div>
+                  <div>
+                    <div style={{ color: '#0B1F3A', fontSize: 13, fontWeight: 900 }}>{item.title}</div>
+                    <div style={{ color: '#67738E', fontSize: 11, fontWeight: 800, marginTop: 3 }}>{item.detail}</div>
+                  </div>
+                  <div style={{ color: '#166534', fontSize: 16, fontWeight: 900 }}>+{formatApc(item.points)}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      ) : null}
+
       <section style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)' }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>Available Rewards</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontWeight: 900 }}>Available Rewards</div>
+            <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 3 }}>
+              {apcSummary?.rewardAvailable ? 'Some rewards are ready to request' : `You can view level rewards now; need ${formatApc(apcSummary?.pointsNeededForNextReward ?? 0)} more PC for the next request`}
+            </div>
+          </div>
+          <div style={{ width: 42, height: 42, borderRadius: 14, background: '#FFF7D6', color: '#0B1F3A', display: 'grid', placeItems: 'center' }}>
+            <Wallet size={21} />
+          </div>
+        </div>
         {redemptionError ? <div style={{ color: '#B42318', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>{redemptionError}</div> : null}
         {redemptionMessage ? <div style={{ color: '#166534', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>{redemptionMessage}</div> : null}
         {availableRewards.length === 0 ? (
-          <div style={{ color: '#67738E', fontSize: 13 }}>No rewards available for your current points yet.</div>
+          <div style={{ color: '#67738E', fontSize: 13 }}>No rewards are available for your current partner level yet.</div>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
             {availableRewards.map((reward) => {

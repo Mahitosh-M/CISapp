@@ -5,9 +5,7 @@ import CustomerMobileLayout from './components/CustomerMobileLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
-import { useIsMobile } from './hooks/useIsMobile';
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const Payments = lazy(() => import('./pages/Payments'));
@@ -27,11 +25,7 @@ const CustomerProfile = lazy(() => import('./pages/customer/CustomerProfile'));
 const CustomerPartnerPoints = lazy(() => import('./pages/customer/CustomerPartnerPoints'));
 
 const AdminStaffLanding = () => {
-  const isMobile = useIsMobile();
-
-  if (isMobile) return <Navigate to="/invoices" replace />;
-
-  return <Dashboard />;
+  return <Navigate to="/invoices" replace />;
 };
 
 const App = () => {
@@ -52,11 +46,11 @@ const App = () => {
         </Route>
         <Route path="/" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Layout /></ProtectedRoute>}>
           <Route index element={<AdminStaffLanding />} />
-          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="dashboard" element={<Navigate to="/invoices" replace />} />
           <Route path="customers" element={<Customers />} />
           <Route path="invoices" element={<Invoices />} />
           <Route path="payments" element={<Payments />} />
-          <Route path="intelligence" element={<Intelligence />} />
+          <Route path="intelligence" element={<ProtectedRoute allowedRoles={['Admin']}><Intelligence /></ProtectedRoute>} />
           <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin']}><Analytics /></ProtectedRoute>} />
           <Route path="loyalty" element={<ProtectedRoute allowedRoles={['Admin']}><Loyalty /></ProtectedRoute>} />
           <Route path="overdue-pc-requests" element={<ProtectedRoute allowedRoles={['Admin']}><OverduePcRequests /></ProtectedRoute>} />

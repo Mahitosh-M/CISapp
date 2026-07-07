@@ -53,6 +53,26 @@ export const getIntelligenceScoreProgressPercent = (score: number, level: Partne
   return Math.min(100, Math.max(0, Math.round(((score - range.min) / (range.next - range.min)) * 100)));
 };
 
+export const getPcThresholdProgress = (pcBalance: number, currentLevel: PartnerLevel, settings?: AppSettings) => {
+  const activeSettings = mergeWithDefaultSettings(settings);
+  const nextLevel = getNextPartnerLevel(currentLevel);
+  const currentThreshold = Math.max(0, numberOrZero(activeSettings.loyaltySettings.partnerLevelThresholds[currentLevel]));
+  const nextThreshold = nextLevel ? Math.max(0, numberOrZero(activeSettings.loyaltySettings.partnerLevelThresholds[nextLevel])) : currentThreshold;
+
+  if (!nextLevel) {
+    return { progressPercent: 100, pointsNeededForNextLevel: 0 };
+  }
+
+  if (nextThreshold <= currentThreshold) {
+    return { progressPercent: pcBalance >= nextThreshold ? 100 : 0, pointsNeededForNextLevel: Math.max(0, Math.round(nextThreshold - pcBalance)) };
+  }
+
+  return {
+    progressPercent: Math.min(100, Math.max(0, Math.round(((pcBalance - currentThreshold) / (nextThreshold - currentThreshold)) * 100))),
+    pointsNeededForNextLevel: Math.max(0, Math.round(nextThreshold - pcBalance))
+  };
+};
+
 export const canViewRewardAtLevel = (customerLevel: PartnerLevel, rewardLevel: PartnerLevel) => {
   return PARTNER_LEVELS.indexOf(customerLevel) >= PARTNER_LEVELS.indexOf(rewardLevel);
 };

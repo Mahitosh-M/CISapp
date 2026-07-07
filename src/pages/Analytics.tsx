@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
 import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { buildCustomerContributionRows } from '../utils/contribution';
+import { buildCustomerContributionRows, buildTopFivePieRows } from '../utils/contribution';
 import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
@@ -15,6 +16,61 @@ import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
 
 const formatPercent = (value: number) => `${Math.round(Number.isFinite(value) ? value : 0)}%`;
+const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#7C3AED', '#9AA6B2'];
+
+const parseDateKey = (dateString: string) => {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day) ? new Date(year, month - 1, day) : undefined;
+};
+
+const formatDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getDateKeysInRange = (fromDate: string, toDate: string) => {
+  const start = parseDateKey(fromDate);
+  const end = parseDateKey(toDate);
+  if (!start || !end || start > end) return [];
+
+  const rows: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    rows.push(formatDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return rows;
+};
+
+const getDailyFixedCost = (monthlyFixedCost: number, dateString: string) => {
+  const date = parseDateKey(dateString);
+  if (!date || monthlyFixedCost <= 0) return 0;
+  const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return monthlyFixedCost / daysInMonth;
+};
+
+const getMonthKeysInRange = (fromDate: string, toDate: string) => {
+  const start = parseDateKey(fromDate);
+  const end = parseDateKey(toDate);
+  if (!start || !end || start > end) return [];
+
+  const rows: string[] = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+  while (cursor <= endMonth) {
+    rows.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return rows;
+};
+
+const formatMonthLabel = (monthKey: string) => {
+  const [year, month] = monthKey.split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return monthKey;
+  return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+};
 
 const getSignalColor = (tone: 'good' | 'watch' | 'risk') => {
   if (tone === 'good') return '#1B7F3A';
@@ -29,8 +85,15 @@ const Analytics = () => {
   const [activeFromDate, setActiveFromDate] = useState(defaultRange.fromDate);
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
   const [contributionGroup, setContributionGroup] = useState<ContributionGroup>('top5');
-  const { customers, invoices, payments, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
+  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
   const isMobile = useIsMobile();
+
+  const selectedDateKeys = useMemo(() => getDateKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
+  const selectedMonthKeys = useMemo(() => getMonthKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
+  const allocatedFixedCost = useMemo(
+    () => selectedDateKeys.reduce((sum, date) => sum + getDailyFixedCost(settings.fixedMonthlyCosts, date), 0),
+    [selectedDateKeys, settings.fixedMonthlyCosts]
+  );
 
   const filteredInvoices = useMemo(() => {
     return getBusinessInvoices(invoices).filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
@@ -54,6 +117,10 @@ const Analytics = () => {
     const negativeProfitInvoices = filteredInvoices.filter((invoice) => invoice.totalProfit < 0);
     const avgInvoiceValue = filteredInvoices.length > 0 ? Math.round(sales / filteredInvoices.length) : 0;
     const margin = sales > 0 ? (profit / sales) * 100 : 0;
+    const netProfit = profit - allocatedFixedCost;
+    const breakEvenProgress = allocatedFixedCost > 0 ? Math.min(100, Math.max(0, (profit / allocatedFixedCost) * 100)) : profit > 0 ? 100 : 0;
+    const breakEvenSales = margin > 0 && allocatedFixedCost > 0 ? allocatedFixedCost / (margin / 100) : 0;
+    const breakEvenSalesGap = breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : 0;
     const collectionRate = sales > 0 ? (collected / sales) * 100 : 0;
     const activeCustomerRate = customers.length > 0 ? (activeCustomerIds.size / customers.length) * 100 : 0;
 
@@ -67,12 +134,17 @@ const Analytics = () => {
       activeCustomers: activeCustomerIds.size,
       avgInvoiceValue,
       margin,
+      fixedCost: allocatedFixedCost,
+      netProfit,
+      breakEvenProgress,
+      breakEvenSales,
+      breakEvenSalesGap,
       collectionRate,
       activeCustomerRate,
       negativeProfitCount: negativeProfitInvoices.length,
       negativeProfitAmount: negativeProfitInvoices.reduce((sum, invoice) => sum + Math.abs(invoice.totalProfit), 0)
     };
-  }, [customers.length, filteredInvoices, filteredPayments, invoiceIds]);
+  }, [allocatedFixedCost, customers.length, filteredInvoices, filteredPayments, invoiceIds]);
 
   const customerAnalysis = useMemo(() => {
     const rows = new Map<string, { customer: string; sales: number; profit: number; invoices: number }>();
@@ -94,6 +166,8 @@ const Analytics = () => {
   const contributionRows = useMemo(() => {
     return buildCustomerContributionRows(customers, filteredInvoices).sort((left, right) => right.sales - left.sales);
   }, [customers, filteredInvoices]);
+  const salesPieRows = useMemo(() => buildTopFivePieRows(contributionRows, 'sales'), [contributionRows]);
+  const profitPieRows = useMemo(() => buildTopFivePieRows(contributionRows, 'profit'), [contributionRows]);
 
   const contributionGroupRows = useMemo(() => {
     if (contributionGroup === 'top5') return contributionRows.slice(0, 5);
@@ -136,6 +210,28 @@ const Analytics = () => {
 
     return [...rows.values()].sort((a, b) => b.date.localeCompare(a.date));
   }, [filteredInvoices, filteredPayments]);
+
+  const monthlyBreakevenRows = useMemo(() => {
+    return selectedMonthKeys.map((month) => {
+      const monthInvoices = filteredInvoices.filter((invoice) => invoice.date.startsWith(`${month}-`));
+      const sales = monthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+      const grossProfit = monthInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+      const fixedCost = Math.max(0, settings.fixedMonthlyCosts);
+      const netProfit = grossProfit - fixedCost;
+      const margin = sales > 0 ? (grossProfit / sales) * 100 : 0;
+      const breakEvenSales = margin > 0 && fixedCost > 0 ? fixedCost / (margin / 100) : 0;
+      return {
+        month,
+        monthLabel: formatMonthLabel(month),
+        sales,
+        grossProfit,
+        fixedCost,
+        netProfit,
+        breakEvenSalesGap: breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : fixedCost > 0 ? fixedCost : 0,
+        status: fixedCost <= 0 ? 'Fixed cost not set' : netProfit >= 0 ? 'Profitable' : 'Below breakeven'
+      };
+    });
+  }, [filteredInvoices, selectedMonthKeys, settings.fixedMonthlyCosts]);
 
   const insightCards = useMemo(() => {
     const concentration = analysis.sales > 0 && customerAnalysis.length > 0 ? (customerAnalysis[0].sales / analysis.sales) * 100 : 0;
@@ -213,6 +309,9 @@ const Analytics = () => {
     add(analysis.margin >= 12 && analysis.margin < 20, 'Margin is healthy but should be monitored customer-wise so discounts do not quietly erode profit.');
     add(analysis.margin >= 5 && analysis.margin < 12, 'Margin is thin; avoid blanket discounts and review low-margin customers before pushing more volume.');
     add(analysis.margin > 0 && analysis.margin < 5, 'Margin is critically low; sales growth alone may not improve cash if pricing is not corrected.');
+    add(analysis.fixedCost > 0 && analysis.netProfit >= 0, `After fixed costs, the selected period is profitable by ${formatMoney(analysis.netProfit)}.`);
+    add(analysis.fixedCost > 0 && analysis.netProfit < 0, `The selected period is ${formatMoney(Math.abs(analysis.netProfit))} short of breakeven after fixed costs.`);
+    add(analysis.fixedCost > 0 && analysis.breakEvenSalesGap > 0, `At the current gross margin, about ${formatMoney(analysis.breakEvenSalesGap)} more sales are needed to reach breakeven.`);
     add(zeroCollection, 'Sales exist but no matching collection is recorded in this period; this is a cash-flow warning, not just a reporting gap.');
     add(analysis.outstanding > analysis.sales * 0.75 && analysis.sales > 0, 'Outstanding is very high compared with period sales, so collection risk is the biggest operating concern.');
     add(analysis.outstanding > analysis.sales * 0.4 && analysis.outstanding <= analysis.sales * 0.75 && analysis.sales > 0, 'Outstanding is meaningful and should be reviewed customer-wise before approving larger orders.');
@@ -331,6 +430,27 @@ const Analytics = () => {
     remaining: 'Remaining'
   };
 
+  const renderContributionPie = (title: string, rows: { name: string; value: number; percent: number }[]) => (
+    <div style={cardStyle}>
+      <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>{title}</div>
+      <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>Top 5 customers + Others for the selected period.</div>
+      {rows.length === 0 ? (
+        <div style={{ height: isMobile ? 220 : 260, display: 'grid', placeItems: 'center', color: '#67738E', fontWeight: 800 }}>No contribution data</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={isMobile ? 240 : 280}>
+          <PieChart>
+            <Pie data={rows} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={2} label={({ payload }) => formatPercent((payload as { percent?: number }).percent ?? 0)}>
+              {rows.map((entry, index) => (
+                <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value, name, item) => [formatMoney(Number(value)), `${name} (${formatPercent((item.payload as { percent?: number }).percent ?? 0)})`]} />
+          </PieChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+
   if (loading) {
     return <SectionHeader title="Analytics" description="Loading Firestore analytics..." />;
   }
@@ -389,6 +509,93 @@ const Analytics = () => {
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
               <div style={{ color: '#67738E', marginTop: 6 }}>Selected range balance</div>
             </div>
+          </div>
+
+          <div style={{ ...cardStyle, marginBottom: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div>
+                <div style={{ color: '#D4AF37', fontWeight: 900 }}>Breakeven Analysis</div>
+                <div style={{ color: '#67738E', marginTop: 4 }}>
+                  Fixed cost is allocated from the monthly cost saved in Admin Settings.
+                </div>
+              </div>
+              <div style={{ color: analysis.netProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>
+                {analysis.fixedCost > 0 ? (analysis.netProfit >= 0 ? 'Above breakeven' : 'Below breakeven') : 'Fixed cost not set'}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Gross Profit</div>
+                <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.profit)}</div>
+              </div>
+              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Allocated Fixed Cost</div>
+                <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.fixedCost)}</div>
+              </div>
+              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Net After Fixed Cost</div>
+                <div style={{ fontWeight: 900, marginTop: 4, color: analysis.netProfit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(analysis.netProfit)}</div>
+              </div>
+              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Sales Needed</div>
+                <div style={{ fontWeight: 900, marginTop: 4 }}>{analysis.fixedCost > 0 ? formatMoney(analysis.breakEvenSalesGap) : '-'}</div>
+              </div>
+            </div>
+
+            <div style={{ height: 10, borderRadius: 999, background: '#E8EDF4', overflow: 'hidden', marginBottom: 16 }}>
+              <div
+                style={{
+                  width: `${analysis.breakEvenProgress}%`,
+                  height: '100%',
+                  background: analysis.netProfit >= 0 ? '#1B7F3A' : '#D4AF37'
+                }}
+              />
+            </div>
+
+            <div style={{ color: '#D4AF37', fontWeight: 900, margin: '4px 0 10px' }}>Month-on-Month Breakeven</div>
+            <ResponsiveContainer width="100%" height={isMobile ? 240 : 300}>
+              <BarChart data={monthlyBreakevenRows}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" />
+                <XAxis dataKey="monthLabel" axisLine={false} tickLine={false} tick={{ fill: '#67738E', fontSize: 11 }} />
+                <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} axisLine={false} tickLine={false} tick={{ fill: '#67738E', fontSize: 11 }} />
+                <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                <Bar dataKey="netProfit" name="Net After Fixed Cost" radius={[8, 8, 0, 0]}>
+                  {monthlyBreakevenRows.map((row) => (
+                    <Cell key={row.month} fill={row.netProfit >= 0 ? '#1B7F3A' : '#B42318'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+
+            <div style={{ overflowX: 'auto', marginTop: 12 }}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    {['Month', 'Sales', 'Gross Profit', 'Fixed Cost', 'Net', 'Status'].map((header) => (
+                      <th key={header} style={{ ...cellStyle, background: '#F8F9FB', textAlign: 'left' }}>{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyBreakevenRows.map((row) => (
+                    <tr key={row.month}>
+                      <td style={cellStyle}><strong>{row.monthLabel}</strong></td>
+                      <td style={cellStyle}>{formatMoney(row.sales)}</td>
+                      <td style={cellStyle}>{formatMoney(row.grossProfit)}</td>
+                      <td style={cellStyle}>{formatMoney(row.fixedCost)}</td>
+                      <td style={{ ...cellStyle, color: row.netProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{formatMoney(row.netProfit)}</td>
+                      <td style={{ ...cellStyle, fontWeight: 900 }}>{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={gridStyle}>
+            {renderContributionPie('Sales Contribution', salesPieRows)}
+            {renderContributionPie('Profit Contribution', profitPieRows)}
           </div>
 
           <div style={gridStyle}>

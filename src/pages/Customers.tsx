@@ -15,8 +15,10 @@ import {
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
 import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
-import { formatMoney } from '../utils/formatters';
+import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
+import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { getBusinessInvoices } from '../utils/openingBalance';
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
 import TierBadge from '../components/TierBadge';
@@ -46,6 +48,8 @@ const Customers = () => {
   const [showFullTable, setShowFullTable] = useState(false);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [inactiveSearchText, setInactiveSearchText] = useState('');
+  const [calledCustomerIds, setCalledCustomerIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -80,7 +84,11 @@ const Customers = () => {
       );
       const syncedInvoiceRows = [...invoiceRows, ...openingBalanceSync.createdInvoices];
 
-      setCustomers(applyIntelligenceTiersToCustomers(syncedCustomerRows, syncedInvoiceRows, paymentRows, appSettings));
+      setCustomers(
+        isAdmin
+          ? applyIntelligenceTiersToCustomers(syncedCustomerRows, syncedInvoiceRows, paymentRows, appSettings)
+          : syncedCustomerRows
+      );
       setInvoices(syncedInvoiceRows);
       setPayments(paymentRows);
       setSettings(appSettings);
@@ -131,6 +139,51 @@ const Customers = () => {
       })
     );
   }, [customers, invoices, settings]);
+
+  const inactiveCustomerRows = useMemo(() => {
+    const today = getTodayDateString();
+    const cutoffDate = addDaysToDateString(today, -15);
+    const todayTime = new Date(`${today}T00:00:00`).getTime();
+    const term = inactiveSearchText.trim().toLowerCase();
+    const lastOrderByCustomerId = new Map<string, string>();
+
+    getBusinessInvoices(invoices).forEach((invoice) => {
+      const currentDate = lastOrderByCustomerId.get(invoice.customerId);
+
+      if (!currentDate || invoice.date > currentDate) {
+        lastOrderByCustomerId.set(invoice.customerId, invoice.date);
+      }
+    });
+
+    return customers
+      .map((customer) => {
+        const lastOrderDate = lastOrderByCustomerId.get(customer.id) ?? '';
+        const lastOrderTime = lastOrderDate ? new Date(`${lastOrderDate}T00:00:00`).getTime() : 0;
+        const daysSinceLastOrder = lastOrderTime > 0 ? Math.max(0, Math.floor((todayTime - lastOrderTime) / (24 * 60 * 60 * 1000))) : null;
+        const outstanding = outstandingByCustomerId.get(customer.id)?.outstanding ?? customer.totalOutstandingAmount ?? 0;
+
+        return {
+          customer,
+          lastOrderDate,
+          daysSinceLastOrder,
+          outstanding
+        };
+      })
+      .filter((row) => !row.lastOrderDate || row.lastOrderDate <= cutoffDate)
+      .filter((row) => !calledCustomerIds.has(row.customer.id))
+      .filter((row) => {
+        if (!term) return true;
+
+        return [row.customer.name, row.customer.mobile, row.customer.area].some((value) =>
+          value.toLowerCase().includes(term)
+        );
+      })
+      .sort((left, right) => {
+        if (!left.lastOrderDate && right.lastOrderDate) return -1;
+        if (left.lastOrderDate && !right.lastOrderDate) return 1;
+        return left.lastOrderDate.localeCompare(right.lastOrderDate) || left.customer.name.localeCompare(right.customer.name);
+      });
+  }, [calledCustomerIds, customers, inactiveSearchText, invoices, outstandingByCustomerId]);
 
   const handleFieldChange = (field: CustomerTextField, value: string) => {
     if (field === 'tier') {
@@ -439,6 +492,74 @@ const Customers = () => {
         </form>
           ) : null}
         </div>
+
+        {!isAdmin ? (
+          <div style={cardStyle}>
+            <label style={labelStyle}>
+              Customers not ordered in 15+ days
+              <input
+                style={inputStyle}
+                value={inactiveSearchText}
+                onChange={(event) => setInactiveSearchText(event.target.value)}
+                placeholder="Search follow-up customers"
+              />
+            </label>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <div style={{ color: '#67738E', fontSize: 12 }}>
+                Follow-up list based on normal business invoices only.
+              </div>
+              <div style={{ color: '#0B1F3A', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
+            </div>
+
+            <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
+              <table style={compactTableStyle}>
+                <thead>
+                  <tr>
+                    <th style={{ ...headerCellStyle, width: '42%' }}>Customer</th>
+                    <th style={{ ...headerCellStyle, width: '22%' }}>Last Order</th>
+                    <th style={{ ...headerCellStyle, width: '18%' }}>Days</th>
+                    <th style={{ ...headerCellStyle, width: '18%' }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
+                  ) : inactiveCustomerRows.length === 0 ? (
+                    <tr><td style={cellStyle} colSpan={4}>No customers found for this follow-up list.</td></tr>
+                  ) : (
+                    inactiveCustomerRows.map(({ customer, lastOrderDate, daysSinceLastOrder, outstanding }) => (
+                      <tr key={customer.id}>
+                        <td style={cellStyle}>
+                          <strong>{customer.name}</strong>
+                          <button
+                            type="button"
+                            style={{ ...buttonStyle, display: 'block', marginTop: 6, padding: '6px 10px', background: '#E8F5EC', color: '#166534', fontSize: 11 }}
+                            onClick={() => setCalledCustomerIds((current) => new Set(current).add(customer.id))}
+                          >
+                            Called
+                          </button>
+                          {customer.area ? (
+                            <div style={{ marginTop: 4 }}>
+                              <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
+                              <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                            </div>
+                          ) : null}
+                          <div style={{ color: '#67738E', fontSize: 11 }}>{customer.mobile}</div>
+                        </td>
+                        <td style={cellStyle}>{lastOrderDate ? formatDate(lastOrderDate) : 'No order yet'}</td>
+                        <td style={{ ...cellStyle, color: '#B7791F', fontWeight: 900 }}>
+                          {daysSinceLastOrder === null ? '-' : `${daysSinceLastOrder} day(s)`}
+                        </td>
+                        <td style={{ ...cellStyle, fontWeight: 900 }}>{formatMoney(outstanding)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
 
         <div style={cardStyle}>
           <div style={{ position: 'relative', marginBottom: 16 }}>

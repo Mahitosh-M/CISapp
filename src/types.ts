@@ -101,6 +101,10 @@ export interface Payment {
   amountUsedForOldBalance: number;
   oldBalanceBeforePayment: number;
   oldBalanceAfterPayment: number;
+  splitPaymentGroupId?: string;
+  splitPaymentTotalAmount?: number;
+  splitPaymentPart?: number;
+  splitPaymentCount?: number;
   cashDiscount: number;
   mode: PaymentMode;
   notes: string;
@@ -135,6 +139,7 @@ export interface AppSettings {
     loyalty: number;
   };
   highOutstandingThreshold: number;
+  fixedMonthlyCosts: number;
   invoicePrefix: string;
   financialYearReset: boolean;
   defaultReportPeriod: 'current_month' | 'last_month' | 'previous_30_days';
@@ -304,6 +309,10 @@ export interface PaymentFormData {
   date: string;
   amount: number;
   cashDiscount: number;
+  splitPaymentGroupId?: string;
+  splitPaymentTotalAmount?: number;
+  splitPaymentPart?: number;
+  splitPaymentCount?: number;
   mode: PaymentMode;
   notes: string;
 }
