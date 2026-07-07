@@ -189,7 +189,6 @@ const Analytics = () => {
     const salesChange = firstSales > 0 ? ((secondSales - firstSales) / firstSales) * 100 : secondSales > 0 ? 100 : 0;
     const profitChange = firstProfit > 0 ? ((secondProfit - firstProfit) / firstProfit) * 100 : secondProfit > 0 ? 100 : 0;
     const collectionChange = firstCollected > 0 ? ((secondCollected - firstCollected) / firstCollected) * 100 : secondCollected > 0 ? 100 : 0;
-    const topCustomer = contributionRows[0];
     const topFiveSalesPercent = contributionRows.slice(0, 5).reduce((sum, row) => sum + row.salesPercent, 0);
     const topFiveProfitPercent = contributionRows.slice(0, 5).reduce((sum, row) => sum + row.profitPercent, 0);
     const inactiveCustomers = Math.max(0, customers.length - analysis.activeCustomers);
@@ -210,29 +209,15 @@ const Analytics = () => {
     const highSalesLowProfitDay = sortedDays.find((row) => row.sales > dailySalesAverage && row.sales > 0 && (row.profit / row.sales) * 100 < 5);
     const noPaymentDays = sortedDays.filter((row) => row.sales > 0 && row.collected <= 0);
 
-    add(analysis.sales <= 0, 'No invoice sales were recorded in this period, so the main action is to verify whether the selected date range is correct or sales entry is pending.');
-    add(analysis.sales > 0, `The business generated ${formatMoney(analysis.sales)} sales from ${analysis.invoiceCount} invoice(s), with an average invoice value of ${formatMoney(analysis.avgInvoiceValue)}.`);
-    add(analysis.profit > 0, `The period is profitable with ${formatMoney(analysis.profit)} gross profit and ${formatPercent(analysis.margin)} margin.`);
-    add(analysis.profit < 0, `The period is loss-making by ${formatMoney(Math.abs(analysis.profit))}; pricing, scheme discounting, or purchase-cost entry should be reviewed immediately.`);
     add(analysis.margin >= 20, 'Margin is strong, so the business has room to protect service quality while staying profitable.');
     add(analysis.margin >= 12 && analysis.margin < 20, 'Margin is healthy but should be monitored customer-wise so discounts do not quietly erode profit.');
     add(analysis.margin >= 5 && analysis.margin < 12, 'Margin is thin; avoid blanket discounts and review low-margin customers before pushing more volume.');
     add(analysis.margin > 0 && analysis.margin < 5, 'Margin is critically low; sales growth alone may not improve cash if pricing is not corrected.');
-    add(analysis.collectionRate >= 90, 'Collections are very strong against selected sales, which supports faster stock rotation and lower credit risk.');
-    add(analysis.collectionRate >= 70 && analysis.collectionRate < 90, 'Collections are acceptable, but follow-up discipline still matters for customers with fresh outstanding.');
-    add(analysis.collectionRate >= 40 && analysis.collectionRate < 70, 'Collections are moderate; cash flow may tighten if the same pattern continues into the next period.');
-    add(analysis.collectionRate > 0 && analysis.collectionRate < 40, 'Collections are weak compared with sales; prioritize payment follow-up before extending additional credit.');
     add(zeroCollection, 'Sales exist but no matching collection is recorded in this period; this is a cash-flow warning, not just a reporting gap.');
     add(analysis.outstanding > analysis.sales * 0.75 && analysis.sales > 0, 'Outstanding is very high compared with period sales, so collection risk is the biggest operating concern.');
     add(analysis.outstanding > analysis.sales * 0.4 && analysis.outstanding <= analysis.sales * 0.75 && analysis.sales > 0, 'Outstanding is meaningful and should be reviewed customer-wise before approving larger orders.');
     add(analysis.outstanding <= analysis.sales * 0.15 && analysis.sales > 0, 'Outstanding is controlled relative to sales, which indicates healthier collection conversion.');
-    add(analysis.activeCustomerRate >= 60, 'Customer activity is broad, reducing dependence on a small buyer base.');
-    add(analysis.activeCustomerRate >= 30 && analysis.activeCustomerRate < 60, 'Customer activity is moderate; there is room to reactivate dormant customers.');
-    add(analysis.activeCustomerRate > 0 && analysis.activeCustomerRate < 30, 'Only a small part of the customer base purchased in this period, so sales concentration and inactivity need attention.');
     add(inactiveCustomers > 0, `${inactiveCustomers} customer(s) had no invoice activity in this range; reactivation calls can be planned from this list.`);
-    add(Boolean(topCustomer && topCustomer.salesPercent >= 40), topCustomer ? `${topCustomer.customerName} alone contributes ${formatPercent(topCustomer.salesPercent)} of sales, creating high dependency on one account.` : '');
-    add(Boolean(topCustomer && topCustomer.salesPercent >= 25 && topCustomer.salesPercent < 40), topCustomer ? `${topCustomer.customerName} is a major sales driver at ${formatPercent(topCustomer.salesPercent)} of sales; protect the relationship but monitor credit exposure.` : '');
-    add(Boolean(topCustomer && topCustomer.salesPercent < 25), 'No single customer dominates sales, which is healthier from a dependency perspective.');
     add(topFiveSalesPercent >= 75, `Top 5 customers contribute ${formatPercent(topFiveSalesPercent)} of sales, so the business is concentrated and should not ignore smaller buyers.`);
     add(topFiveSalesPercent >= 50 && topFiveSalesPercent < 75, `Top 5 customers contribute ${formatPercent(topFiveSalesPercent)} of sales, which is normal but still worth tracking.`);
     add(topFiveSalesPercent < 50 && analysis.sales > 0, 'Sales are well distributed beyond the top 5 customers.');

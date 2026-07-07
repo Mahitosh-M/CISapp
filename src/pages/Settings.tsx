@@ -83,7 +83,7 @@ const Settings = () => {
       setSaving(true);
       setError('');
       await updateAppSettings(settings, auditUser);
-      setMessage('Settings saved successfully. New invoices, intelligence, reports, gifts, and overdue alerts will use the updated rules.');
+      setMessage('Settings saved successfully. New invoices, intelligence, reports, gifts, and overdue checks will use the updated rules.');
       await loadSettings();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save settings.');
@@ -128,7 +128,7 @@ const Settings = () => {
   };
 
   const handleDeleteUserProfile = async (user: UserProfile) => {
-    const confirmed = window.confirm(`Delete profile for ${user.email}? This removes ERP role access but does not delete the Firebase Auth account.`);
+    const confirmed = window.confirm(`Delete profile for ${user.email}? This removes ERP role access. You can recreate access with the same email by using that email's current password, or send a password reset first.`);
     if (!confirmed) return;
     await deleteUserProfileRecord(user.id, auditUser);
     await loadSettings();
@@ -382,16 +382,6 @@ const Settings = () => {
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>ERP Control Settings</div>
         <div style={gridStyle}>
-          <label style={labelStyle}>
-            High Outstanding Alert Threshold
-            <input
-              style={inputStyle}
-              type="number"
-              min="0"
-              value={settings.highOutstandingThreshold}
-              onChange={(event) => handleTopLevelSettingChange('highOutstandingThreshold', event.target.value)}
-            />
-          </label>
           <label style={labelStyle}>
             Invoice Prefix
             <input

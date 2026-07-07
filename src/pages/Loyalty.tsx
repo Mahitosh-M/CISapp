@@ -1,8 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
-import StatCard from '../components/StatCard';
-import SuggestedGiftManager from '../components/SuggestedGiftManager';
+import ExternalImage from '../components/ExternalImage';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -105,8 +104,6 @@ const Loyalty = () => {
   const sortedOffers = useMemo(() => sortOffersByLatest(offers), [offers]);
   const sortedRequests = useMemo(() => sortNewestFirst(requests.filter((request) => request.status !== 'Gifted'), ['requestedAt']), [requests]);
   const sortedGiftHistory = useMemo(() => sortNewestFirst(giftHistory, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [giftHistory]);
-  const pendingRequests = requests.filter((request) => request.status === 'Pending');
-  const approvedOrGivenGifts = giftHistory.filter((gift) => gift.status === 'Approved' || gift.status === 'Given');
 
   const updateLoyaltyNumber = (field: keyof AppSettings['loyaltySettings'], value: string) => {
     if (field === 'partnerLevelThresholds') return;
@@ -439,23 +436,15 @@ const Loyalty = () => {
   const rewardImagePreviewSource = rewardForm.imageUrl;
 
   if (loading) {
-    return <SectionHeader title="Ashoka Partner Program" description="Loading loyalty module..." />;
+    return <SectionHeader title="Partner Program" description="Loading loyalty module..." />;
   }
 
   return (
     <div>
-      <SectionHeader title="Ashoka Partner Program" description="Manage PC points, partner levels, rewards, and redemption approvals." />
+      <SectionHeader title="Partner Program" description="Manage PC points, partner levels, rewards, and redemption approvals." />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
-
-      <SuggestedGiftManager />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 18, marginBottom: 24 }}>
-        <StatCard title="Active Rewards" value={`${rewards.filter((reward) => reward.isActive).length}`} subtitle="Visible to eligible customers" />
-        <StatCard title="Pending Requests" value={`${pendingRequests.length}`} subtitle="Waiting for Admin review" color="#B7791F" />
-        <StatCard title="Reward Records" value={`${approvedOrGivenGifts.length}`} subtitle="Approved and redeemed rewards" />
-      </div>
 
       {isAdmin ? (
         <form style={cardStyle} onSubmit={saveSettings}>
@@ -521,7 +510,7 @@ const Loyalty = () => {
                 <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
                   Image preview
                 </div>
-                <img
+                <ExternalImage
                   src={offerImagePreviewSource}
                   alt="Offer preview"
                   style={{ width: '100%', maxWidth: 300, height: 170, objectFit: 'cover', borderRadius: 12, display: 'block' }}
@@ -630,7 +619,7 @@ const Loyalty = () => {
                 <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
                   Image preview
                 </div>
-                <img
+                <ExternalImage
                   src={rewardImagePreviewSource}
                   alt="Reward preview"
                   style={{ width: '100%', maxWidth: 300, height: 170, objectFit: 'cover', borderRadius: 12, display: 'block' }}
@@ -674,7 +663,7 @@ const Loyalty = () => {
                   </td>
                   <td style={tdStyle}>
                     {reward.imageUrl ? (
-                      <img loading="lazy" src={reward.imageUrl} alt={reward.name} style={{ width: 72, height: 52, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
+                      <ExternalImage src={reward.imageUrl} alt={reward.name} style={{ width: 72, height: 52, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
                     ) : 'No image'}
                   </td>
                   <td style={tdStyle}>{reward.name}</td>

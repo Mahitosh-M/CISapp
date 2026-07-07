@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import ExternalImage from './ExternalImage';
 import TierBadge from './TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useErpData } from '../hooks/useErpData';
 import { createGiftHistoryRecord, deleteGiftHistoryRecord, getApprovedBonusPcRequests, getApprovedOverduePcRequests, getGiftHistory, getRewardItems, updateGiftHistoryRecord } from '../services/firestoreService';
 import type { BonusPcRequest, GiftHistory, GiftItem, GiftPeriod, OverduePcRequest, RewardItem } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
 import { buildSuggestedGiftRows, calculateGiftDifference } from '../utils/giftUtils';
@@ -340,7 +342,7 @@ const SuggestedGiftManager = () => {
               <option value="">Select customer</option>
               {searchedCustomerRows.map((row) => (
                 <option key={row.customer.id} value={row.customer.id}>
-                  {row.customer.name} - {formatMoney(row.giftBudget)} PC
+                  {formatCustomerSelectLabel(row.customer)} - {formatMoney(row.giftBudget)} PC
                 </option>
               ))}
             </select>
@@ -414,8 +416,7 @@ const SuggestedGiftManager = () => {
                             onClick={() => handleSelectGift(row.customer.id, giftItem.giftItemName)}
                           >
                             {giftItem.imageUrl ? (
-                              <img
-                                loading="lazy"
+                              <ExternalImage
                                 src={giftItem.imageUrl}
                                 alt={giftItem.giftItemName}
                                 style={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 10, display: 'block', marginBottom: 8 }}

@@ -10,9 +10,11 @@ import {
   getInvoices,
   getPayments,
   getPaymentsByCustomerId,
+  syncCustomerPartnerLevelsFromFirestore,
   updatePaymentRecord
 } from '../services/firestoreService';
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
@@ -211,7 +213,7 @@ const Payments = () => {
       const matchesMode = modeFilter === 'all' || payment.mode === modeFilter;
 
       return matchesSearch && matchesCustomer && matchesMode;
-    }), ['updatedAt', 'createdAt', 'date']);
+    }), ['createdAt', 'date']);
   }, [customerFilter, modeFilter, payments, searchText]);
 
   const paymentRows = filteredPaymentRows;
@@ -355,6 +357,7 @@ const Payments = () => {
         setMessage(`Payment added. ${formatMoney(recordedAmount)} recorded across ${payableAllocations.length} invoice(s).`);
       }
 
+      await syncCustomerPartnerLevelsFromFirestore();
       resetForm();
       await loadData();
     } catch (err) {
@@ -399,6 +402,7 @@ const Payments = () => {
 
     try {
       await deletePaymentRecord(payment.id, auditUser);
+      await syncCustomerPartnerLevelsFromFirestore();
       setMessage('Payment deleted successfully.');
       await loadData();
     } catch (err) {
@@ -502,7 +506,7 @@ const Payments = () => {
             <select style={inputStyle} value={formData.customerId} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
@@ -623,7 +627,7 @@ const Payments = () => {
             <select style={inputStyle} value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)}>
               <option value="all">All customers</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>

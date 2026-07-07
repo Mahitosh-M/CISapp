@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
-import StatCard from '../components/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { BONUS_PC_LABELS, generateBonusPcRequests, generateOverduePcRequests, getBonusPcRequests, getOverduePcRequests, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
 import type { BonusPcRequest, OverduePcRequest } from '../types';
@@ -38,7 +37,7 @@ const OverduePcRequests = () => {
       setCoinEdits(Object.fromEntries(rows.map((request) => [request.id, request.approvedCoins || request.suggestedCoins])));
       setBonusCoinEdits(Object.fromEntries(bonusRows.map((request) => [request.id, request.approvedCoins || request.suggestedCoins])));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load overdue PC requests.');
+      setError(err instanceof Error ? err.message : 'Unable to load PC requests.');
     } finally {
       setLoading(false);
     }
@@ -48,14 +47,8 @@ const OverduePcRequests = () => {
     loadRequests();
   }, []);
 
-  const pendingRequests = requests.filter((request) => request.status === 'Pending');
-  const sortedPendingRequests = useMemo(() => sortNewestFirst(pendingRequests, ['generatedAt', 'reviewedAt']), [pendingRequests]);
-  const approvedRequests = requests.filter((request) => request.status === 'Approved');
-  const approvedCoins = approvedRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
-  const pendingBonusRequests = bonusRequests.filter((request) => request.status === 'Pending');
-  const sortedPendingBonusRequests = useMemo(() => sortNewestFirst(pendingBonusRequests, ['generatedAt', 'reviewedAt']), [pendingBonusRequests]);
-  const approvedBonusRequests = bonusRequests.filter((request) => request.status === 'Approved');
-  const approvedBonusCoins = approvedBonusRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
+  const sortedPendingRequests = useMemo(() => sortNewestFirst(requests, ['generatedAt', 'reviewedAt']), [requests]);
+  const sortedPendingBonusRequests = useMemo(() => sortNewestFirst(bonusRequests, ['generatedAt', 'reviewedAt']), [bonusRequests]);
 
   const handleGenerate = async () => {
     try {
@@ -63,10 +56,10 @@ const OverduePcRequests = () => {
       setMessage('');
       setError('');
       const result = await generateOverduePcRequests(auditUser);
-      setMessage(result.createdCount > 0 ? `${result.createdCount} overdue PC request(s) created.` : 'No new overdue PC requests found.');
+      setMessage(result.createdCount > 0 ? `${result.createdCount} PC request(s) created.` : 'No new PC requests found.');
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to generate overdue PC requests.');
+      setError(err instanceof Error ? err.message : 'Unable to generate PC requests.');
     } finally {
       setGenerating(false);
     }
@@ -84,10 +77,10 @@ const OverduePcRequests = () => {
         auditUser,
         status === 'Approved' ? 'Approved by Admin' : 'Rejected by Admin'
       );
-      setMessage(status === 'Approved' ? 'PC approved and added to customer balance.' : 'Overdue PC request rejected.');
+      setMessage(status === 'Approved' ? 'PC approved and added to customer balance.' : 'PC request rejected.');
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to review overdue PC request.');
+      setError(err instanceof Error ? err.message : 'Unable to review PC request.');
     } finally {
       setSavingId('');
     }
@@ -166,23 +159,15 @@ const OverduePcRequests = () => {
   };
 
   if (loading) {
-    return <SectionHeader title="Overdue PC Requests" description="Loading overdue Partner Coin requests..." />;
+    return <SectionHeader title="PC" description="Loading Partner Coin requests..." />;
   }
 
   return (
     <div>
-      <SectionHeader title="Overdue PC Requests" description="Approve Partner Coins for invoices paid after the tier due date plus buffer days." />
+      <SectionHeader title="PC" description="Approve Partner Coins for invoices paid after the tier due date plus buffer days." />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 18, marginBottom: 24 }}>
-        <StatCard title="Pending Requests" value={`${pendingRequests.length}`} subtitle="Waiting for Admin review" color="#B7791F" />
-        <StatCard title="Approved Requests" value={`${approvedRequests.length}`} subtitle="Already added to customer PC" />
-        <StatCard title="Approved PC" value={formatPc(approvedCoins)} subtitle="Total approved Partner Coins" />
-        <StatCard title="Bonus Requests" value={`${pendingBonusRequests.length}`} subtitle="Pending bonus approvals" color="#B7791F" />
-        <StatCard title="Bonus PC" value={formatPc(approvedBonusCoins)} subtitle="Approved bonus Partner Coins" />
-      </div>
 
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
@@ -208,7 +193,7 @@ const OverduePcRequests = () => {
             </thead>
             <tbody>
               {sortedPendingRequests.length === 0 ? (
-                <tr><td style={tdStyle} colSpan={10}>No pending overdue PC requests.</td></tr>
+                <tr><td style={tdStyle} colSpan={10}>No pending PC requests.</td></tr>
               ) : sortedPendingRequests.map((request) => (
                 <tr key={request.id}>
                   <td style={tdStyle}>{request.customerName}</td>
@@ -260,7 +245,10 @@ const OverduePcRequests = () => {
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Bonus Request Queue</div>
             <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
-              Four bonus types are supported. Current automatic trigger creates New customer bonus requests after the first invoice, once per customer.
+              Pending bonuses need approval before PC is added. Approved/rejected requests are hidden from this queue but kept in history.
+            </div>
+            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+              Payment and target bonuses are generated once per customer per month. Referral bonus is not generated yet.
             </div>
           </div>
           <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
@@ -269,11 +257,18 @@ const OverduePcRequests = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          {Object.values(BONUS_PC_LABELS).map((label) => (
-            <span key={label} style={{ background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
-              {label}
+          {(['new_customer', 'payment', 'purchase_target'] as const).map((key) => (
+            <span key={key} style={{ background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
+              {BONUS_PC_LABELS[key]}
             </span>
           ))}
+          <span style={{ background: '#F3F4F6', color: '#67738E', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
+            Referral bonus disabled
+          </span>
+        </div>
+
+        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 12 }}>
+          Bonus PC is capped at 20% of the customer&apos;s base PC earned for the month when generated automatically.
         </div>
 
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>

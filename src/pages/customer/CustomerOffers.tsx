@@ -1,5 +1,6 @@
 import { Tags } from 'lucide-react';
 import { useMemo } from 'react';
+import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../../utils/offers';
 
@@ -30,7 +31,7 @@ const CustomerOffers = () => {
           {activeOffers.map((offer) => (
             <div key={offer.id} style={{ minWidth: '85%', scrollSnapAlign: 'start', background: '#FFFFFF', borderRadius: 22, padding: 14, boxShadow: '0 12px 28px rgba(11,31,58,0.10)', overflow: 'hidden' }}>
               {offer.imageUrl ? (
-                <img loading="lazy" src={offer.imageUrl} alt={offer.title} style={{ width: '100%', height: 170, objectFit: 'cover', borderRadius: 18, display: 'block' }} />
+                <ExternalImage src={offer.imageUrl} alt={offer.title} style={{ width: '100%', height: 170, objectFit: 'cover', borderRadius: 18, display: 'block' }} />
               ) : (
                 <div style={{ background: '#FFF7D6', borderRadius: 18, minHeight: 170, display: 'grid', placeItems: 'center', color: '#0B1F3A', fontWeight: 900 }}>
                   Offer poster will appear here

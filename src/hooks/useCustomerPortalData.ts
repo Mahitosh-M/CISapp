@@ -20,6 +20,22 @@ import { canViewRewardAtLevel, getIntelligenceScoreProgressPercent, getNextPartn
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
+const isPermissionError = (err: unknown) => {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === 'permission-denied';
+};
+
+const optionalCustomerRead = async <T,>(read: () => Promise<T>, fallback: T) => {
+  try {
+    return await read();
+  } catch (err) {
+    if (isPermissionError(err)) {
+      return fallback;
+    }
+
+    throw err;
+  }
+};
+
 export const useCustomerPortalData = () => {
   const { userProfile } = useAuth();
   const [customer, setCustomer] = useState<Customer>();
@@ -58,10 +74,10 @@ export const useCustomerPortalData = () => {
         getPaymentsForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
         getAppSettings(),
         getActiveOffers(),
-        getActiveRewardItems(),
-        customerId ? getRedemptionRequestsForCustomer(customerId) : Promise.resolve([]),
-        customerId ? getApprovedOverduePcRequestsForCustomer(customerId) : Promise.resolve([]),
-        customerId ? getApprovedBonusPcRequestsForCustomer(customerId) : Promise.resolve([])
+        optionalCustomerRead(() => getActiveRewardItems(), []),
+        customerId ? optionalCustomerRead(() => getRedemptionRequestsForCustomer(customerId), []) : Promise.resolve([]),
+        customerId ? optionalCustomerRead(() => getApprovedOverduePcRequestsForCustomer(customerId), []) : Promise.resolve([]),
+        customerId ? optionalCustomerRead(() => getApprovedBonusPcRequestsForCustomer(customerId), []) : Promise.resolve([])
       ]);
 
       const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });

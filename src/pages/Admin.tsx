@@ -1,45 +1,22 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
 import SectionHeader from '../components/SectionHeader';
-import StatCard from '../components/StatCard';
-import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { createCustomerAuthAccount, createStaffAuthAccount, sendUserPasswordResetEmail } from '../services/authService';
 import {
   deleteUserProfileRecord,
-  getAlerts,
-  getGiftHistory,
   getUserProfiles,
-  updateAlertStatus,
-  updateCustomerRecord,
-  updateGiftHistoryRecord,
   updateUserProfileRecord,
-  upsertAlerts
 } from '../services/firestoreService';
 import { useErpData } from '../hooks/useErpData';
-import type { Alert, GiftHistory, UserProfile, UserRole } from '../types';
-import { buildOperationalAlerts } from '../utils/alertUtils';
-import { buildCustomerScores } from '../utils/customerAnalytics';
-import { getTodayDateString } from '../utils/dateUtils';
-import { formatDateRange, formatMoney } from '../utils/formatters';
+import type { UserProfile, UserRole } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
-import { getPaymentTermsLabel } from '../utils/settings';
-
-const alertTypeLabels: Partial<Record<Alert['alertType'], string>> = {
-  automatic_tier_change: 'automatic partner level change',
-  tier_downgrade_risk: 'partner level downgrade risk',
-  tier3_credit_warning: 'partner level credit warning'
-};
-
-const getAlertTypeLabel = (alertType: Alert['alertType']) => alertTypeLabels[alertType] ?? alertType.replace(/_/g, ' ');
 
 const Admin = () => {
-  const { customers, invoices, payments, settings, loading, error, refreshData } = useErpData();
+  const { customers, loading, error } = useErpData();
   const { userProfile } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [staffName, setStaffName] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
@@ -62,14 +39,8 @@ const Admin = () => {
   const loadAdminData = async () => {
     try {
       setAdminError('');
-      const [userRows, alertRows, giftRows] = await Promise.all([
-        getUserProfiles(),
-        getAlerts(),
-        getGiftHistory()
-      ]);
+      const userRows = await getUserProfiles();
       setUsers(userRows);
-      setAlerts(alertRows);
-      setGiftHistory(giftRows);
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Unable to load admin data.');
     }
@@ -79,86 +50,8 @@ const Admin = () => {
     loadAdminData();
   }, []);
 
-  const generatedAlerts = useMemo(() => buildOperationalAlerts(customers, invoices, payments, settings), [customers, invoices, payments, settings]);
-  const openAlerts = alerts.filter((alert) => alert.status === 'Open');
-  const pendingGifts = giftHistory.filter((gift) => gift.status !== 'Given');
-  const tierOverrides = customers.filter((customer) => customer.tierOverride);
-  const negativeProfitInvoices = invoices.filter((invoice) => invoice.totalProfit < 0);
   const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
-  const sortedAlerts = useMemo(
-    () => sortNewestFirst(
-      // Resolved alerts remain in Firestore for history, but the active Admin list
-      // should only show alerts that still need attention.
-      alerts.filter((alert) => alert.status !== 'Resolved'),
-      ['updatedAt', 'createdAt', 'date']
-    ),
-    [alerts]
-  );
-  const sortedPendingGifts = useMemo(() => sortNewestFirst(pendingGifts, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [pendingGifts]);
-  const sortedTierOverrides = useMemo(() => sortNewestFirst(tierOverrides, ['updatedAt', 'createdAt']), [tierOverrides]);
   const isAdmin = userProfile?.role === 'Admin';
-
-  const handleSyncAlerts = async () => {
-    try {
-      setSaving(true);
-
-      // Auto-tier sync respects Admin overrides while activity log writes remain disabled.
-      const scoresByCustomerId = new Map(buildCustomerScores(customers, invoices, payments, new Date(), settings).map((score) => [score.customerId, score]));
-      await Promise.all(
-        customers.map(async (customer) => {
-          const score = scoresByCustomerId.get(customer.id);
-
-          if (!score || customer.tierOverride || score.tier === customer.tier) {
-            return;
-          }
-
-          await updateCustomerRecord(
-            customer.id,
-            {
-              name: customer.name,
-              mobile: customer.mobile,
-              area: customer.area,
-              tier: score.tier,
-              paymentTerms: getPaymentTermsLabel(score.tier, settings),
-              notes: customer.notes,
-              previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
-              status: customer.status,
-              tierOverride: false
-            },
-            auditUser
-          );
-        })
-      );
-
-      const giftPendingAlerts = giftHistory
-        .filter((gift) => gift.status !== 'Given')
-        .map((gift) => ({
-          uniqueKey: `gift_pending:${gift.id}`,
-          customerId: gift.customerId,
-          customerName: gift.customerName,
-          alertType: 'gift_pending' as const,
-          severity: 'Medium' as const,
-          date: getTodayDateString(),
-          status: 'Open' as const,
-          actionRequired: 'Approve or mark the pending gift as given.',
-          message: `${gift.customerName} has a pending gift for ${formatDateRange(gift.periodStart, gift.periodEnd)}.`
-        }));
-
-      await upsertAlerts([...generatedAlerts, ...giftPendingAlerts], auditUser);
-      setMessage('Alerts and automatic partner level changes synced from current Firestore ERP data.');
-      await refreshData();
-      await loadAdminData();
-    } catch (err) {
-      setAdminError(err instanceof Error ? err.message : 'Unable to sync alerts.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAlertStatus = async (alert: Alert, status: Alert['status']) => {
-    await updateAlertStatus(alert.id, status, auditUser);
-    await loadAdminData();
-  };
 
   const handleCreateStaff = async (event: FormEvent) => {
     event.preventDefault();
@@ -246,7 +139,7 @@ const Admin = () => {
       return;
     }
 
-    const confirmed = window.confirm(`Delete ERP access for ${user.email}? This removes the app user profile. The Firebase Auth account itself must be removed from Firebase Console or a future Admin SDK function.`);
+    const confirmed = window.confirm(`Delete ERP access for ${user.email}? This removes the app user profile. You can recreate access with the same email by using that email's current password, or send a password reset first.`);
 
     if (!confirmed) {
       return;
@@ -256,53 +149,13 @@ const Admin = () => {
       setSaving(true);
       setAdminError('');
       await deleteUserProfileRecord(user.id, auditUser);
-      setMessage(`ERP access deleted for ${user.email}. Firebase Auth password records are not exposed by the client app.`);
+      setMessage(`ERP access deleted for ${user.email}. To reuse this email, create access again with the current password or send a password reset first.`);
       await loadAdminData();
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Unable to delete user access.');
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleGiftStatus = async (gift: GiftHistory, status: GiftHistory['status']) => {
-    await updateGiftHistoryRecord(
-      gift.id,
-      {
-        ...gift,
-        status,
-        actualGiftAmount: status === 'Given' ? gift.suggestedGiftBudget : gift.actualGiftAmount,
-        giftAmount: status === 'Given' ? gift.suggestedGiftBudget : gift.giftAmount,
-        giftGivenDate: status === 'Given' ? getTodayDateString() : gift.giftGivenDate,
-        giftedDate: status === 'Given' ? getTodayDateString() : gift.giftedDate,
-        giftedBy: status === 'Given' ? userProfile?.email || 'Admin' : gift.giftedBy,
-        approvedBy: gift.approvedBy || userProfile?.email || 'Admin'
-      },
-      auditUser
-    );
-    await loadAdminData();
-  };
-
-  const clearTierOverride = async (customerId: string) => {
-    const customer = customers.find((item) => item.id === customerId);
-    if (!customer) return;
-
-    await updateCustomerRecord(
-      customer.id,
-      {
-        name: customer.name,
-        mobile: customer.mobile,
-        area: customer.area,
-        tier: customer.tier,
-        paymentTerms: customer.paymentTerms,
-        notes: customer.notes,
-        previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
-        status: customer.status,
-        tierOverride: false
-      },
-      auditUser
-    );
-    await refreshData();
   };
 
   const cardStyle: CSSProperties = {
@@ -366,37 +219,16 @@ const Admin = () => {
   );
 
   if (loading) {
-    return <SectionHeader title="Admin" description="Loading system health..." />;
+    return <SectionHeader title="Admin" description="Loading admin controls..." />;
   }
 
   return (
     <div>
-      <SectionHeader title="Admin" description="Manage staff, alerts, gift approvals, partner level overrides, and system health." />
+      <SectionHeader title="Admin" description="Manage staff and user access." />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {adminError ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{adminError}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 18, marginBottom: 24 }}>
-        <StatCard title="Open Alerts" value={`${openAlerts.length}`} subtitle={`${generatedAlerts.length} generated from current data`} color="#EB5757" />
-        <StatCard title="Pending Gifts" value={`${pendingGifts.length}`} subtitle="Approved or awaiting final gift" />
-        <StatCard title="Negative Profit" value={`${negativeProfitInvoices.length}`} subtitle="Invoices to review" color="#EB5757" />
-      </div>
-
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900 }}>System Health</div>
-            <div style={{ color: '#67738E', marginTop: 4 }}>Alerts are generated from live Firestore customers, invoices, payments, and settings.</div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Link to="/settings" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', textDecoration: 'none' }}>Settings</Link>
-            <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={handleSyncAlerts}>
-              {saving ? 'Syncing...' : 'Sync Alerts'}
-            </button>
-          </div>
-        </div>
-      </div>
 
       <form style={cardStyle} onSubmit={handleCreateStaff}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Manage Staff Users</div>
@@ -431,7 +263,7 @@ const Admin = () => {
             <select style={inputStyle} value={customerLoginId} onChange={(event) => setCustomerLoginId(event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name} - {customer.mobile}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer, true)}</option>
               ))}
             </select>
           </label>
@@ -477,80 +309,6 @@ const Admin = () => {
                 </td>
               </tr>
             ))}
-          </>
-        )}
-      </div>
-
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Alerts</div>
-        {renderTable(
-          ['Customer', 'Type', 'Severity', 'Message', 'Status', 'Action'],
-          <>
-            {sortedAlerts.length === 0 ? (
-              <tr><td style={cellStyle} colSpan={6}>No active alerts to review.</td></tr>
-            ) : (
-              sortedAlerts.map((alert) => (
-                <tr key={alert.id}>
-                  <td style={cellStyle}>{alert.customerName}</td>
-                  <td style={cellStyle}>{getAlertTypeLabel(alert.alertType)}</td>
-                  <td style={{ ...cellStyle, color: alert.severity === 'High' ? '#B42318' : '#B7791F', fontWeight: 900 }}>{alert.severity}</td>
-                  <td style={cellStyle}>{alert.message}<div style={{ color: '#67738E', fontSize: 12 }}>{alert.actionRequired}</div></td>
-                  <td style={cellStyle}>{alert.status}</td>
-                  <td style={cellStyle}>
-                    <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleAlertStatus(alert, 'Reviewed')}>Reviewed</button>
-                    <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={() => handleAlertStatus(alert, 'Resolved')}>Resolved</button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </>
-        )}
-      </div>
-
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Gift Approvals</div>
-        {renderTable(
-          ['Customer', 'Partner Level', 'Status', 'Period', 'PC Points', 'Item', 'Action'],
-          <>
-            {sortedPendingGifts.length === 0 ? (
-              <tr><td style={cellStyle} colSpan={7}>No pending gift approvals.</td></tr>
-            ) : (
-              sortedPendingGifts.map((gift) => (
-                <tr key={gift.id}>
-                  <td style={cellStyle}>{gift.customerName}</td>
-                  <td style={cellStyle}><TierBadge tier={gift.tierAtGiftTime} /></td>
-                  <td style={cellStyle}>{gift.status}</td>
-                  <td style={cellStyle}>{formatDateRange(gift.periodStart, gift.periodEnd)}</td>
-                  <td style={cellStyle}>{formatMoney(gift.suggestedGiftBudget)}</td>
-                  <td style={cellStyle}>{gift.giftItem || '-'}</td>
-                  <td style={cellStyle}>
-                    <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={() => handleGiftStatus(gift, 'Given')}>Mark Given</button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </>
-        )}
-      </div>
-
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Partner Level Overrides</div>
-        {renderTable(
-          ['Customer', 'Area', 'Partner Level', 'Payment Terms', 'Action'],
-          <>
-            {sortedTierOverrides.length === 0 ? (
-              <tr><td style={cellStyle} colSpan={5}>No manual partner level overrides active.</td></tr>
-            ) : (
-              sortedTierOverrides.map((customer) => (
-                <tr key={customer.id}>
-                  <td style={cellStyle}>{customer.name}</td>
-                  <td style={cellStyle}>{customer.area}</td>
-                  <td style={cellStyle}><TierBadge tier={customer.tier} /></td>
-                  <td style={cellStyle}>{customer.paymentTerms}</td>
-                  <td style={cellStyle}><button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={() => clearTierOverride(customer.id)}>Clear Override</button></td>
-                </tr>
-              ))
-            )}
           </>
         )}
       </div>

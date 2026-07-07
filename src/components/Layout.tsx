@@ -17,9 +17,9 @@ const navItems: NavItem[] = [
   { to: '/invoices', label: 'Invoices' },
   { to: '/payments', label: 'Payments' },
   { to: '/intelligence', label: 'Intelligence' },
-  { to: '/analytics', label: 'Analytics' },
-  { to: '/loyalty', label: 'Loyalty' },
-  { to: '/overdue-pc-requests', label: 'Overdue PC', adminOnly: true },
+  { to: '/analytics', label: 'Analytics', adminOnly: true },
+  { to: '/loyalty', label: 'Loyalty', adminOnly: true },
+  { to: '/overdue-pc-requests', label: 'PC', adminOnly: true },
   { to: '/reports', label: 'Reports', staffPermission: 'canViewReports' },
   { to: '/admin', label: 'Admin', adminOnly: true },
   { to: '/settings', label: 'Settings', adminOnly: true }

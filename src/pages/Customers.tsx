@@ -30,11 +30,10 @@ const emptyCustomerForm: CustomerFormData = {
   paymentTerms: getPaymentTermsForTier('Tier 4'),
   notes: '',
   previousOutstandingAmount: 0,
-  tierOverride: false,
   status: 'Active'
 };
 
-type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount' | 'tierOverride'>;
+type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount'>;
 
 const Customers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -99,7 +98,7 @@ const Customers = () => {
   const filteredCustomers = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
-    if (!term) return sortNewestFirst(customers, ['updatedAt', 'createdAt']);
+    if (!term) return [];
 
     return sortNewestFirst(
       customers.filter((customer) =>
@@ -215,7 +214,6 @@ const Customers = () => {
       paymentTerms: customer.paymentTerms,
       notes: customer.notes,
       previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
-      tierOverride: Boolean(customer.tierOverride),
       status: customer.status || 'Active'
     });
     setShowCustomerForm(true);
@@ -404,14 +402,6 @@ const Customers = () => {
                 Old opening balance before this ERP. It creates one opening-balance invoice and is paid before newer invoices.
               </div>
 
-              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(formData.tierOverride)}
-                  onChange={(event) => setFormData((current) => ({ ...current, tierOverride: event.target.checked }))}
-                />
-                Admin partner level override
-              </label>
             </>
           ) : null}
 
@@ -495,13 +485,17 @@ const Customers = () => {
               {showFullTable ? 'Compact View' : 'View Full'}
             </button>
           </div>
-          <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+          <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
+            {searchText.trim() ? latestEntriesNotice : 'Search to show matching customers.'}
+          </div>
           {showFullTable ? (
             <div style={{ ...latestFiveScrollStyle, display: 'grid', gap: 12 }}>
               {loading ? (
                 <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>Loading customers...</div>
               ) : filteredCustomers.length === 0 ? (
-                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>No customers found.</div>
+                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>
+                  {searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}
+                </div>
               ) : (
                 filteredCustomers.map((customer) => {
                   const outstanding = outstandingByCustomerId.get(customer.id);
@@ -562,7 +556,7 @@ const Customers = () => {
                 {loading ? (
                   <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
                 ) : filteredCustomers.length === 0 ? (
-                  <tr><td style={cellStyle} colSpan={4}>No customers found.</td></tr>
+                  <tr><td style={cellStyle} colSpan={4}>{searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}</td></tr>
                 ) : (
                   filteredCustomers.map((customer) => (
                     <tr key={customer.id}>

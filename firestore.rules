@@ -62,6 +62,10 @@ service cloud.firestore {
       return level in ['Active Partner', 'Silver Partner', 'Gold Partner', 'Platinum Partner'];
     }
 
+    function isCustomerTier(tier) {
+      return tier in ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'];
+    }
+
     function isRedemptionStatus(status) {
       return status in ['Pending', 'Approved', 'Rejected', 'Gifted'];
     }
@@ -76,10 +80,29 @@ service cloud.firestore {
           'customerId',
           'month',
           'totalSales',
+          'totalProfit',
           'totalPayments',
           'orderCount',
           'overdueAmount',
           'target',
+          'basePcEarned',
+          'bonusPcEarned',
+          'availablePc',
+          'salesTarget',
+          'profitTarget',
+          'frequencyTarget',
+          'paymentScore',
+          'profitScore',
+          'frequencyScore',
+          'salesScore',
+          'loyaltyScore',
+          'rollingScore',
+          'calculatedTier',
+          'finalTier',
+          'tierCapReason',
+          'isOnboarding',
+          'onboardingStage',
+          'confidenceFactor',
           'pointsEarned',
           'currentLevel',
           'progressPercent',
@@ -90,10 +113,29 @@ service cloud.firestore {
         && data.month is string
         && data.month.matches('^\\d{4}-\\d{2}$')
         && data.totalSales is number
+        && (!('totalProfit' in data) || data.totalProfit is number)
         && data.totalPayments is number
         && data.orderCount is number
         && data.overdueAmount is number
         && data.target is number
+        && (!('basePcEarned' in data) || data.basePcEarned is number)
+        && (!('bonusPcEarned' in data) || data.bonusPcEarned is number)
+        && (!('availablePc' in data) || data.availablePc is number)
+        && (!('salesTarget' in data) || data.salesTarget is number)
+        && (!('profitTarget' in data) || data.profitTarget is number)
+        && (!('frequencyTarget' in data) || data.frequencyTarget is number)
+        && (!('paymentScore' in data) || data.paymentScore is number)
+        && (!('profitScore' in data) || data.profitScore is number)
+        && (!('frequencyScore' in data) || data.frequencyScore is number)
+        && (!('salesScore' in data) || data.salesScore is number)
+        && (!('loyaltyScore' in data) || data.loyaltyScore is number)
+        && (!('rollingScore' in data) || data.rollingScore is number)
+        && (!('calculatedTier' in data) || isCustomerTier(data.calculatedTier))
+        && (!('finalTier' in data) || isCustomerTier(data.finalTier))
+        && validOptionalString(data, 'tierCapReason', 240)
+        && (!('isOnboarding' in data) || data.isOnboarding is bool)
+        && (!('onboardingStage' in data) || data.onboardingStage in ['None', 'Stage A', 'Stage B', 'Stage C', 'Stage D'])
+        && (!('confidenceFactor' in data) || data.confidenceFactor is number)
         && data.pointsEarned is number
         && data.progressPercent is number
         && data.totalSales >= 0
@@ -101,6 +143,19 @@ service cloud.firestore {
         && data.orderCount >= 0
         && data.overdueAmount >= 0
         && data.target >= 0
+        && (!('basePcEarned' in data) || data.basePcEarned >= 0)
+        && (!('bonusPcEarned' in data) || data.bonusPcEarned >= 0)
+        && (!('availablePc' in data) || data.availablePc >= 0)
+        && (!('salesTarget' in data) || data.salesTarget >= 0)
+        && (!('profitTarget' in data) || data.profitTarget >= 0)
+        && (!('frequencyTarget' in data) || data.frequencyTarget >= 0)
+        && (!('paymentScore' in data) || (data.paymentScore >= 0 && data.paymentScore <= 100))
+        && (!('profitScore' in data) || (data.profitScore >= 0 && data.profitScore <= 100))
+        && (!('frequencyScore' in data) || (data.frequencyScore >= 0 && data.frequencyScore <= 100))
+        && (!('salesScore' in data) || (data.salesScore >= 0 && data.salesScore <= 100))
+        && (!('loyaltyScore' in data) || (data.loyaltyScore >= 0 && data.loyaltyScore <= 100))
+        && (!('rollingScore' in data) || (data.rollingScore >= 0 && data.rollingScore <= 100))
+        && (!('confidenceFactor' in data) || (data.confidenceFactor >= 0 && data.confidenceFactor <= 1))
         && data.pointsEarned >= 0
         && data.progressPercent >= 0
         && data.progressPercent <= 100
@@ -383,11 +438,6 @@ service cloud.firestore {
     match /giftItems/{giftItemId} {
       allow read: if isTeam();
       allow write: if isAdmin();
-    }
-
-    match /alerts/{alertId} {
-      allow read, create, update: if isTeam();
-      allow delete: if isAdmin();
     }
 
     match /offers/{offerId} {

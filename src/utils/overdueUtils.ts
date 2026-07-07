@@ -1,5 +1,5 @@
-import type { AppSettings, Customer, Invoice, OverdueInvoiceAlert, Payment } from '../types';
-import { getPreviousOutstandingFallback } from './openingBalance';
+import type { AppSettings, Customer, Invoice, OverdueInvoiceRisk, Payment } from '../types';
+import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import { getEffectiveInvoiceDueDate } from './settings';
 
@@ -21,12 +21,12 @@ export const getPaidAmountForInvoice = (invoiceId: string, payments: Payment[]) 
     .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
 };
 
-export const buildOverdueInvoiceAlerts = (
+export const buildOverdueInvoiceRisks = (
   customers: Customer[],
   invoices: Invoice[],
   payments: Payment[],
   settings?: AppSettings
-): OverdueInvoiceAlert[] => {
+): OverdueInvoiceRisk[] => {
   const today = getToday();
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
 
@@ -38,7 +38,7 @@ export const buildOverdueInvoiceAlerts = (
       const overdueAmount = getPendingAmount(invoice.totalSales, paidAmount);
       const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);
       const overdueDays = effectiveDueDate < today && overdueAmount > 0 ? daysBetween(effectiveDueDate, today) : 0;
-      const severity: OverdueInvoiceAlert['severity'] = overdueAmount <= 0 ? 'green' : overdueDays > 7 ? 'red' : overdueDays > 0 ? 'yellow' : 'green';
+      const severity: OverdueInvoiceRisk['severity'] = overdueAmount <= 0 ? 'green' : overdueDays > 7 ? 'red' : overdueDays > 0 ? 'yellow' : 'green';
 
       return {
         invoiceId: invoice.id,
@@ -56,7 +56,7 @@ export const buildOverdueInvoiceAlerts = (
         severity
       };
     })
-    .filter((alert) => alert.overdueAmount > 0 && alert.overdueDays > 0)
+    .filter((row) => row.overdueAmount > 0 && row.overdueDays > 0)
     .sort((a, b) => b.overdueAmount - a.overdueAmount);
 };
 
@@ -66,21 +66,23 @@ export const buildCustomerOutstandingRows = (
   payments: Payment[],
   settings?: AppSettings
 ) => {
-  const overdueAlerts = buildOverdueInvoiceAlerts(customers, invoices, payments, settings);
+  const overdueRisks = buildOverdueInvoiceRisks(customers, invoices, payments, settings);
 
   return customers.map((customer) => {
     const customerInvoices = invoices.filter((invoice) => invoice.customerId === customer.id);
+    const businessInvoices = getBusinessInvoices(customerInvoices);
     const invoiceIds = new Set(customerInvoices.map((invoice) => invoice.id));
-    const totalSales = customerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+    const businessInvoiceIds = new Set(businessInvoices.map((invoice) => invoice.id));
+    const totalSales = businessInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
     const customerPayments = payments.filter((payment) => invoiceIds.has(payment.invoiceId));
+    const businessPayments = payments.filter((payment) => businessInvoiceIds.has(payment.invoiceId));
     const totalPayments = customerPayments.reduce((sum, payment) => sum + payment.amount + payment.cashDiscount, 0);
-    const invoicePaymentEffect = customerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-    // Opening balances are normal invoices after conversion; the field is only a legacy fallback.
+    const businessInvoicePaymentEffect = businessPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
     const previousOutstanding = getPreviousOutstandingFallback(customer, customerInvoices);
-    const newOutstanding = getPendingAmount(totalSales, invoicePaymentEffect);
-    const customerAlerts = overdueAlerts.filter((alert) => alert.customerId === customer.id);
-    const overdueAmount = customerAlerts.reduce((sum, alert) => sum + alert.overdueAmount, 0);
-    const overdueDays = customerAlerts.reduce((highest, alert) => Math.max(highest, alert.overdueDays), 0);
+    const newOutstanding = getPendingAmount(totalSales, businessInvoicePaymentEffect);
+    const customerRisks = overdueRisks.filter((row) => row.customerId === customer.id);
+    const overdueAmount = customerRisks.reduce((sum, row) => sum + row.overdueAmount, 0);
+    const overdueDays = customerRisks.reduce((highest, row) => Math.max(highest, row.overdueDays), 0);
     const calculatedOutstanding = previousOutstanding + newOutstanding;
     const outstanding = customer.totalOutstandingAmount ?? calculatedOutstanding;
     const indicator = overdueAmount > 0 ? 'red' : outstanding > 0 ? 'yellow' : 'green';
@@ -91,7 +93,6 @@ export const buildCustomerOutstandingRows = (
       totalPayments,
       previousOutstanding,
       newOutstanding,
-      // Future improvement: allow payments to be allocated specifically to previous outstanding.
       outstanding,
       overdueAmount,
       overdueDays,

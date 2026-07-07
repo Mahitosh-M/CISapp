@@ -10,6 +10,8 @@ interface UseErpDataOptions {
   toDate?: string;
   invoiceLimit?: number;
   paymentLimit?: number;
+  includePayments?: boolean;
+  includeScores?: boolean;
 }
 
 export const useErpData = (options: UseErpDataOptions = {}) => {
@@ -28,19 +30,21 @@ export const useErpData = (options: UseErpDataOptions = {}) => {
 
       // Scoped pages keep their visible invoice/payment rows filtered, but tiers are always calculated
       // from the same full rolling data used by the Intelligence page.
+      const includePayments = options.includePayments !== false;
+      const includeScores = options.includeScores !== false;
       const hasScopedRecords = Boolean(options.fromDate || options.toDate || options.invoiceLimit || options.paymentLimit);
       const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
         getCustomers(),
         getInvoices({ fromDate: options.fromDate, toDate: options.toDate, limitCount: options.invoiceLimit }),
-        getPayments({ fromDate: options.fromDate, toDate: options.toDate, limitCount: options.paymentLimit }),
+        includePayments ? getPayments({ fromDate: options.fromDate, toDate: options.toDate, limitCount: options.paymentLimit }) : Promise.resolve([]),
         getAppSettings()
       ]);
-      const [scoringInvoices, scoringPayments] = hasScopedRecords
+      const [scoringInvoices, scoringPayments] = includeScores && hasScopedRecords
         ? await Promise.all([getInvoices(), getPayments()])
         : [invoiceRows, paymentRows];
-      const intelligenceScores = buildCustomerScores(customerRows, scoringInvoices, scoringPayments, new Date(), appSettings);
+      const intelligenceScores = includeScores ? buildCustomerScores(customerRows, scoringInvoices, scoringPayments, new Date(), appSettings) : [];
 
-      setCustomers(applyScoresToCustomerTiers(customerRows, intelligenceScores));
+      setCustomers(includeScores ? applyScoresToCustomerTiers(customerRows, intelligenceScores) : customerRows);
       setInvoices(invoiceRows);
       setPayments(paymentRows);
       setSettings(appSettings);
@@ -50,7 +54,7 @@ export const useErpData = (options: UseErpDataOptions = {}) => {
     } finally {
       setLoading(false);
     }
-  }, [options.fromDate, options.invoiceLimit, options.paymentLimit, options.toDate]);
+  }, [options.fromDate, options.includePayments, options.includeScores, options.invoiceLimit, options.paymentLimit, options.toDate]);
 
   useEffect(() => {
     refreshData();

@@ -8,6 +8,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { getGiftHistory } from '../services/firestoreService';
 import type { GiftHistory } from '../types';
 import { buildCustomerScoresForDateRange } from '../utils/customerAnalytics';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getMonthValue, getTodayDateString, getYearValue, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
@@ -495,7 +496,7 @@ const Reports = () => {
             <select style={inputStyle} value={draftFilters.customerId} onChange={(event) => handleFilterChange('customerId', event.target.value)}>
               <option value="all">All customers</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{customer.name}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
