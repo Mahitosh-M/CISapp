@@ -10,6 +10,7 @@ import {
   getAppSettings,
   getCustomers,
   getInvoices,
+  getInvoicesByCustomerId,
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
   getPaymentsByInvoiceIds,
@@ -19,6 +20,7 @@ import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment } from '.
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { getInvoiceDisplayNumber } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
 
@@ -36,7 +38,8 @@ const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   notes: ''
 });
 
-const LIST_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 10;
+const LOAD_MORE_PAGE_SIZE = 10;
 
 const getInvoiceStatus = (dueDate: string, totalSales: number, paidAmount: number) => {
   const outstanding = getPendingAmount(totalSales, paidAmount);
@@ -84,9 +87,14 @@ const Invoices = () => {
       setLoading(true);
       setError('');
 
+      const invoiceRead =
+        customerFilter === 'all'
+          ? getInvoices({ limitCount: invoiceLimit, sortBy: 'invoiceNumber' })
+          : getInvoicesByCustomerId(customerFilter, { limitCount: invoiceLimit, sortBy: 'invoiceNumber' });
+
       const [customerRows, invoiceRows, invoiceNumber, appSettings] = await Promise.all([
         getCustomers(),
-        getInvoices({ limitCount: invoiceLimit }),
+        invoiceRead,
         getNextInvoiceNumber(),
         getAppSettings()
       ]);
@@ -106,7 +114,11 @@ const Invoices = () => {
 
   useEffect(() => {
     loadData();
-  }, [invoiceLimit]);
+  }, [customerFilter, invoiceLimit]);
+
+  useEffect(() => {
+    setInvoiceLimit(LIST_PAGE_SIZE);
+  }, [customerFilter]);
 
   const getPaidAmount = (invoiceId: string) => {
     return payments
@@ -134,7 +146,7 @@ const Invoices = () => {
         };
       })
       .filter((invoice) => {
-        const matchesSearch = !term || [invoice.invoiceNumber, invoice.customerName].some((value) => value.toLowerCase().includes(term));
+        const matchesSearch = !term || [getInvoiceDisplayNumber(invoice), invoice.invoiceNumber, invoice.customerName].some((value) => value.toLowerCase().includes(term));
         const matchesCustomer = customerFilter === 'all' || invoice.customerId === customerFilter;
         const matchesStatus = statusFilter === 'all' || invoice.status.label === statusFilter;
         return matchesSearch && matchesCustomer && matchesStatus;
@@ -503,7 +515,7 @@ const Invoices = () => {
         </div>
 
         <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
+        <div style={{ ...latestFiveScrollStyle, maxHeight: 520, overflowX: 'auto', overflowY: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -529,7 +541,7 @@ const Invoices = () => {
               ) : (
                 invoiceRows.map((invoice) => (
                   <tr key={invoice.id}>
-                    <td style={cellStyle}><strong>{invoice.invoiceNumber}</strong></td>
+                    <td style={cellStyle}><strong>{getInvoiceDisplayNumber(invoice)}</strong></td>
                     <td style={cellStyle}>{invoice.customerName}</td>
                     <td style={cellStyle}>{formatDate(invoice.date)}</td>
                     <td style={cellStyle}>{formatDate(invoice.effectiveDueDate)}</td>

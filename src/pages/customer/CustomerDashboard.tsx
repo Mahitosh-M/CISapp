@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Coins, FileText, ShoppingCart, Wallet, WalletCards } from 'lucide-react';
+import { AlertTriangle, Coins, ShoppingCart, Wallet } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatMoney } from '../../utils/formatters';
 import { calculateCustomerTotalOutstanding, isCurrentMonth } from '../../utils/customerPortal';
 import { formatApc } from '../../utils/loyalty';
+import { getBusinessInvoices } from '../../utils/openingBalance';
 
 const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; value: string; icon: JSX.Element; color?: string }) => (
   <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)' }}>
@@ -19,15 +20,14 @@ const StatTile = ({ title, value, icon, color = '#0B1F3A' }: { title: string; va
 );
 
 const CustomerDashboard = () => {
-  const { customer, invoices, payments, invoiceViews, apcSummary, bonusPcRequests } = useCustomerPortalContext();
+  const { customer, invoices, invoiceViews, apcSummary, bonusPcRequests } = useCustomerPortalContext();
   const navigate = useNavigate();
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const hasScrolledRef = useRef(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const currentMonthInvoices = invoices.filter((invoice) => isCurrentMonth(invoice.date));
-  const currentMonthPayments = payments.filter((payment) => isCurrentMonth(payment.date));
+  const currentMonthInvoices = getBusinessInvoices(invoices).filter((invoice) => isCurrentMonth(invoice.date));
   const currentMonthPurchases = currentMonthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-  const totalOutstanding = calculateCustomerTotalOutstanding(customer, invoiceViews);
+  const totalOutstanding = customer?.totalOutstandingAmount ?? calculateCustomerTotalOutstanding(customer, invoiceViews);
   const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
   const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
   const currentMonthBonusRequests = bonusPcRequests.filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)));
@@ -74,8 +74,6 @@ const CustomerDashboard = () => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
         <StatTile title="Month Purchases" value={formatMoney(currentMonthPurchases)} icon={<ShoppingCart size={20} />} />
         <StatTile title="PC Balance" value={formatApc(apcSummary?.apcBalance ?? 0)} icon={<Wallet size={20} />} color="#166534" />
-        <StatTile title="Invoices" value={`${currentMonthInvoices.length}`} icon={<FileText size={20} />} />
-        <StatTile title="Payments" value={`${currentMonthPayments.length}`} icon={<WalletCards size={20} />} />
       </div>
 
       {currentMonthBonusPc > 0 ? (
@@ -96,7 +94,7 @@ const CustomerDashboard = () => {
       ) : null}
 
       <div style={{ background: '#0B1F3A', color: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 12 }}>
-        <div style={{ color: '#D4AF37', fontWeight: 900 }}>Total Outstanding</div>
+        <div style={{ color: '#D4AF37', fontWeight: 900 }}>Total</div>
         <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{formatMoney(totalOutstanding)}</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, color: overdueInvoices.length > 0 ? '#FCA5A5' : '#BFC8D9' }}>
           <AlertTriangle size={17} />

@@ -17,6 +17,7 @@ import { buildCustomerScores } from '../utils/customerAnalytics';
 import { calculateDueStatus, calculateInvoiceApcInfo, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
 import { calculateCustomerApcBonuses } from '../utils/giftUtils';
 import { canViewRewardAtLevel, getIntelligenceScoreProgressPercent, getNextPartnerLevel, getPartnerLevelForTier, getScoreNeededForNextPartnerLevel } from '../utils/loyalty';
+import { getBusinessInvoices } from '../utils/openingBalance';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
 export const useCustomerPortalData = () => {
@@ -65,12 +66,13 @@ export const useCustomerPortalData = () => {
 
       const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
       const scopedPayments = filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
-      const intelligenceResult = linkedCustomer ? buildCustomerScores([linkedCustomer], scopedInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
+      const businessInvoices = getBusinessInvoices(scopedInvoices);
+      const intelligenceResult = linkedCustomer ? buildCustomerScores([linkedCustomer], businessInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
       const customerWithIntelligenceTier = linkedCustomer && intelligenceResult ? { ...linkedCustomer, tier: intelligenceResult.tier } : linkedCustomer;
       const baseApcEarned = customerWithIntelligenceTier
-        ? scopedInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, scopedPayments, customerWithIntelligenceTier.tier, appSettings).earnedApc, 0)
+        ? businessInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, scopedPayments, customerWithIntelligenceTier.tier, appSettings).earnedApc, 0)
         : 0;
-      const bonusApcEarned = customerWithIntelligenceTier ? calculateCustomerApcBonuses(customerWithIntelligenceTier, scopedInvoices, scopedPayments, appSettings).totalBonus : 0;
+      const bonusApcEarned = customerWithIntelligenceTier ? calculateCustomerApcBonuses(customerWithIntelligenceTier, businessInvoices, scopedPayments, appSettings).totalBonus : 0;
       const redeemedApc = redemptions
         .filter((request) => request.status === 'Gifted')
         .reduce((sum, request) => sum + request.points, 0);
@@ -79,6 +81,7 @@ export const useCustomerPortalData = () => {
       const apcBalance = Math.max(0, Math.round(baseApcEarned + bonusApcEarned + approvedOverduePc + approvedBonusPc - redeemedApc));
       const monthlyApcEarned = customerWithIntelligenceTier
         ? scopedInvoices
+            .filter((invoice) => businessInvoices.some((businessInvoice) => businessInvoice.id === invoice.id))
             .filter((invoice) => isCurrentMonth(invoice.date))
             .reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, scopedPayments, customerWithIntelligenceTier.tier, appSettings).earnedApc, 0)
         : 0;

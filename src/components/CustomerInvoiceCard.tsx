@@ -2,6 +2,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import type { CustomerInvoiceView } from '../utils/customerPortal';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatApc } from '../utils/loyalty';
+import { getInvoiceDisplayNumber } from '../utils/openingBalance';
 
 interface CustomerInvoiceCardProps {
   invoiceView: CustomerInvoiceView;
@@ -32,7 +33,7 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 126px', gap: 12, alignItems: 'center' }}>
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-            <div style={{ fontWeight: 900 }}>{invoiceView.invoice.invoiceNumber}</div>
+            <div style={{ fontWeight: 900 }}>{getInvoiceDisplayNumber(invoiceView.invoice)}</div>
             <span style={{ background: invoiceView.urgencyColor, color: '#FFFFFF', borderRadius: 999, padding: '4px 8px', fontSize: 11, fontWeight: 900 }}>
               {invoiceView.status}
             </span>

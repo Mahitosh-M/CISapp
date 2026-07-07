@@ -14,6 +14,7 @@ import type {
   TierCreditPolicy
 } from '../types';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
+import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
 import {
   getEffectiveInvoiceDueDate,
   getCreditDaysForTierFromSettings,
@@ -612,15 +613,18 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
     const customerInvoices = activeInvoices.filter((invoice) => invoice.customerId === customer.id);
     const allCustomerInvoices = invoices.filter((invoice) => invoice.customerId === customer.id);
     const invoiceIds = new Set(customerInvoices.map((invoice) => invoice.id));
+    const allInvoiceIds = new Set(allCustomerInvoices.map((invoice) => invoice.id));
     const customerPayments = payments.filter((payment) => invoiceIds.has(payment.invoiceId) && parseDate(payment.date) <= endOfDay(window.end));
+    const allCustomerPayments = payments.filter((payment) => allInvoiceIds.has(payment.invoiceId) && parseDate(payment.date) <= endOfDay(window.end));
 
     const totalSales = customerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
     const totalProfit = customerInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
     const totalPayments = customerPayments.reduce((sum, payment) => sum + payment.amount + payment.cashDiscount, 0);
-    const invoicePaymentEffect = customerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-    // previousOutstandingAmount is the customer's old opening balance before this ERP existed.
-    const previousOutstandingAmount = customer.previousOutstandingAmount ?? 0;
-    const newOutstanding = getPendingAmount(totalSales, invoicePaymentEffect);
+    const allInvoicePaymentEffect = allCustomerPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+    const allSales = allCustomerInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+    // Opening balances are normal invoices after conversion; the field is only a legacy fallback.
+    const previousOutstandingAmount = getPreviousOutstandingFallback(customer, allCustomerInvoices);
+    const newOutstanding = getPendingAmount(allSales, allInvoicePaymentEffect);
     const invoiceCount = customerInvoices.length;
     const monthsInScoringWindow = getAverageTargetMonthCount(window);
 
@@ -810,8 +814,9 @@ export const buildCustomerScores = (
   referenceDate = new Date(),
   settings?: AppSettings
 ): CustomerScore[] => {
-  const currentScores = buildScoresForWindow(customers, invoices, payments, getCurrentRollingWindow(referenceDate), settings);
-  const previousScores = buildScoresForWindow(customers, invoices, payments, getPreviousRollingWindow(referenceDate), settings);
+  const businessInvoices = getBusinessInvoices(invoices);
+  const currentScores = buildScoresForWindow(customers, businessInvoices, payments, getCurrentRollingWindow(referenceDate), settings);
+  const previousScores = buildScoresForWindow(customers, businessInvoices, payments, getPreviousRollingWindow(referenceDate), settings);
   const previousScoreByCustomer = new Map(previousScores.map((score) => [score.customerId, score]));
 
   return currentScores.map((currentScore) => {
@@ -836,7 +841,7 @@ export const buildCustomerScoresForDateRange = (
   toDate: string,
   settings?: AppSettings
 ): CustomerScore[] => {
-  return buildScoresForWindow(customers, invoices, payments, {
+  return buildScoresForWindow(customers, getBusinessInvoices(invoices), payments, {
     start: parseDate(fromDate),
     end: parseDate(toDate)
   }, settings);

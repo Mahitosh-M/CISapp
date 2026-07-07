@@ -10,6 +10,7 @@ import {
   getInvoices,
   getPayments,
   getPaymentTermsForTier,
+  syncOpeningBalanceInvoices,
   updateCustomerRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
@@ -71,8 +72,17 @@ const Customers = () => {
         getAppSettings()
       ]);
 
-      setCustomers(applyIntelligenceTiersToCustomers(customerRows, invoiceRows, paymentRows, appSettings));
-      setInvoices(invoiceRows);
+      const openingBalanceSync = isAdmin
+        ? await syncOpeningBalanceInvoices(customerRows, invoiceRows)
+        : { convertedCustomerIds: [] as string[], createdInvoices: [] as Invoice[] };
+      const convertedCustomerIds = new Set(openingBalanceSync.convertedCustomerIds);
+      const syncedCustomerRows = customerRows.map((customer) =>
+        convertedCustomerIds.has(customer.id) ? { ...customer, previousOutstandingAmount: 0 } : customer
+      );
+      const syncedInvoiceRows = [...invoiceRows, ...openingBalanceSync.createdInvoices];
+
+      setCustomers(applyIntelligenceTiersToCustomers(syncedCustomerRows, syncedInvoiceRows, paymentRows, appSettings));
+      setInvoices(syncedInvoiceRows);
       setPayments(paymentRows);
       setSettings(appSettings);
     } catch (err) {
@@ -391,7 +401,7 @@ const Customers = () => {
               </label>
 
               <div style={{ color: '#67738E', fontSize: 12, lineHeight: 1.5, marginTop: -6, marginBottom: 12 }}>
-                Old opening balance before this ERP. It is added to invoice sales minus payments for total outstanding.
+                Old opening balance before this ERP. It creates one opening-balance invoice and is paid before newer invoices.
               </div>
 
               <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
@@ -514,7 +524,7 @@ const Customers = () => {
                         <div><strong>Payments</strong><div>{formatMoney(outstanding?.totalPayments ?? 0)}</div></div>
                         <div><strong>Previous Outstanding</strong><div>{formatMoney(outstanding?.previousOutstanding ?? 0)}</div></div>
                         <div><strong>Invoice Outstanding</strong><div>{formatMoney(outstanding?.newOutstanding ?? 0)}</div></div>
-                        <div><strong>Total Outstanding</strong><div>{formatMoney(outstanding?.outstanding ?? 0)}</div></div>
+                        <div><strong>Total</strong><div>{formatMoney(outstanding?.outstanding ?? 0)}</div></div>
                         <div><strong>Overdue</strong><div>{formatMoney(outstanding?.overdueAmount ?? 0)} | {outstanding?.overdueDays ?? 0} day(s)</div></div>
                         <div><strong>PC Points</strong><div>{formatMoney(giftBudget)}</div></div>
                         <div><strong>PC Status</strong><div>{giftBudget > 0 ? 'PC eligible' : 'No PC points yet'}</div></div>

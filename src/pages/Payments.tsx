@@ -9,16 +9,19 @@ import {
   getCustomers,
   getInvoices,
   getPayments,
+  getPaymentsByCustomerId,
   updatePaymentRecord
 } from '../services/firestoreService';
 import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../utils/openingBalance';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
-const LIST_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 10;
+const LOAD_MORE_PAGE_SIZE = 10;
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -60,10 +63,15 @@ const Payments = () => {
       setLoading(true);
       setError('');
 
+      const paymentRead =
+        customerFilter === 'all'
+          ? getPayments({ limitCount: paymentLimit, sortBy: 'createdAt' })
+          : getPaymentsByCustomerId(customerFilter, { limitCount: paymentLimit });
+
       const [customerRows, invoiceRows, paymentRows] = await Promise.all([
         getCustomers(),
         getInvoices(),
-        getPayments()
+        paymentRead
       ]);
 
       setCustomers(customerRows);
@@ -78,7 +86,11 @@ const Payments = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [customerFilter, paymentLimit]);
+
+  useEffect(() => {
+    setPaymentLimit(LIST_PAGE_SIZE);
+  }, [customerFilter]);
 
   const getPaidAmountForInvoice = (invoiceId: string, ignoredPaymentId = '') => {
     return payments
@@ -104,7 +116,7 @@ const Payments = () => {
       .sort((left, right) => {
         if (left.pendingAmount > 0 && right.pendingAmount <= 0) return -1;
         if (left.pendingAmount <= 0 && right.pendingAmount > 0) return 1;
-        return left.date.localeCompare(right.date) || left.invoiceNumber.localeCompare(right.invoiceNumber);
+        return sortInvoicesForPaymentAllocation([left, right])[0] === left ? -1 : 1;
       });
   }, [editingPaymentId, formData.customerId, formData.invoiceId, invoices, payments]);
 
@@ -133,9 +145,8 @@ const Payments = () => {
     let remainingAmount = formData.amount;
     let remainingDiscount = formData.cashDiscount;
 
-    return selectedInvoiceOptions.map((invoice, index) => {
-      const isLastAllocation = index === selectedInvoiceOptions.length - 1;
-      const appliedTotal = isLastAllocation ? Math.max(0, remainingEffect) : Math.min(invoice.pendingAmount, Math.max(0, remainingEffect));
+    return selectedInvoiceOptions.map((invoice) => {
+      const appliedTotal = Math.min(invoice.pendingAmount, Math.max(0, remainingEffect));
       const amount = Math.min(remainingAmount, appliedTotal);
       const cashDiscount = Math.min(remainingDiscount, appliedTotal - amount);
 
@@ -151,6 +162,8 @@ const Payments = () => {
       };
     });
   }, [formData.amount, formData.cashDiscount, paymentEffect, selectedInvoiceOptions]);
+
+  const appliedTotalPreview = allocationPreview.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
 
   useEffect(() => {
     if (editingPaymentId || !formData.customerId) return;
@@ -201,7 +214,7 @@ const Payments = () => {
     }), ['updatedAt', 'createdAt', 'date']);
   }, [customerFilter, modeFilter, payments, searchText]);
 
-  const paymentRows = useMemo(() => filteredPaymentRows.slice(0, paymentLimit), [filteredPaymentRows, paymentLimit]);
+  const paymentRows = filteredPaymentRows;
 
   const handleFieldChange = (field: keyof PaymentFormData, value: string) => {
     if (field === 'customerId') {
@@ -306,6 +319,12 @@ const Payments = () => {
       return;
     }
 
+    const oldestPendingInvoice = pendingInvoiceOptions[0];
+    if (!editingPaymentId && oldestPendingInvoice && !selectedInvoiceIds.includes(oldestPendingInvoice.id)) {
+      setError(`Payment must be applied to the oldest pending invoice first (${getInvoiceDisplayNumber(oldestPendingInvoice)}).`);
+      return;
+    }
+
     try {
       setSaving(true);
       setError('');
@@ -332,7 +351,8 @@ const Payments = () => {
             }, auditUser)
           )
         );
-        setMessage(`Payment added. ${formatMoney(paymentEffect)} recorded across ${payableAllocations.length} invoice(s).`);
+        const recordedAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
+        setMessage(`Payment added. ${formatMoney(recordedAmount)} recorded across ${payableAllocations.length} invoice(s).`);
       }
 
       resetForm();
@@ -388,7 +408,7 @@ const Payments = () => {
 
   const handleLoadMore = () => {
     // Free-tier safety: initial payment screen reads only latest records; older rows load on demand.
-    setPaymentLimit((current) => current + LIST_PAGE_SIZE);
+    setPaymentLimit((current) => current + LOAD_MORE_PAGE_SIZE);
   };
 
   const cardStyle: CSSProperties = {
@@ -471,7 +491,7 @@ const Payments = () => {
               Selected Pending: {selectedInvoiceIds.length > 0 ? formatMoney(selectedPendingTotal) : 'Select invoice(s)'}
             </div>
             {selectedInvoiceIds.length > 0 ? (
-              <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>This payment applies: {formatMoney(amountAppliedToInvoicePreview)}</div>
+              <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>This payment applies: {formatMoney(appliedTotalPreview)}</div>
             ) : null}
           </div>
         </div>
@@ -520,7 +540,7 @@ const Payments = () => {
                     >
                       <input type="checkbox" checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
                       <span style={{ minWidth: 0 }}>
-                        <span style={{ display: 'block', color: '#0B1F3A', fontWeight: 900 }}>{invoice.invoiceNumber}</span>
+                        <span style={{ display: 'block', color: '#0B1F3A', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
                         <span style={{ display: 'block', color: '#B42318', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
                       </span>
                     </label>
@@ -531,7 +551,7 @@ const Payments = () => {
                 <div style={{ marginTop: 10, color: '#0B1F3A', fontSize: 12, fontWeight: 800 }}>
                   {allocationPreview.map((allocation) => (
                     <span key={allocation.invoice.id} style={{ display: 'inline-block', marginRight: 12, marginTop: 4 }}>
-                      {allocation.invoice.invoiceNumber}: {formatMoney(allocation.appliedTotal)}
+                      {getInvoiceDisplayNumber(allocation.invoice)}: {formatMoney(allocation.appliedTotal)}
                     </span>
                   ))}
                 </div>
@@ -574,7 +594,7 @@ const Payments = () => {
         {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
         {overpaymentAmount > 0 ? (
           <div style={{ color: '#B7791F', marginTop: 12, fontWeight: 800 }}>
-            Warning: this creates an advance or extra amount of {formatMoney(overpaymentAmount)}. It is allowed.
+            Extra amount of {formatMoney(overpaymentAmount)} is not applied to invoice outstanding.
           </div>
         ) : null}
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
@@ -620,7 +640,7 @@ const Payments = () => {
         </div>
 
         <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
+        <div style={{ ...latestFiveScrollStyle, maxHeight: 520, overflowX: 'auto', overflowY: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -640,13 +660,27 @@ const Payments = () => {
               ) : paymentRows.length === 0 ? (
                 <tr><td style={cellStyle} colSpan={8}>No payments found.</td></tr>
               ) : (
-                paymentRows.map((payment) => (
+                paymentRows.map((payment) => {
+                  const linkedInvoice = invoices.find((invoice) => invoice.id === payment.invoiceId);
+                  const invoiceLabel = linkedInvoice ? getInvoiceDisplayNumber(linkedInvoice) : payment.invoiceNumber;
+
+                  return (
                   <tr key={payment.id}>
                     <td style={cellStyle}>{formatDate(payment.date)}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
-                    <td style={cellStyle}>{payment.invoiceNumber}</td>
+                    <td style={cellStyle}>{invoiceLabel}</td>
                     <td style={{ ...cellStyle, fontWeight: 800 }}>
                       {formatMoney(payment.amount)}
+                      {(payment.notes || '').includes('Split payment') ? (
+                        <div style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>
+                          Split paid: {formatMoney(payment.amount)}
+                        </div>
+                      ) : null}
+                      {payment.cashDiscount > 0 ? (
+                        <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
+                          Applied with discount: {formatMoney(getInvoicePaymentEffect(payment))}
+                        </div>
+                      ) : null}
                       {payment.amountUsedForOldBalance > 0 ? (
                         <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
                           Old balance: {formatMoney(payment.amountUsedForOldBalance)}
@@ -674,12 +708,13 @@ const Payments = () => {
                       ) : null}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
-        {!loading && filteredPaymentRows.length > paymentLimit ? (
+        {!loading && payments.length >= paymentLimit ? (
           <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
             Load More
           </button>

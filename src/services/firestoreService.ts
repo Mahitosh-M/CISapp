@@ -12,7 +12,8 @@ import {
   runTransaction,
   setDoc,
   updateDoc,
-  where
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import type {
@@ -56,6 +57,8 @@ import {
 import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
 import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate } from '../utils/customerPortal';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
+import { getOpeningBalanceInvoiceId, getOpeningBalanceInvoiceNumber, isOpeningBalanceInvoice, OPENING_BALANCE_INVOICE_TYPE } from '../utils/openingBalance';
+import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const CUSTOMERS = 'customers';
 const INVOICES = 'invoices';
@@ -87,6 +90,7 @@ interface DateRangeQueryOptions {
   fromDate?: string;
   toDate?: string;
   limitCount?: number;
+  sortBy?: 'date' | 'invoiceNumber' | 'createdAt';
 }
 
 interface CustomerScopedQueryOptions extends DateRangeQueryOptions {
@@ -101,6 +105,80 @@ const getTodayDateString = () => nowIso().slice(0, 10);
 const withoutUndefined = <T extends Record<string, unknown>>(payload: T) => {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)) as Partial<T>;
 };
+
+const buildOpeningBalanceInvoicePayload = (customerId: string, customer: CustomerFormData, amount: number, createdAt: string) => {
+  const customerCreationDate = createdAt.slice(0, 10);
+
+  return {
+    invoiceNumber: getOpeningBalanceInvoiceNumber(customerId),
+    customerId,
+    customerName: customer.name,
+    invoiceType: OPENING_BALANCE_INVOICE_TYPE,
+    isOpeningBalance: true,
+    date: customerCreationDate,
+    dueDate: customerCreationDate,
+    salesAmount: amount,
+    costAmount: 0,
+    transportAmount: 0,
+    totalSales: amount,
+    totalCost: 0,
+    totalProfit: 0,
+    notes: 'Opening balance from previous outstanding',
+    createdAt,
+    updatedAt: createdAt
+  };
+};
+
+export async function syncCustomerFinancialSummary(customerId: string) {
+  if (!customerId) {
+    return {
+      totalOutstandingAmount: 0,
+      invoiceOutstandingAmount: 0,
+      openingBalanceOutstandingAmount: 0
+    };
+  }
+
+  const [invoiceSnapshot, paymentSnapshot] = await Promise.all([
+    getDocs(query(collection(db, INVOICES), where('customerId', '==', customerId))),
+    getDocs(query(collection(db, PAYMENTS), where('customerId', '==', customerId)))
+  ]);
+  const invoices = invoiceSnapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
+  const payments = paymentSnapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+  const invoicePaymentEffectByInvoiceId = payments.reduce((paymentMap, payment) => {
+    if (!payment.invoiceId) return paymentMap;
+    paymentMap.set(payment.invoiceId, (paymentMap.get(payment.invoiceId) ?? 0) + getInvoicePaymentEffect(payment));
+    return paymentMap;
+  }, new Map<string, number>());
+  const summary = invoices.reduce(
+    (totals, invoice) => {
+      const outstanding = getPendingAmount(invoice.totalSales, invoicePaymentEffectByInvoiceId.get(invoice.id) ?? 0);
+
+      if (isOpeningBalanceInvoice(invoice)) {
+        totals.openingBalanceOutstandingAmount += outstanding;
+      } else {
+        totals.invoiceOutstandingAmount += outstanding;
+      }
+
+      return totals;
+    },
+    {
+      invoiceOutstandingAmount: 0,
+      openingBalanceOutstandingAmount: 0
+    }
+  );
+  const totalOutstandingAmount = summary.invoiceOutstandingAmount + summary.openingBalanceOutstandingAmount;
+  const payload = {
+    totalOutstandingAmount,
+    invoiceOutstandingAmount: summary.invoiceOutstandingAmount,
+    openingBalanceOutstandingAmount: summary.openingBalanceOutstandingAmount,
+    financialSummaryUpdatedAt: nowIso(),
+    previousOutstandingAmount: 0
+  };
+
+  await updateDoc(doc(db, CUSTOMERS, customerId), payload);
+
+  return payload;
+}
 
 let appSettingsCache: AppSettings | undefined;
 
@@ -133,6 +211,11 @@ const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => 
     tierOverride: Boolean(data.tierOverride),
     // Old balance from before this ERP started. Missing legacy documents safely read as zero.
     previousOutstandingAmount: Math.max(0, numberOrZero(data.previousOutstandingAmount)),
+    totalOutstandingAmount: data.totalOutstandingAmount === undefined ? undefined : numberOrZero(data.totalOutstandingAmount),
+    invoiceOutstandingAmount: data.invoiceOutstandingAmount === undefined ? undefined : numberOrZero(data.invoiceOutstandingAmount),
+    openingBalanceOutstandingAmount: data.openingBalanceOutstandingAmount === undefined ? undefined : numberOrZero(data.openingBalanceOutstandingAmount),
+    overdueAmount: data.overdueAmount === undefined ? undefined : numberOrZero(data.overdueAmount),
+    financialSummaryUpdatedAt: data.financialSummaryUpdatedAt ? String(data.financialSummaryUpdatedAt) : undefined,
     paymentTerms: String(data.paymentTerms || getPaymentTermsLabel(tier)),
     notes: String(data.notes || ''),
     status: data.status ? String(data.status) : '',
@@ -153,6 +236,8 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     invoiceNumber: String(data.invoiceNumber || ''),
     customerId: String(data.customerId || ''),
     customerName: String(data.customerName || ''),
+    invoiceType: data.invoiceType ? String(data.invoiceType) : undefined,
+    isOpeningBalance: data.isOpeningBalance === true,
     date: String(data.date || data.invoiceDate || ''),
     dueDate: String(data.dueDate || ''),
     salesAmount,
@@ -315,7 +400,8 @@ const buildInvoiceQueryConstraints = (options?: CustomerScopedQueryOptions) => {
 
   // Free-tier safety: filter by date/customer in Firestore before React receives rows.
   applyDateRangeConstraints(constraints, 'date', options);
-  constraints.push(orderBy('date', 'desc'));
+  const hasDateRange = Boolean(options?.fromDate || options?.toDate);
+  constraints.push(orderBy(!hasDateRange && options?.sortBy === 'invoiceNumber' ? 'invoiceNumber' : 'date', 'desc'));
   applyLimitConstraint(constraints, options?.limitCount);
 
   return constraints;
@@ -328,7 +414,8 @@ const buildPaymentQueryConstraints = (options?: CustomerScopedQueryOptions) => {
   if (options?.customerName && !options.customerId) constraints.push(where('customerName', '==', options.customerName));
 
   applyDateRangeConstraints(constraints, 'date', options);
-  constraints.push(orderBy('date', 'desc'));
+  const hasDateRange = Boolean(options?.fromDate || options?.toDate);
+  constraints.push(orderBy(!hasDateRange && options?.sortBy === 'createdAt' ? 'createdAt' : 'date', 'desc'));
   applyLimitConstraint(constraints, options?.limitCount);
 
   return constraints;
@@ -537,31 +624,108 @@ export const getCustomersByName = async (customerName: string) => {
 };
 
 export const createCustomer = async (customer: CustomerFormData, auditUser?: AuditUser) => {
+  const previousOutstandingAmount = Math.max(0, numberOrZero(customer.previousOutstandingAmount));
+  const timestamp = nowIso();
+  const customerRef = doc(collection(db, CUSTOMERS));
+  const batch = writeBatch(db);
   const customerPayload = {
     ...customer,
-    previousOutstandingAmount: Math.max(0, numberOrZero(customer.previousOutstandingAmount))
+    previousOutstandingAmount: 0,
+    totalOutstandingAmount: previousOutstandingAmount,
+    invoiceOutstandingAmount: 0,
+    openingBalanceOutstandingAmount: previousOutstandingAmount,
+    financialSummaryUpdatedAt: timestamp
   };
 
-  const docRef = await addDoc(collection(db, CUSTOMERS), {
+  batch.set(customerRef, {
     ...customerPayload,
-    createdAt: nowIso(),
-    updatedAt: nowIso()
+    createdAt: timestamp,
+    updatedAt: timestamp
   });
 
-  return docRef;
+  if (previousOutstandingAmount > 0) {
+    batch.set(
+      doc(db, INVOICES, getOpeningBalanceInvoiceId(customerRef.id)),
+      buildOpeningBalanceInvoicePayload(customerRef.id, customerPayload, previousOutstandingAmount, timestamp)
+    );
+  }
+
+  await batch.commit();
+  return customerRef;
 };
 
 export const updateCustomerRecord = async (customerId: string, customer: CustomerFormData, auditUser?: AuditUser) => {
+  const previousOutstandingAmount = Math.max(0, numberOrZero(customer.previousOutstandingAmount));
+  const timestamp = nowIso();
   const customerPayload = {
     ...customer,
-    previousOutstandingAmount: Math.max(0, numberOrZero(customer.previousOutstandingAmount))
+    previousOutstandingAmount: 0
   };
 
-  await updateDoc(doc(db, CUSTOMERS, customerId), {
-    ...customerPayload,
-    updatedAt: nowIso()
+  if (previousOutstandingAmount <= 0) {
+    await updateDoc(doc(db, CUSTOMERS, customerId), {
+      ...customerPayload,
+      updatedAt: timestamp
+    });
+    await syncCustomerFinancialSummary(customerId);
+    return;
+  }
+
+  const openingInvoiceRef = doc(db, INVOICES, getOpeningBalanceInvoiceId(customerId));
+
+  await runTransaction(db, async (transaction) => {
+    const openingInvoiceSnapshot = await transaction.get(openingInvoiceRef);
+
+    transaction.update(doc(db, CUSTOMERS, customerId), {
+      ...customerPayload,
+      updatedAt: timestamp
+    });
+
+    if (!openingInvoiceSnapshot.exists()) {
+      transaction.set(openingInvoiceRef, buildOpeningBalanceInvoicePayload(customerId, customerPayload, previousOutstandingAmount, timestamp));
+    }
   });
 
+  await syncCustomerFinancialSummary(customerId);
+
+};
+
+export const syncOpeningBalanceInvoices = async (customers: Customer[], invoices: Invoice[]) => {
+  const existingOpeningCustomerIds = new Set(invoices.filter(isOpeningBalanceInvoice).map((invoice) => invoice.customerId));
+  const customersToConvert = customers.filter((customer) => (customer.previousOutstandingAmount ?? 0) > 0 && !existingOpeningCustomerIds.has(customer.id));
+
+  if (customersToConvert.length === 0) {
+    return { convertedCustomerIds: [] as string[], createdInvoices: [] as Invoice[] };
+  }
+
+  const batch = writeBatch(db);
+  const timestamp = nowIso();
+  const createdInvoices: Invoice[] = [];
+
+  customersToConvert.forEach((customer) => {
+    const invoiceRef = doc(db, INVOICES, getOpeningBalanceInvoiceId(customer.id));
+    const createdAt = customer.createdAt || timestamp;
+    const payload = buildOpeningBalanceInvoicePayload(customer.id, customer, customer.previousOutstandingAmount, createdAt);
+
+    batch.set(invoiceRef, payload);
+    batch.update(doc(db, CUSTOMERS, customer.id), {
+      previousOutstandingAmount: 0,
+      totalOutstandingAmount: customer.previousOutstandingAmount,
+      invoiceOutstandingAmount: 0,
+      openingBalanceOutstandingAmount: customer.previousOutstandingAmount,
+      financialSummaryUpdatedAt: timestamp,
+      updatedAt: timestamp
+    });
+    createdInvoices.push({ id: invoiceRef.id, ...payload });
+  });
+
+  await batch.commit();
+  await Promise.all(customersToConvert.map((customer) => syncCustomerFinancialSummary(customer.id)));
+
+  return {
+    convertedCustomerIds: customersToConvert.map((customer) => customer.id),
+    createdInvoices
+  };
 };
 
 export const deleteCustomerRecord = async (customerId: string, auditUser?: AuditUser) => {
@@ -581,7 +745,11 @@ export const getInvoicesByCustomerId = async (customerId: string, options?: Date
     .map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()))
     .filter((invoice) => !options?.fromDate || invoice.date >= options.fromDate)
     .filter((invoice) => !options?.toDate || invoice.date <= options.toDate)
-    .sort((left, right) => right.date.localeCompare(left.date));
+    .sort((left, right) =>
+      options?.sortBy === 'invoiceNumber'
+        ? right.invoiceNumber.localeCompare(left.invoiceNumber, undefined, { numeric: true })
+        : right.date.localeCompare(left.date)
+    );
 
   return options?.limitCount && options.limitCount > 0 ? rows.slice(0, options.limitCount) : rows;
 };
@@ -649,15 +817,21 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     updatedAt: nowIso()
   });
 
+  await syncCustomerFinancialSummary(invoice.customerId);
   return docRef;
 };
 
 export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFormData, auditUser?: AuditUser) => {
+  const existingInvoiceSnapshot = await getDoc(doc(db, INVOICES, invoiceId));
+  const existingInvoice = existingInvoiceSnapshot.exists() ? mapInvoiceDoc(existingInvoiceSnapshot.id, existingInvoiceSnapshot.data()) : undefined;
+
   await updateDoc(doc(db, INVOICES, invoiceId), {
     ...invoice,
     updatedAt: nowIso()
   });
 
+  const affectedCustomerIds = [existingInvoice?.customerId, invoice.customerId].filter((customerId): customerId is string => Boolean(customerId));
+  await Promise.all([...new Set(affectedCustomerIds)].map((customerId) => syncCustomerFinancialSummary(customerId)));
 };
 
 export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUser) => {
@@ -665,6 +839,7 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
   const linkedPaymentsSnapshot = await getDocs(query(collection(db, PAYMENTS), where('invoiceId', '==', invoiceId)));
   const linkedPaymentRefs = linkedPaymentsSnapshot.docs.map((paymentDoc) => paymentDoc.ref);
   let deletedPaymentCount = 0;
+  let affectedCustomerId = '';
 
   if (linkedPaymentRefs.length >= 450) {
     throw new Error('This invoice has too many linked payments to delete safely in one operation.');
@@ -676,6 +851,8 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
     if (!invoiceSnapshot.exists()) {
       throw new Error('Invoice record no longer exists. Refresh the list and try again.');
     }
+
+    affectedCustomerId = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data()).customerId;
 
     const paymentSnapshots = await Promise.all(linkedPaymentRefs.map((paymentRef) => transaction.get(paymentRef)));
     const paymentsToDelete = paymentSnapshots
@@ -726,6 +903,7 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
     throw new Error('Invoice delete did not complete. Refresh the list and try again.');
   }
 
+  await syncCustomerFinancialSummary(affectedCustomerId);
   return { deletedPaymentCount };
 };
 
@@ -758,6 +936,18 @@ export const getPaymentsByInvoiceIds = async (invoiceIds: string[]) => {
   );
 
   return snapshots.flatMap((snapshot) => snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data())));
+};
+
+export const getPaymentsByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
+  const paymentsQuery = query(collection(db, PAYMENTS), where('customerId', '==', customerId));
+  const snapshot = await getDocs(paymentsQuery);
+  const rows = snapshot.docs
+    .map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
+    .filter((payment) => !options?.fromDate || payment.date >= options.fromDate)
+    .filter((payment) => !options?.toDate || payment.date <= options.toDate)
+    .sort((left, right) => (right.createdAt || right.date).localeCompare(left.createdAt || left.date));
+
+  return options?.limitCount && options.limitCount > 0 ? rows.slice(0, options.limitCount) : rows;
 };
 
 export const getPaymentsForCustomerViewer = async (customerId?: string, customerName?: string) => {
@@ -827,6 +1017,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     });
   });
 
+  await syncCustomerFinancialSummary(payment.customerId);
   return paymentRef;
 };
 
@@ -834,11 +1025,13 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   const paymentRef = doc(db, PAYMENTS, paymentId);
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
+  let affectedCustomerIds: string[] = [payment.customerId];
 
   await runTransaction(db, async (transaction) => {
     const paymentSnapshot = await transaction.get(paymentRef);
     const existingPayment = paymentSnapshot.exists() ? mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()) : undefined;
     const oldCustomerId = existingPayment?.customerId || payment.customerId;
+    affectedCustomerIds = [...new Set([oldCustomerId, payment.customerId].filter(Boolean))];
     const oldCustomerRef = oldCustomerId ? doc(db, CUSTOMERS, oldCustomerId) : undefined;
     const newCustomerRef = doc(db, CUSTOMERS, payment.customerId);
     const oldCustomerSnapshot = oldCustomerRef ? await transaction.get(oldCustomerRef) : undefined;
@@ -876,6 +1069,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
     });
   });
 
+  await Promise.all(affectedCustomerIds.map((customerId) => syncCustomerFinancialSummary(customerId)));
 };
 
 export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUser) => {
@@ -913,6 +1107,8 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
   if (deletedPaymentSnapshot.exists()) {
     throw new Error('Payment delete did not complete. Refresh the list and try again.');
   }
+
+  await syncCustomerFinancialSummary(deletedPayment?.customerId ?? '');
 };
 
 export const getAppSettings = async (forceRefresh = false) => {

@@ -1,5 +1,6 @@
 import type { AppSettings, BonusPcRequest, Customer, GiftHistory, GiftItem, GiftPeriod, Invoice, OverduePcRequest, Payment } from '../types';
 import { calculateInvoiceApcInfo } from './customerPortal';
+import { getBusinessInvoices } from './openingBalance';
 import { getGiftPercentageForTier } from './settings';
 import { getTierTargetSettings } from './settings';
 
@@ -52,8 +53,9 @@ export const calculateCustomerApcBonuses = (
   customerPayments: Payment[],
   settings: AppSettings
 ) => {
+  const businessInvoices = getBusinessInvoices(customerInvoices);
   const targetSettings = getTierTargetSettings(customer.tier, settings);
-  const apcEligibleInvoices = customerInvoices.filter((invoice) => calculateInvoiceApcInfo(invoice, customerPayments, customer.tier, settings).earnedApc > 0);
+  const apcEligibleInvoices = businessInvoices.filter((invoice) => calculateInvoiceApcInfo(invoice, customerPayments, customer.tier, settings).earnedApc > 0);
   const totalSales = apcEligibleInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
   const onTimePaymentBonus = 0;
   const monthlyTargetBonus =
@@ -82,12 +84,13 @@ export const calculateCustomerAvailableApc = (
   approvedOverduePcRequests: OverduePcRequest[] = [],
   approvedBonusPcRequests: BonusPcRequest[] = []
 ) => {
-  const profitConsidered = customerInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalProfit), 0);
-  const baseApcPoints = customerInvoices.reduce(
+  const businessInvoices = getBusinessInvoices(customerInvoices);
+  const profitConsidered = businessInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalProfit), 0);
+  const baseApcPoints = businessInvoices.reduce(
     (sum, invoice) => sum + calculateInvoiceApcInfo(invoice, customerPayments, customer.tier, settings).earnedApc,
     0
   );
-  const bonusApcPoints = calculateCustomerApcBonuses(customer, customerInvoices, customerPayments, settings).totalBonus;
+  const bonusApcPoints = calculateCustomerApcBonuses(customer, businessInvoices, customerPayments, settings).totalBonus;
   const redeemedApcPoints = giftHistory
     .filter((gift) => gift.customerId === customer.id && gift.status === 'Given')
     .reduce((sum, gift) => sum + numberOrZero(gift.giftAmount || gift.actualGiftAmount), 0);
@@ -99,7 +102,7 @@ export const calculateCustomerAvailableApc = (
     .reduce((sum, request) => sum + numberOrZero(request.approvedCoins), 0);
 
   return {
-    salesAmount: customerInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0),
+    salesAmount: businessInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0),
     profitConsidered,
     baseApcPoints,
     bonusApcPoints,

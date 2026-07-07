@@ -1,5 +1,6 @@
 import type { AppSettings, Customer, CustomerTier, Invoice, Payment, UserProfile } from '../types';
 import { addDaysToDateString, getCurrentMonthRange } from './dateUtils';
+import { getPreviousOutstandingFallback } from './openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import { getEffectiveInvoiceDueDate, getGiftPercentageForTier, getPaymentBufferForTier } from './settings';
 
@@ -221,9 +222,9 @@ export const sortInvoicesByUrgency = (invoiceViews: CustomerInvoiceView[]) => {
 };
 
 export const calculateCustomerTotalOutstanding = (customer: Customer | undefined, invoiceViews: CustomerInvoiceView[]) => {
-  const previousOutstanding = customer?.previousOutstandingAmount ?? 0;
+  const previousOutstanding = getPreviousOutstandingFallback(customer, invoiceViews.map((row) => row.invoice));
   const invoiceOutstanding = invoiceViews.reduce((sum, row) => sum + Math.max(0, row.outstandingAmount), 0);
 
-  // Total outstanding includes old opening balance plus invoice outstanding from all time.
+  // Opening balances are normal invoices after conversion; the field is only a legacy fallback.
   return previousOutstanding + invoiceOutstanding;
 };

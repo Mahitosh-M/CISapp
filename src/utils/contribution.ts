@@ -1,4 +1,5 @@
 import type { Customer, Invoice } from '../types';
+import { getBusinessInvoices } from './openingBalance';
 
 export interface CustomerContributionRow {
   customerId: string;
@@ -22,7 +23,7 @@ export const buildCustomerContributionRows = (customers: Customer[], invoices: I
   const customerNameById = new Map(customers.map((customer) => [customer.id, customer.name]));
   const rows = new Map<string, CustomerContributionRow>();
 
-  invoices.forEach((invoice) => {
+  getBusinessInvoices(invoices).forEach((invoice) => {
     const current = rows.get(invoice.customerId) || {
       customerId: invoice.customerId,
       customerName: customerNameById.get(invoice.customerId) || invoice.customerName || 'Unknown Customer',

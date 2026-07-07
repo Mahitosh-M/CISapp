@@ -17,7 +17,6 @@ import OverduePcRequests from './pages/OverduePcRequests';
 import NotFound from './pages/NotFound';
 import CustomerDashboard from './pages/customer/CustomerDashboard';
 import CustomerInvoices from './pages/customer/CustomerInvoices';
-import CustomerPayments from './pages/customer/CustomerPayments';
 import CustomerOffers from './pages/customer/CustomerOffers';
 import CustomerProfile from './pages/customer/CustomerProfile';
 import CustomerPartnerPoints from './pages/customer/CustomerPartnerPoints';
@@ -43,7 +42,7 @@ const App = () => {
       <Route path="/customer" element={<ProtectedRoute allowedRoles={['customer']}><CustomerMobileLayout /></ProtectedRoute>}>
         <Route index element={<CustomerDashboard />} />
         <Route path="invoices" element={<CustomerInvoices />} />
-        <Route path="payments" element={<CustomerPayments />} />
+        <Route path="payments" element={<Navigate to="/customer" replace />} />
         <Route path="offers" element={<CustomerOffers />} />
         <Route path="partner-points" element={<CustomerPartnerPoints />} />
         <Route path="profile" element={<CustomerProfile />} />

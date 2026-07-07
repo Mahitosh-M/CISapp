@@ -26,6 +26,7 @@ import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { getBusinessInvoices, getPreviousOutstandingFallback } from '../utils/openingBalance';
 import { buildOverdueInvoiceAlerts } from '../utils/overdueUtils';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
@@ -43,7 +44,7 @@ const Dashboard = () => {
   const isMobile = useIsMobile();
 
   const periodInvoices = useMemo(() => {
-    return invoices.filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
+    return getBusinessInvoices(invoices).filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
   }, [activeFromDate, activeToDate, invoices]);
 
   const periodInvoiceIds = useMemo(() => new Set(periodInvoices.map((invoice) => invoice.id)), [periodInvoices]);
@@ -55,14 +56,18 @@ const Dashboard = () => {
     const collected = periodPayments.reduce((sum, payment) => sum + payment.amount, 0);
     const invoicePayments = payments.filter((payment) => periodInvoiceIds.has(payment.invoiceId));
     const invoicePaymentEffect = invoicePayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-    // Opening balances from old records are included in dashboard outstanding without changing payment entry flow.
-    const previousOutstanding = customers.reduce((sum, customer) => sum + (customer.previousOutstandingAmount ?? 0), 0);
+    const storedOutstanding = customers.reduce((sum, customer) => sum + (customer.totalOutstandingAmount ?? 0), 0);
+    const hasStoredOutstanding = customers.length > 0 && customers.every((customer) => customer.totalOutstandingAmount !== undefined);
+    const previousOutstanding = customers.reduce(
+      (sum, customer) => sum + getPreviousOutstandingFallback(customer, periodInvoices.filter((invoice) => invoice.customerId === customer.id)),
+      0
+    );
 
     return {
       sales,
       profit,
       collected,
-      outstanding: previousOutstanding + getPendingAmount(sales, invoicePaymentEffect)
+      outstanding: hasStoredOutstanding ? storedOutstanding : previousOutstanding + getPendingAmount(sales, invoicePaymentEffect)
     };
   }, [customers, payments, periodInvoiceIds, periodInvoices, periodPayments]);
 
@@ -274,7 +279,7 @@ const Dashboard = () => {
         <StatCard title="Sales" value={formatMoney(periodTotals.sales)} subtitle="Last month" />
         <StatCard title="Profit" value={formatMoney(periodTotals.profit)} subtitle="Last month" />
         <StatCard title="Collected" value={formatMoney(periodTotals.collected)} subtitle="Payments against period invoices" />
-        <StatCard title="Outstanding" value={formatMoney(periodTotals.outstanding)} subtitle="Previous + period unpaid invoices" color="#D32F2F" />
+        <StatCard title="Outstanding" value={formatMoney(periodTotals.outstanding)} subtitle="Current customer total" color="#D32F2F" />
         <StatCard title="Customers" value={`${customers.length}`} subtitle="Firestore customer records" />
         <StatCard title="Average Score" value={`${summary.averageScore}`} subtitle="Rolling 2-month intelligence" />
         <StatCard title="Overdue Alerts" value={`${overdueAlerts.length}`} subtitle={formatMoney(overdueAmount)} color="#EB5757" />

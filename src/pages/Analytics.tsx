@@ -9,6 +9,7 @@ import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
+import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
@@ -32,7 +33,7 @@ const Analytics = () => {
   const isMobile = useIsMobile();
 
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
+    return getBusinessInvoices(invoices).filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
   }, [activeFromDate, activeToDate, invoices]);
 
   const filteredPayments = useMemo(() => {

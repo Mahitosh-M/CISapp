@@ -12,6 +12,7 @@ import { getMonthValue, getTodayDateString, getYearValue, isDateInRange } from '
 import type { DateRange } from '../utils/dateUtils';
 import { formatDate, formatDateRange, formatMoney } from '../utils/formatters';
 import { sortNewestFirst } from '../utils/listDisplay';
+import { getBusinessInvoices, getPreviousOutstandingFallback } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { getEffectiveInvoiceDueDate } from '../utils/settings';
 import { CUSTOMER_TIERS, getTierDisplayName, getTierWithCodeLabel } from '../utils/tiers';
@@ -174,7 +175,7 @@ const Reports = () => {
   };
 
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((invoice) => matchesCommonFilters(invoice.date, invoice.customerId));
+    return getBusinessInvoices(invoices).filter((invoice) => matchesCommonFilters(invoice.date, invoice.customerId));
   }, [activeFilters, invoices, customerById]);
 
   const filteredPayments = useMemo(() => {
@@ -256,12 +257,9 @@ const Reports = () => {
       const linkedPayments = payments
         .filter((payment) => invoiceIds.has(payment.invoiceId))
         .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-      const unallocatedPeriodPayments = filteredPayments
-        .filter((payment) => payment.customerId === customer.id && !payment.invoiceId)
-        .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-      const newPayments = linkedPayments + unallocatedPeriodPayments;
-      // Previous outstanding is the opening balance from before this ERP; reports add it to new invoice outstanding.
-      const previousOutstanding = customer.previousOutstandingAmount ?? 0;
+      const newPayments = linkedPayments;
+      // Opening balances are normal invoices after conversion; the field is only a legacy fallback.
+      const previousOutstanding = getPreviousOutstandingFallback(customer, customerInvoices);
       const newOutstanding = getPendingAmount(newSales, newPayments);
       const totalOutstanding = previousOutstanding + newOutstanding;
       const hasOverdueInvoice = customerInvoices.some((invoice) => {

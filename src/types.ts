@@ -70,6 +70,11 @@ export interface Customer {
   tier: CustomerTier;
   tierOverride?: boolean;
   previousOutstandingAmount: number;
+  totalOutstandingAmount?: number;
+  invoiceOutstandingAmount?: number;
+  openingBalanceOutstandingAmount?: number;
+  overdueAmount?: number;
+  financialSummaryUpdatedAt?: string;
   paymentTerms: string;
   notes: string;
   status?: string;
@@ -82,6 +87,8 @@ export interface Invoice {
   invoiceNumber: string;
   customerId: string;
   customerName: string;
+  invoiceType?: string;
+  isOpeningBalance?: boolean;
   date: string;
   dueDate: string;
   salesAmount: number;
