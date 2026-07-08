@@ -98,6 +98,12 @@ interface CustomerScopedQueryOptions extends DateRangeQueryOptions {
   customerName?: string;
 }
 
+interface CustomerQueryOptions {
+  limitCount?: number;
+  sortBy?: 'name' | 'createdAt' | 'updatedAt';
+  sortDirection?: 'asc' | 'desc';
+}
+
 const nowIso = () => new Date().toISOString();
 
 const getTodayDateString = () => nowIso().slice(0, 10);
@@ -716,9 +722,13 @@ export const mapUserProfileDoc = (id: string, data: Record<string, unknown>): Us
   updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
 });
 
-export const getCustomers = async () => {
-  return getCached(cacheKey(CUSTOMERS), async () => {
-    const customersQuery = query(collection(db, CUSTOMERS), orderBy('name', 'asc'));
+export const getCustomers = async (options?: CustomerQueryOptions) => {
+  return getCached(cacheKey(CUSTOMERS, options ?? {}), async () => {
+    const constraints: QueryConstraint[] = [
+      orderBy(options?.sortBy ?? 'name', options?.sortDirection ?? 'asc')
+    ];
+    applyLimitConstraint(constraints, options?.limitCount);
+    const customersQuery = query(collection(db, CUSTOMERS), ...constraints);
     const snapshot = await getDocs(customersQuery);
     return snapshot.docs.map((customerDoc) => mapCustomerDoc(customerDoc.id, customerDoc.data()));
   });
@@ -890,19 +900,9 @@ export const getInvoices = async (options?: DateRangeQueryOptions) => {
 };
 
 export const getInvoicesByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
-  const invoicesQuery = query(collection(db, INVOICES), where('customerId', '==', customerId));
+  const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints({ ...options, customerId }));
   const snapshot = await getDocs(invoicesQuery);
-  const rows = snapshot.docs
-    .map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()))
-    .filter((invoice) => !options?.fromDate || invoice.date >= options.fromDate)
-    .filter((invoice) => !options?.toDate || invoice.date <= options.toDate)
-    .sort((left, right) =>
-      options?.sortBy === 'invoiceNumber'
-        ? right.invoiceNumber.localeCompare(left.invoiceNumber, undefined, { numeric: true })
-        : right.date.localeCompare(left.date)
-    );
-
-  return options?.limitCount && options.limitCount > 0 ? rows.slice(0, options.limitCount) : rows;
+  return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
 };
 
 export const getInvoicesForCustomerViewer = async (customerId?: string, customerName?: string) => {
@@ -1095,15 +1095,9 @@ export const getPaymentsByInvoiceIds = async (invoiceIds: string[]) => {
 };
 
 export const getPaymentsByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
-  const paymentsQuery = query(collection(db, PAYMENTS), where('customerId', '==', customerId));
+  const paymentsQuery = query(collection(db, PAYMENTS), ...buildPaymentQueryConstraints({ ...options, customerId }));
   const snapshot = await getDocs(paymentsQuery);
-  const rows = snapshot.docs
-    .map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
-    .filter((payment) => !options?.fromDate || payment.date >= options.fromDate)
-    .filter((payment) => !options?.toDate || payment.date <= options.toDate)
-    .sort((left, right) => (right.createdAt || right.date).localeCompare(left.createdAt || left.date));
-
-  return options?.limitCount && options.limitCount > 0 ? rows.slice(0, options.limitCount) : rows;
+  return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
 };
 
 export const getPaymentsForCustomerViewer = async (customerId?: string, customerName?: string) => {
@@ -1126,11 +1120,16 @@ export const getPaymentsForCustomerViewer = async (customerId?: string, customer
   return [...paymentMap.values()].sort((a, b) => b.date.localeCompare(a.date));
 };
 
-const sanitizePaymentPayload = (payment: PaymentFormData): PaymentFormData => ({
-  ...payment,
-  amount: Math.max(0, numberOrZero(payment.amount)),
-  cashDiscount: Math.max(0, numberOrZero(payment.cashDiscount))
-});
+const stripUndefinedFields = <T extends Record<string, unknown>>(data: T) => {
+  return Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)) as T;
+};
+
+const sanitizePaymentPayload = (payment: PaymentFormData): PaymentFormData =>
+  stripUndefinedFields({
+    ...payment,
+    amount: Math.max(0, numberOrZero(payment.amount)),
+    cashDiscount: Math.max(0, numberOrZero(payment.cashDiscount))
+  });
 
 const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstandingAmount: number) => {
   const cleanPayment = sanitizePaymentPayload(payment);

@@ -16,7 +16,8 @@ import {
   getPaymentsByInvoiceId,
   getPaymentsByInvoiceIds,
   syncCustomerPartnerLevelsFromFirestore,
-  updateInvoiceRecord
+  updateInvoiceRecord,
+  updatePaymentRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment, PaymentMode } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
@@ -41,9 +42,11 @@ const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   notes: ''
 });
 
-const LIST_PAGE_SIZE = 10;
-const LOAD_MORE_PAGE_SIZE = 10;
+const LIST_PAGE_SIZE = 1;
+const CUSTOMER_LIST_PAGE_SIZE = 3;
+const LOAD_MORE_PAGE_SIZE = 5;
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Card', 'Other'];
+const invoiceCreationPaymentNote = 'Payment entered during invoice creation';
 
 const getInvoiceNumberRank = (invoiceNumber: string) => {
   const match = invoiceNumber.match(/(\d+)(?!.*\d)/);
@@ -157,7 +160,7 @@ const Invoices = () => {
   }, [customerFilter, invoiceLimit]);
 
   useEffect(() => {
-    setInvoiceLimit(LIST_PAGE_SIZE);
+    setInvoiceLimit(customerFilter === 'all' ? LIST_PAGE_SIZE : CUSTOMER_LIST_PAGE_SIZE);
   }, [customerFilter]);
 
   const getPaidAmount = (invoiceId: string) => {
@@ -257,6 +260,10 @@ const Invoices = () => {
 
   const canEditInvoice = (_invoice: Invoice) => true;
 
+  const getInvoiceCreationPayment = (invoiceId: string, paymentRows = payments) => {
+    return paymentRows.find((payment) => payment.invoiceId === invoiceId && payment.notes === invoiceCreationPaymentNote);
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
@@ -271,6 +278,32 @@ const Invoices = () => {
 
       if (editingInvoiceId) {
         await updateInvoiceRecord(editingInvoiceId, formData, auditUser);
+        const cleanPaymentAmount = Math.max(0, Number(sameDayPaymentAmount) || 0);
+        const cleanCashDiscount = Math.max(0, Number(sameDayCashDiscount) || 0);
+        const currentInvoice = invoices.find((invoice) => invoice.id === editingInvoiceId);
+        const linkedPayments = await getPaymentsByInvoiceId(editingInvoiceId);
+        const invoiceCreationPayment = getInvoiceCreationPayment(editingInvoiceId, linkedPayments);
+
+        if (cleanPaymentAmount > 0) {
+          const paymentPayload = {
+            customerId: formData.customerId,
+            customerName: formData.customerName,
+            invoiceId: editingInvoiceId,
+            invoiceNumber: currentInvoice?.invoiceNumber ?? invoiceCreationPayment?.invoiceNumber ?? '',
+            date: formData.date,
+            amount: cleanPaymentAmount,
+            cashDiscount: cleanCashDiscount,
+            mode: sameDayPaymentMode,
+            notes: invoiceCreationPaymentNote
+          };
+
+          if (invoiceCreationPayment) {
+            await updatePaymentRecord(invoiceCreationPayment.id, paymentPayload, auditUser);
+          } else {
+            await createPayment(paymentPayload, auditUser);
+          }
+        }
+
         setMessage('Invoice updated successfully.');
       } else {
         const createdInvoice = await createInvoice(formData, auditUser);
@@ -287,7 +320,7 @@ const Invoices = () => {
             amount: cleanPaymentAmount,
             cashDiscount: cleanCashDiscount,
             mode: sameDayPaymentMode,
-            notes: 'Payment entered during invoice creation'
+            notes: invoiceCreationPaymentNote
           }, auditUser);
         }
 
@@ -305,10 +338,12 @@ const Invoices = () => {
   };
 
   const handleEdit = (invoice: Invoice) => {
+    const invoiceCreationPayment = getInvoiceCreationPayment(invoice.id);
+
     setEditingInvoiceId(invoice.id);
-    setSameDayPaymentAmount(0);
-    setSameDayCashDiscount(0);
-    setSameDayPaymentMode('Cash');
+    setSameDayPaymentAmount(invoiceCreationPayment?.amount ?? 0);
+    setSameDayCashDiscount(invoiceCreationPayment?.cashDiscount ?? 0);
+    setSameDayPaymentMode(invoiceCreationPayment?.mode ?? 'Cash');
     setFormData({
       customerId: invoice.customerId,
       customerName: invoice.customerName,
@@ -554,40 +589,36 @@ const Invoices = () => {
             <input style={inputStyle} value={formData.notes} onChange={(event) => handleFieldChange('notes', event.target.value)} />
           </label>
 
-          {!editingInvoiceId ? (
-            <>
-              <label style={labelStyle}>
-                Payment Received
-                <input
-                  style={inputStyle}
-                  type="number"
-                  min="0"
-                  value={sameDayPaymentAmount}
-                  onChange={(event) => setSameDayPaymentAmount(Number(event.target.value) || 0)}
-                />
-              </label>
+          <label style={labelStyle}>
+            Payment Received
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={sameDayPaymentAmount}
+              onChange={(event) => setSameDayPaymentAmount(Number(event.target.value) || 0)}
+            />
+          </label>
 
-              <label style={labelStyle}>
-                Cash Discount
-                <input
-                  style={inputStyle}
-                  type="number"
-                  min="0"
-                  value={sameDayCashDiscount}
-                  onChange={(event) => setSameDayCashDiscount(Number(event.target.value) || 0)}
-                />
-              </label>
+          <label style={labelStyle}>
+            Cash Discount
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={sameDayCashDiscount}
+              onChange={(event) => setSameDayCashDiscount(Number(event.target.value) || 0)}
+            />
+          </label>
 
-              <label style={labelStyle}>
-                Payment Mode
-                <select style={inputStyle} value={sameDayPaymentMode} onChange={(event) => setSameDayPaymentMode(event.target.value as PaymentMode)}>
-                  {paymentModes.map((mode) => (
-                    <option key={mode} value={mode}>{mode}</option>
-                  ))}
-                </select>
-              </label>
-            </>
-          ) : null}
+          <label style={labelStyle}>
+            Payment Mode
+            <select style={inputStyle} value={sameDayPaymentMode} onChange={(event) => setSameDayPaymentMode(event.target.value as PaymentMode)}>
+              {paymentModes.map((mode) => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
@@ -704,7 +735,7 @@ const Invoices = () => {
         </div>
         {!loading && invoices.length >= invoiceLimit ? (
           <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
-            Load More
+            Load 5 more
           </button>
         ) : null}
       </div>

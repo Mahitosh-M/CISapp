@@ -22,8 +22,9 @@ import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../ut
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
-const LIST_PAGE_SIZE = 10;
-const LOAD_MORE_PAGE_SIZE = 10;
+const LIST_PAGE_SIZE = 1;
+const CUSTOMER_LIST_PAGE_SIZE = 3;
+const LOAD_MORE_PAGE_SIZE = 5;
 const splitPaymentPattern = /Split payment\s+(\d+)\/(\d+)/i;
 
 const emptyPaymentForm: PaymentFormData = {
@@ -60,8 +61,11 @@ const Payments = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [customerPayments, setCustomerPayments] = useState<Payment[]>([]);
+  const [loadingCustomerPayments, setLoadingCustomerPayments] = useState(false);
   const [formData, setFormData] = useState<PaymentFormData>(emptyPaymentForm);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [manualInvoiceSelection, setManualInvoiceSelection] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
@@ -110,11 +114,47 @@ const Payments = () => {
   }, [customerFilter, paymentLimit]);
 
   useEffect(() => {
-    setPaymentLimit(LIST_PAGE_SIZE);
+    setPaymentLimit(customerFilter === 'all' ? LIST_PAGE_SIZE : CUSTOMER_LIST_PAGE_SIZE);
   }, [customerFilter]);
 
+  useEffect(() => {
+    let isActive = true;
+
+    if (!formData.customerId) {
+      setCustomerPayments([]);
+      setLoadingCustomerPayments(false);
+      return undefined;
+    }
+
+    setCustomerPayments([]);
+    setLoadingCustomerPayments(true);
+
+    getPaymentsByCustomerId(formData.customerId)
+      .then((paymentRows) => {
+        if (isActive) {
+          setCustomerPayments(paymentRows);
+        }
+      })
+      .catch((err) => {
+        if (isActive) {
+          setError(err instanceof Error ? err.message : 'Unable to load customer payments.');
+        }
+      })
+      .finally(() => {
+        if (isActive) {
+          setLoadingCustomerPayments(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [formData.customerId]);
+
+  const paymentsForAllocation = formData.customerId ? customerPayments : payments;
+
   const getPaidAmountForInvoice = (invoiceId: string, ignoredPaymentId = '') => {
-    return payments
+    return paymentsForAllocation
       .filter((payment) => payment.invoiceId === invoiceId && payment.id !== ignoredPaymentId)
       .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
   };
@@ -139,7 +179,7 @@ const Payments = () => {
         if (left.pendingAmount <= 0 && right.pendingAmount > 0) return 1;
         return sortInvoicesForPaymentAllocation([left, right])[0] === left ? -1 : 1;
       });
-  }, [editingPaymentId, formData.customerId, formData.invoiceId, invoices, payments]);
+  }, [editingPaymentId, formData.customerId, formData.invoiceId, invoices, paymentsForAllocation]);
 
   const pendingInvoiceOptions = useMemo(
     () => invoiceOptions.filter((invoice) => invoice.pendingAmount > 0),
@@ -220,8 +260,11 @@ const Payments = () => {
         setSelectedInvoiceIds([]);
         setFormData((current) => ({ ...current, invoiceId: '', invoiceNumber: '' }));
       }
+      setManualInvoiceSelection(false);
       return;
     }
+
+    if (manualInvoiceSelection) return;
 
     let remainingEffect = paymentEffect;
     const autoSelectedInvoices: typeof pendingInvoiceOptions = [];
@@ -245,7 +288,7 @@ const Payments = () => {
         invoiceNumber: firstInvoice?.invoiceNumber ?? ''
       }));
     }
-  }, [editingPaymentId, formData.customerId, formData.invoiceId, paymentEffect, pendingInvoiceOptions, selectedInvoiceIds]);
+  }, [editingPaymentId, formData.customerId, formData.invoiceId, manualInvoiceSelection, paymentEffect, pendingInvoiceOptions, selectedInvoiceIds]);
 
   const filteredPaymentRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
@@ -274,6 +317,7 @@ const Payments = () => {
         invoiceNumber: ''
       }));
       setSelectedInvoiceIds([]);
+      setManualInvoiceSelection(false);
       return;
     }
 
@@ -287,6 +331,7 @@ const Payments = () => {
         customerName: invoice?.customerName ?? current.customerName
       }));
       setSelectedInvoiceIds(invoice?.id ? [invoice.id] : []);
+      setManualInvoiceSelection(true);
       return;
     }
 
@@ -307,11 +352,28 @@ const Payments = () => {
   const resetForm = () => {
     setFormData(emptyPaymentForm);
     setSelectedInvoiceIds([]);
+    setManualInvoiceSelection(false);
     setEditingPaymentId('');
   };
 
   const toggleSelectedInvoice = (invoiceId: string) => {
-    if (editingPaymentId) return;
+    setManualInvoiceSelection(true);
+
+    if (editingPaymentId) {
+      const invoice = invoices.find((item) => item.id === invoiceId);
+
+      if (!invoice) return;
+
+      setSelectedInvoiceIds([invoice.id]);
+      setFormData((form) => ({
+        ...form,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        customerId: invoice.customerId,
+        customerName: invoice.customerName
+      }));
+      return;
+    }
 
     setSelectedInvoiceIds((current) => {
       if (current.includes(invoiceId)) {
@@ -457,6 +519,8 @@ const Payments = () => {
     setPaymentLimit((current) => current + LOAD_MORE_PAGE_SIZE);
   };
 
+  const canLoadMorePayments = !loading && payments.length >= paymentLimit;
+
   const cardStyle: CSSProperties = {
     background: '#FFFFFF',
     borderRadius: 12,
@@ -553,20 +617,28 @@ const Payments = () => {
             </select>
           </label>
 
-          {!editingPaymentId && formData.customerId && invoiceOptions.length > 0 ? (
+          {formData.customerId && loadingCustomerPayments ? (
+            <div style={{ gridColumn: '1 / -1', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, background: '#F8FAFC', color: '#67738E', fontWeight: 800 }}>
+              Loading customer payment history...
+            </div>
+          ) : null}
+
+          {formData.customerId && !loadingCustomerPayments && invoiceOptions.length > 0 ? (
             <div style={{ gridColumn: '1 / -1', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, background: '#F8FAFC' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                <div style={{ fontWeight: 900, color: '#0B1F3A' }}>Apply to invoices</div>
+                <div style={{ fontWeight: 900, color: '#0B1F3A' }}>{editingPaymentId ? 'Apply to invoice' : 'Apply to invoices'}</div>
                 <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>
                   Selected pending: {formatMoney(selectedPendingTotal)}
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
-                <label style={labelStyle}>
-                  Payment Amount
-                  <input style={inputStyle} type="number" min="0" value={formData.amount} onChange={(event) => handleFieldChange('amount', event.target.value)} />
-                </label>
-              </div>
+              {!editingPaymentId ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
+                  <label style={labelStyle}>
+                    Payment Amount
+                    <input style={inputStyle} type="number" min="0" value={formData.amount} onChange={(event) => handleFieldChange('amount', event.target.value)} />
+                  </label>
+                </div>
+              ) : null}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
                 {invoiceOptions.map((invoice) => {
                   const checked = selectedInvoiceIds.includes(invoice.id);
@@ -584,7 +656,7 @@ const Payments = () => {
                         cursor: 'pointer'
                       }}
                     >
-                      <input type="checkbox" checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
+                      <input type={editingPaymentId ? 'radio' : 'checkbox'} checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
                       <span style={{ minWidth: 0 }}>
                         <span style={{ display: 'block', color: '#0B1F3A', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
                         <span style={{ display: 'block', color: '#B42318', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
@@ -761,9 +833,9 @@ const Payments = () => {
             </tbody>
           </table>
         </div>
-        {!loading && payments.length >= paymentLimit ? (
+        {canLoadMorePayments ? (
           <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
-            Load More
+            Load 5 more
           </button>
         ) : null}
       </div>

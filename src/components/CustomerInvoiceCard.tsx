@@ -10,6 +10,7 @@ interface CustomerInvoiceCardProps {
 
 const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
   const isPaid = invoiceView.outstandingAmount <= 0;
+  const dueDateColor = isPaid ? '#166534' : invoiceView.daysRemaining < 0 ? '#B42318' : '#7C3AED';
   const apcColor = invoiceView.apcStatus === 'Earned' ? '#166534' : invoiceView.apcStatus === 'Expired' ? '#B42318' : '#0B1F3A';
   const apcLabel =
     invoiceView.apcStatus === 'Earned'
@@ -39,7 +40,9 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
             </span>
           </div>
           <div style={{ color: '#67738E', fontSize: 12, marginTop: 8 }}>Invoice: {formatDate(invoiceView.invoice.date)}</div>
-          <div style={{ color: '#67738E', fontSize: 12 }}>Due: {invoiceView.invoice.dueDate ? formatDate(invoiceView.invoice.dueDate) : 'Due date not set'}</div>
+          <div style={{ color: dueDateColor, fontSize: 13, fontWeight: 900, marginTop: 3 }}>
+            Due: {invoiceView.invoice.dueDate ? formatDate(invoiceView.invoice.dueDate) : 'Due date not set'}
+          </div>
           <div style={{ color: apcColor, fontSize: 12, fontWeight: 900, marginTop: 6 }}>
             {apcLabel}
             {invoiceView.apcStatus === 'Available' && invoiceView.apcDeadline ? (

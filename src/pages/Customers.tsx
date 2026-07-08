@@ -24,6 +24,10 @@ import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
 import TierBadge from '../components/TierBadge';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
 
+const LIST_PAGE_SIZE = 1;
+const SELECTED_CUSTOMER_PAGE_SIZE = 3;
+const LOAD_MORE_PAGE_SIZE = 5;
+
 const emptyCustomerForm: CustomerFormData = {
   name: '',
   mobile: '',
@@ -41,6 +45,9 @@ const Customers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [inactiveCustomers, setInactiveCustomers] = useState<Customer[]>([]);
+  const [inactiveInvoices, setInactiveInvoices] = useState<Invoice[]>([]);
+  const [inactivePayments, setInactivePayments] = useState<Payment[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [formData, setFormData] = useState<CustomerFormData>(emptyCustomerForm);
   const [editingCustomerId, setEditingCustomerId] = useState('');
@@ -50,6 +57,10 @@ const Customers = () => {
   const [searchText, setSearchText] = useState('');
   const [inactiveSearchText, setInactiveSearchText] = useState('');
   const [calledCustomerIds, setCalledCustomerIds] = useState<Set<string>>(() => new Set());
+  const [customerLimit, setCustomerLimit] = useState(LIST_PAGE_SIZE);
+  const [showInactiveCustomers, setShowInactiveCustomers] = useState(false);
+  const [inactiveDataLoaded, setInactiveDataLoaded] = useState(false);
+  const [loadingInactiveCustomers, setLoadingInactiveCustomers] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -67,13 +78,11 @@ const Customers = () => {
       setLoading(true);
       setError('');
 
-      // Customers page needs invoice/payment totals only for display; CRUD still writes to the customers collection.
-      const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
-        getCustomers(),
-        getInvoices(),
-        getPayments(),
+      const [customerRows, appSettings] = await Promise.all([
+        getCustomers({ limitCount: customerLimit, sortBy: 'createdAt', sortDirection: 'desc' }),
         getAppSettings()
       ]);
+      const [invoiceRows, paymentRows] = isAdmin ? await Promise.all([getInvoices(), getPayments()]) : [[], []];
 
       const openingBalanceSync = isAdmin
         ? await syncOpeningBalanceInvoices(customerRows, invoiceRows)
@@ -101,7 +110,7 @@ const Customers = () => {
 
   useEffect(() => {
     loadCustomers();
-  }, []);
+  }, [customerLimit]);
 
   const filteredCustomers = useMemo(() => {
     const term = searchText.trim().toLowerCase();
@@ -121,11 +130,70 @@ const Customers = () => {
     return filteredCustomers.slice(0, 5);
   }, [filteredCustomers, searchText]);
 
+  const handleLoadMoreCustomers = () => {
+    setCustomerLimit((current) => current + LOAD_MORE_PAGE_SIZE);
+  };
+
+  const handleToggleInactiveCustomers = async () => {
+    if (showInactiveCustomers) {
+      setShowInactiveCustomers(false);
+      return;
+    }
+
+    setShowInactiveCustomers(true);
+
+    if (inactiveDataLoaded) return;
+
+    try {
+      setLoadingInactiveCustomers(true);
+      setError('');
+      const [customerRows, invoiceRows, paymentRows] = await Promise.all([
+        getCustomers(),
+        getInvoices(),
+        getPayments()
+      ]);
+
+      setInactiveCustomers(customerRows);
+      setInactiveInvoices(invoiceRows);
+      setInactivePayments(paymentRows);
+      setInactiveDataLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load follow-up customers.');
+    } finally {
+      setLoadingInactiveCustomers(false);
+    }
+  };
+
   const outstandingByCustomerId = useMemo(() => {
+    if (invoices.length === 0 && payments.length === 0) {
+      return new Map(
+        customers.map((customer) => [
+          customer.id,
+          {
+            customerId: customer.id,
+            totalSales: 0,
+            totalPayments: 0,
+            previousOutstanding: customer.openingBalanceOutstandingAmount ?? 0,
+            newOutstanding: customer.invoiceOutstandingAmount ?? 0,
+            outstanding: customer.totalOutstandingAmount ?? 0,
+            overdueAmount: customer.overdueAmount ?? 0,
+            overdueDays: 0,
+            indicator: (customer.overdueAmount ?? 0) > 0 ? 'red' : (customer.totalOutstandingAmount ?? 0) > 0 ? 'yellow' : 'green'
+          }
+        ])
+      );
+    }
+
     return new Map(
       buildCustomerOutstandingRows(customers, invoices, payments, settings).map((row) => [row.customerId, row])
     );
   }, [customers, invoices, payments, settings]);
+
+  const inactiveOutstandingByCustomerId = useMemo(() => {
+    return new Map(
+      buildCustomerOutstandingRows(inactiveCustomers, inactiveInvoices, inactivePayments, settings).map((row) => [row.customerId, row])
+    );
+  }, [inactiveCustomers, inactiveInvoices, inactivePayments, settings]);
 
   const giftBudgetByCustomerId = useMemo(() => {
     return new Map(
@@ -147,7 +215,7 @@ const Customers = () => {
     const term = inactiveSearchText.trim().toLowerCase();
     const lastOrderByCustomerId = new Map<string, string>();
 
-    getBusinessInvoices(invoices).forEach((invoice) => {
+    getBusinessInvoices(inactiveInvoices).forEach((invoice) => {
       const currentDate = lastOrderByCustomerId.get(invoice.customerId);
 
       if (!currentDate || invoice.date > currentDate) {
@@ -155,12 +223,12 @@ const Customers = () => {
       }
     });
 
-    return customers
+    return inactiveCustomers
       .map((customer) => {
         const lastOrderDate = lastOrderByCustomerId.get(customer.id) ?? '';
         const lastOrderTime = lastOrderDate ? new Date(`${lastOrderDate}T00:00:00`).getTime() : 0;
         const daysSinceLastOrder = lastOrderTime > 0 ? Math.max(0, Math.floor((todayTime - lastOrderTime) / (24 * 60 * 60 * 1000))) : null;
-        const outstanding = outstandingByCustomerId.get(customer.id)?.outstanding ?? customer.totalOutstandingAmount ?? 0;
+        const outstanding = inactiveOutstandingByCustomerId.get(customer.id)?.outstanding ?? customer.totalOutstandingAmount ?? 0;
 
         return {
           customer,
@@ -183,7 +251,7 @@ const Customers = () => {
         if (left.lastOrderDate && !right.lastOrderDate) return 1;
         return left.lastOrderDate.localeCompare(right.lastOrderDate) || left.customer.name.localeCompare(right.customer.name);
       });
-  }, [calledCustomerIds, customers, inactiveSearchText, invoices, outstandingByCustomerId]);
+  }, [calledCustomerIds, inactiveCustomers, inactiveInvoices, inactiveOutstandingByCustomerId, inactiveSearchText]);
 
   const handleFieldChange = (field: CustomerTextField, value: string) => {
     if (field === 'tier') {
@@ -495,69 +563,83 @@ const Customers = () => {
 
         {!isAdmin ? (
           <div style={cardStyle}>
-            <label style={labelStyle}>
-              Customers not ordered in 15+ days
-              <input
-                style={inputStyle}
-                value={inactiveSearchText}
-                onChange={(event) => setInactiveSearchText(event.target.value)}
-                placeholder="Search follow-up customers"
-              />
-            </label>
+            <button
+              type="button"
+              style={{ ...buttonStyle, width: '100%', background: showInactiveCustomers ? '#0B1F3A' : '#E8EDF4', color: showInactiveCustomers ? '#FFFFFF' : '#0B1F3A' }}
+              onClick={handleToggleInactiveCustomers}
+              disabled={loadingInactiveCustomers}
+            >
+              {loadingInactiveCustomers ? 'Loading customers...' : showInactiveCustomers ? 'Hide customers not ordered in 15+ days' : 'Customers not ordered in 15+ days'}
+            </button>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-              <div style={{ color: '#67738E', fontSize: 12 }}>
-                Follow-up list based on normal business invoices only.
-              </div>
-              <div style={{ color: '#0B1F3A', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
-            </div>
+            {showInactiveCustomers ? (
+              <div style={{ marginTop: 16 }}>
+                <label style={labelStyle}>
+                  Search follow-up customers
+                  <input
+                    style={inputStyle}
+                    value={inactiveSearchText}
+                    onChange={(event) => setInactiveSearchText(event.target.value)}
+                    placeholder="Search follow-up customers"
+                  />
+                </label>
 
-            <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
-              <table style={compactTableStyle}>
-                <thead>
-                  <tr>
-                    <th style={{ ...headerCellStyle, width: '42%' }}>Customer</th>
-                    <th style={{ ...headerCellStyle, width: '22%' }}>Last Order</th>
-                    <th style={{ ...headerCellStyle, width: '18%' }}>Days</th>
-                    <th style={{ ...headerCellStyle, width: '18%' }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
-                  ) : inactiveCustomerRows.length === 0 ? (
-                    <tr><td style={cellStyle} colSpan={4}>No customers found for this follow-up list.</td></tr>
-                  ) : (
-                    inactiveCustomerRows.map(({ customer, lastOrderDate, daysSinceLastOrder, outstanding }) => (
-                      <tr key={customer.id}>
-                        <td style={cellStyle}>
-                          <strong>{customer.name}</strong>
-                          <button
-                            type="button"
-                            style={{ ...buttonStyle, display: 'block', marginTop: 6, padding: '6px 10px', background: '#E8F5EC', color: '#166534', fontSize: 11 }}
-                            onClick={() => setCalledCustomerIds((current) => new Set(current).add(customer.id))}
-                          >
-                            Called
-                          </button>
-                          {customer.area ? (
-                            <div style={{ marginTop: 4 }}>
-                              <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
-                              <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
-                            </div>
-                          ) : null}
-                          <div style={{ color: '#67738E', fontSize: 11 }}>{customer.mobile}</div>
-                        </td>
-                        <td style={cellStyle}>{lastOrderDate ? formatDate(lastOrderDate) : 'No order yet'}</td>
-                        <td style={{ ...cellStyle, color: '#B7791F', fontWeight: 900 }}>
-                          {daysSinceLastOrder === null ? '-' : `${daysSinceLastOrder} day(s)`}
-                        </td>
-                        <td style={{ ...cellStyle, fontWeight: 900 }}>{formatMoney(outstanding)}</td>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <div style={{ color: '#67738E', fontSize: 12 }}>
+                    Follow-up list based on normal business invoices only.
+                  </div>
+                  <div style={{ color: '#0B1F3A', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
+                </div>
+
+                <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
+                  <table style={compactTableStyle}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...headerCellStyle, width: '42%' }}>Customer</th>
+                        <th style={{ ...headerCellStyle, width: '18%' }}>Days</th>
+                        <th style={{ ...headerCellStyle, width: '20%' }}>Total</th>
+                        <th style={{ ...headerCellStyle, width: '20%' }}>Action</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {loadingInactiveCustomers ? (
+                        <tr><td style={cellStyle} colSpan={4}>Loading follow-up customers...</td></tr>
+                      ) : inactiveCustomerRows.length === 0 ? (
+                        <tr><td style={cellStyle} colSpan={4}>No customers found for this follow-up list.</td></tr>
+                      ) : (
+                        inactiveCustomerRows.map(({ customer, daysSinceLastOrder, outstanding }) => (
+                          <tr key={customer.id}>
+                            <td style={cellStyle}>
+                              <strong>{customer.name}</strong>
+                              {customer.area ? (
+                                <div style={{ marginTop: 4 }}>
+                                  <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
+                                  <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                                </div>
+                              ) : null}
+                              <div style={{ color: '#67738E', fontSize: 11 }}>{customer.mobile}</div>
+                            </td>
+                            <td style={{ ...cellStyle, color: '#B7791F', fontWeight: 900 }}>
+                              {daysSinceLastOrder === null ? '-' : `${daysSinceLastOrder} day(s)`}
+                            </td>
+                            <td style={{ ...cellStyle, fontWeight: 900 }}>{formatMoney(outstanding)}</td>
+                            <td style={cellStyle}>
+                              <button
+                                type="button"
+                                style={{ ...buttonStyle, width: '100%', padding: '6px 10px', background: '#E8F5EC', color: '#166534', fontSize: 11 }}
+                                onClick={() => setCalledCustomerIds((current) => new Set(current).add(customer.id))}
+                              >
+                                Called
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -587,6 +669,7 @@ const Customers = () => {
                     onClick={() => {
                       setSearchText(customer.name);
                       setShowSearchSuggestions(false);
+                      setCustomerLimit(SELECTED_CUSTOMER_PAGE_SIZE);
                     }}
                   >
                     <strong>{customer.name}</strong>
@@ -722,6 +805,11 @@ const Customers = () => {
             </table>
           </div>
           )}
+          {!loading && customers.length >= customerLimit ? (
+            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMoreCustomers}>
+              Load 5 more
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
