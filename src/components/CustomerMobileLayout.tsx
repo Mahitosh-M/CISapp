@@ -3,6 +3,7 @@ import { Bell, Coins, FileText, Gift, Home, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ExternalImage from './ExternalImage';
+import InstallAppPrompt from './InstallAppPrompt';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { markBonusPcRequestSeen } from '../services/firestoreService';
@@ -18,7 +19,7 @@ const navItems = [
 
 const CustomerMobileLayout = () => {
   const portalData = useCustomerPortalData();
-  const { logout } = useAuth();
+  const { logout, role } = useAuth();
   const navigate = useNavigate();
   const [viewedOfferVersion, setViewedOfferVersion] = useState(0);
   const [viewedBonusVersion, setViewedBonusVersion] = useState(0);
@@ -116,6 +117,8 @@ const CustomerMobileLayout = () => {
           );
         })}
       </nav>
+
+      <InstallAppPrompt disabled={role !== 'customer' || Boolean(latestUnreadBonus || latestUnreadOffer)} />
 
       {latestUnreadBonus ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(11,31,58,0.68)', display: 'grid', placeItems: 'center', padding: 18, zIndex: 30 }}>

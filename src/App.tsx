@@ -1,8 +1,10 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import CustomerMobileLayout from './components/CustomerMobileLayout';
 import ProtectedRoute from './components/ProtectedRoute';
+import SplashScreen from './components/SplashScreen';
+import { useAuth } from './contexts/AuthContext';
 import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
 
@@ -31,9 +33,20 @@ const AdminStaffLanding = () => {
 const App = () => {
   useEnterKeyNavigation();
   useNumberInputZeroSelection();
+  const { loading } = useAuth();
+  const [minimumSplashComplete, setMinimumSplashComplete] = useState(false);
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => setMinimumSplashComplete(true), 1300);
+    return () => window.clearTimeout(timerId);
+  }, []);
+
+  if (loading || !minimumSplashComplete) {
+    return <SplashScreen />;
+  }
 
   return (
-    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#0B1F3A', color: '#FFFFFF', padding: 24 }}>Loading...</div>}>
+    <Suspense fallback={<SplashScreen />}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/customer" element={<ProtectedRoute allowedRoles={['customer']}><CustomerMobileLayout /></ProtectedRoute>}>

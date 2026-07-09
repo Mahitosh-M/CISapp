@@ -17,7 +17,7 @@
         ]
       },
       {
-        "source": "/manifest.webmanifest",
+        "source": "/manifest.json",
         "headers": [
           {
             "key": "Cache-Control",

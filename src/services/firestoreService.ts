@@ -1095,6 +1095,14 @@ export const getPaymentsByInvoiceIds = async (invoiceIds: string[]) => {
 };
 
 export const getPaymentsByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
+  if (!options?.fromDate && !options?.toDate && !options?.limitCount && !options?.sortBy) {
+    const paymentsQuery = query(collection(db, PAYMENTS), where('customerId', '==', customerId));
+    const snapshot = await getDocs(paymentsQuery);
+    return snapshot.docs
+      .map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
+      .sort((left, right) => right.date.localeCompare(left.date));
+  }
+
   const paymentsQuery = query(collection(db, PAYMENTS), ...buildPaymentQueryConstraints({ ...options, customerId }));
   const snapshot = await getDocs(paymentsQuery);
   return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
