@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
-import { Bell, Coins, FileText, Gift, Home, Tags, Wallet } from 'lucide-react';
+import { Bell, CalendarDays, Coins, FileText, Gift, Home, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ExternalImage from './ExternalImage';
@@ -157,7 +157,10 @@ const CustomerMobileLayout = () => {
             <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 8 }}>Latest Offer</div>
             <div style={{ fontWeight: 900, fontSize: 22 }}>{latestUnreadOffer.title}</div>
             {latestUnreadOffer.description ? <div style={{ color: '#4B5871', marginTop: 8, lineHeight: 1.5 }}>{latestUnreadOffer.description}</div> : null}
-            <div style={{ color: '#67738E', fontSize: 12, marginTop: 10 }}>Valid: {getOfferDateRangeLabel(latestUnreadOffer)}</div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#0B1F3A', color: '#FDE68A', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 900, marginTop: 12 }}>
+              <CalendarDays size={14} color="#FDE68A" />
+              Valid: {getOfferDateRangeLabel(latestUnreadOffer)}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 16 }}>
               <button type="button" onClick={closeOffer} style={{ border: 0, borderRadius: 14, background: '#E8EDF4', color: '#0B1F3A', padding: 12, fontWeight: 900 }}>
                 Close

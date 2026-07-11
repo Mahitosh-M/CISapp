@@ -1,4 +1,4 @@
-import { Tags } from 'lucide-react';
+import { CalendarDays, Tags } from 'lucide-react';
 import { useMemo } from 'react';
 import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
@@ -43,7 +43,10 @@ const CustomerOffers = () => {
               </div>
               <div style={{ fontWeight: 900, fontSize: 20, marginTop: 10 }}>{offer.title}</div>
               {offer.description ? <div style={{ color: '#4B5871', marginTop: 8, lineHeight: 1.5 }}>{offer.description}</div> : null}
-              <div style={{ color: '#67738E', fontSize: 12, marginTop: 10 }}>Valid: {getOfferDateRangeLabel(offer)}</div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'linear-gradient(135deg, #0B1F3A, #173B66)', color: '#FDE68A', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 900, marginTop: 12, boxShadow: '0 8px 18px rgba(11,31,58,0.14)' }}>
+                <CalendarDays size={14} color="#FDE68A" />
+                Valid: {getOfferDateRangeLabel(offer)}
+              </div>
             </div>
           ))}
         </div>
