@@ -1,6 +1,5 @@
-const CACHE_NAME = 'medicoins-static-v1';
+const CACHE_NAME = 'medicoins-static-v2';
 const STATIC_ASSETS = [
-  '/',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

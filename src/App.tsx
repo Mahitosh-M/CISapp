@@ -30,6 +30,20 @@ const AdminStaffLanding = () => {
   return <Navigate to="/invoices" replace />;
 };
 
+const RootRouteShell = () => {
+  const { role } = useAuth();
+
+  if (role === 'customer') {
+    return <Navigate to="/customer" replace />;
+  }
+
+  return (
+    <ProtectedRoute allowedRoles={['Admin', 'Staff']}>
+      <Layout />
+    </ProtectedRoute>
+  );
+};
+
 const App = () => {
   useEnterKeyNavigation();
   useNumberInputZeroSelection();
@@ -57,7 +71,7 @@ const App = () => {
           <Route path="partner-points" element={<CustomerPartnerPoints />} />
           <Route path="profile" element={<CustomerProfile />} />
         </Route>
-        <Route path="/" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Layout /></ProtectedRoute>}>
+        <Route path="/" element={<RootRouteShell />}>
           <Route index element={<AdminStaffLanding />} />
           <Route path="dashboard" element={<Navigate to="/invoices" replace />} />
           <Route path="customers" element={<Customers />} />

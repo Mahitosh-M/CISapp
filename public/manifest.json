@@ -2,7 +2,7 @@
   "name": "MediCoins Partner App",
   "short_name": "MediCoins",
   "description": "Customer reward app for invoices, offers, outstanding and Partner Coin rewards.",
-  "start_url": "/",
+  "start_url": "/customer",
   "scope": "/",
   "display": "standalone",
   "background_color": "#061B3A",
