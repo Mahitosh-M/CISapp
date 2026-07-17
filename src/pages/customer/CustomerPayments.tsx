@@ -22,11 +22,15 @@ const CustomerPayments = () => {
             <div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 900 }}>
                 <CheckCircle2 size={17} color="#166534" />
-                {payment.invoiceNumber || payment.id.slice(0, 8)}
+                {payment.paymentKind === 'advance_application'
+                  ? `Advance adjusted to ${payment.invoiceNumber}`
+                  : payment.invoiceNumber || 'Advance payment'}
               </div>
               <div style={{ color: '#67738E', fontSize: 12, marginTop: 5 }}>{formatDate(payment.date)} | {payment.mode}</div>
             </div>
-            <div style={{ textAlign: 'right', color: '#166534', fontWeight: 900 }}>{formatMoney(payment.amount)}</div>
+            <div style={{ textAlign: 'right', color: '#166534', fontWeight: 900 }}>
+              {formatMoney(payment.paymentKind === 'advance_application' ? payment.advanceAppliedAmount : payment.amount)}
+            </div>
           </div>
         ))
       )}

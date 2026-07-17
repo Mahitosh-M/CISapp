@@ -185,6 +185,13 @@ export async function syncCustomerFinancialSummary(customerId: string) {
   ]);
   const invoices = invoiceSnapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
   const payments = paymentSnapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+  const advanceBalance = Math.max(
+    0,
+    payments.reduce(
+      (balance, payment) => balance + payment.advanceCreatedAmount - payment.advanceAppliedAmount,
+      0
+    )
+  );
   const invoicePaymentEffectByInvoiceId = payments.reduce((paymentMap, payment) => {
     if (!payment.invoiceId) return paymentMap;
     paymentMap.set(payment.invoiceId, (paymentMap.get(payment.invoiceId) ?? 0) + getInvoicePaymentEffect(payment));
@@ -212,6 +219,7 @@ export async function syncCustomerFinancialSummary(customerId: string) {
     totalOutstandingAmount,
     invoiceOutstandingAmount: summary.invoiceOutstandingAmount,
     openingBalanceOutstandingAmount: summary.openingBalanceOutstandingAmount,
+    advanceBalance,
     financialSummaryUpdatedAt: nowIso(),
     previousOutstandingAmount: 0
   };
@@ -251,6 +259,7 @@ const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => 
     tier,
     // Old balance from before this ERP started. Missing legacy documents safely read as zero.
     previousOutstandingAmount: Math.max(0, numberOrZero(data.previousOutstandingAmount)),
+    advanceBalance: Math.max(0, numberOrZero(data.advanceBalance)),
     totalOutstandingAmount: data.totalOutstandingAmount === undefined ? undefined : numberOrZero(data.totalOutstandingAmount),
     invoiceOutstandingAmount: data.invoiceOutstandingAmount === undefined ? undefined : numberOrZero(data.invoiceOutstandingAmount),
     openingBalanceOutstandingAmount: data.openingBalanceOutstandingAmount === undefined ? undefined : numberOrZero(data.openingBalanceOutstandingAmount),
@@ -294,6 +303,8 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
 
 const mapPaymentDoc = (id: string, data: Record<string, unknown>): Payment => {
   const amount = numberOrZero(data.amount ?? data.amountReceived);
+  const amountAppliedToInvoice = data.amountAppliedToInvoice === undefined ? amount : numberOrZero(data.amountAppliedToInvoice);
+  const paymentKind = data.paymentKind === 'advance_application' ? 'advance_application' : 'receipt';
 
   return {
     id,
@@ -303,7 +314,12 @@ const mapPaymentDoc = (id: string, data: Record<string, unknown>): Payment => {
     customerName: String(data.customerName || ''),
     date: String(data.date || data.paymentDate || ''),
     amount,
-    amountAppliedToInvoice: data.amountAppliedToInvoice === undefined ? amount : numberOrZero(data.amountAppliedToInvoice),
+    amountAppliedToInvoice,
+    advanceCreatedAmount: data.advanceCreatedAmount === undefined && paymentKind === 'receipt'
+      ? Math.max(0, amount - amountAppliedToInvoice)
+      : Math.max(0, numberOrZero(data.advanceCreatedAmount)),
+    advanceAppliedAmount: Math.max(0, numberOrZero(data.advanceAppliedAmount)),
+    paymentKind,
     amountUsedForOldBalance: numberOrZero(data.amountUsedForOldBalance),
     oldBalanceBeforePayment: numberOrZero(data.oldBalanceBeforePayment),
     oldBalanceAfterPayment: numberOrZero(data.oldBalanceAfterPayment),
@@ -959,18 +975,61 @@ export const getNextInvoiceNumber = async (settings?: AppSettings) => {
 };
 
 export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditUser) => {
+  // Rebuild first so legacy overpayments are available as advance before this invoice is created.
+  await syncCustomerFinancialSummary(invoice.customerId);
   const invoiceNumber = await getNextInvoiceNumber();
+  const docRef = doc(collection(db, INVOICES));
+  const advancePaymentRef = doc(collection(db, PAYMENTS));
+  const customerRef = doc(db, CUSTOMERS, invoice.customerId);
+  const timestamp = nowIso();
+  let advanceAppliedAmount = 0;
 
-  const docRef = await addDoc(collection(db, INVOICES), {
-    ...invoice,
-    invoiceNumber,
-    createdAt: nowIso(),
-    updatedAt: nowIso()
+  await runTransaction(db, async (transaction) => {
+    const customerSnapshot = await transaction.get(customerRef);
+    const advanceBalance = customerSnapshot.exists()
+      ? Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
+      : 0;
+    advanceAppliedAmount = Math.min(advanceBalance, Math.max(0, numberOrZero(invoice.totalSales)));
+
+    transaction.set(docRef, {
+      ...invoice,
+      invoiceNumber,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+
+    if (advanceAppliedAmount > 0) {
+      transaction.set(advancePaymentRef, {
+        customerId: invoice.customerId,
+        customerName: invoice.customerName,
+        invoiceId: docRef.id,
+        invoiceNumber,
+        date: invoice.date,
+        amount: 0,
+        amountAppliedToInvoice: advanceAppliedAmount,
+        advanceCreatedAmount: 0,
+        advanceAppliedAmount,
+        paymentKind: 'advance_application',
+        amountUsedForOldBalance: 0,
+        oldBalanceBeforePayment: 0,
+        oldBalanceAfterPayment: 0,
+        cashDiscount: 0,
+        mode: 'Other',
+        notes: 'Automatically adjusted from customer advance',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+
+      transaction.update(customerRef, {
+        advanceBalance: advanceBalance - advanceAppliedAmount,
+        updatedAt: timestamp
+      });
+    }
   });
 
   await syncCustomerFinancialSummary(invoice.customerId);
   clearFirestoreSessionCache();
-  return { id: docRef.id, invoiceNumber, ref: docRef };
+  return { id: docRef.id, invoiceNumber, ref: docRef, advanceAppliedAmount };
 };
 
 export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFormData, auditUser?: AuditUser) => {
@@ -1020,7 +1079,20 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
 
       return restoreMap;
     }, new Map<string, number>());
-    const customerRefsById = new Map([...oldBalanceRestoreByCustomerId.keys()].map((customerId) => [customerId, doc(db, CUSTOMERS, customerId)]));
+    const advanceChangeByCustomerId = paymentsToDelete.reduce((changeMap, payment) => {
+      const change = (payment.advanceAppliedAmount ?? 0) - (payment.advanceCreatedAmount ?? 0);
+
+      if (change !== 0 && payment.customerId) {
+        changeMap.set(payment.customerId, (changeMap.get(payment.customerId) ?? 0) + change);
+      }
+
+      return changeMap;
+    }, new Map<string, number>());
+    const affectedPaymentCustomerIds = new Set([
+      ...oldBalanceRestoreByCustomerId.keys(),
+      ...advanceChangeByCustomerId.keys()
+    ]);
+    const customerRefsById = new Map([...affectedPaymentCustomerIds].map((customerId) => [customerId, doc(db, CUSTOMERS, customerId)]));
     const customerSnapshotsById = new Map(
       await Promise.all(
         [...customerRefsById.entries()].map(async ([customerId, customerRef]) => [customerId, await transaction.get(customerRef)] as const)
@@ -1030,11 +1102,19 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
 
     customerSnapshotsById.forEach((customerSnapshot, customerId) => {
       const amountToRestore = oldBalanceRestoreByCustomerId.get(customerId) ?? 0;
+      const advanceChange = advanceChangeByCustomerId.get(customerId) ?? 0;
       const customerRef = customerRefsById.get(customerId);
 
-      if (customerRef && customerSnapshot.exists() && amountToRestore > 0) {
+      if (customerRef && customerSnapshot.exists() && (amountToRestore > 0 || advanceChange !== 0)) {
+        const nextAdvance = numberOrZero(customerSnapshot.data().advanceBalance) + advanceChange;
+
+        if (nextAdvance < 0) {
+          throw new Error('An advance from this invoice has already been used and the invoice cannot be deleted.');
+        }
+
         transaction.update(customerRef, {
           previousOutstandingAmount: Math.max(0, numberOrZero(customerSnapshot.data().previousOutstandingAmount) + amountToRestore),
+          advanceBalance: nextAdvance,
           updatedAt: timestamp
         });
       }
@@ -1136,6 +1216,9 @@ const sanitizePaymentPayload = (payment: PaymentFormData): PaymentFormData =>
   stripUndefinedFields({
     ...payment,
     amount: Math.max(0, numberOrZero(payment.amount)),
+    amountAppliedToInvoice: payment.amountAppliedToInvoice === undefined
+      ? undefined
+      : Math.max(0, numberOrZero(payment.amountAppliedToInvoice)),
     cashDiscount: Math.max(0, numberOrZero(payment.cashDiscount))
   });
 
@@ -1143,8 +1226,12 @@ const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstand
   const cleanPayment = sanitizePaymentPayload(payment);
   const oldBalanceBeforePayment = Math.max(0, numberOrZero(previousOutstandingAmount));
   const amountUsedForOldBalance = 0;
-  const amountAppliedToInvoice = cleanPayment.amount;
+  const amountAppliedToInvoice = Math.min(
+    cleanPayment.amount,
+    Math.max(0, numberOrZero(cleanPayment.amountAppliedToInvoice ?? cleanPayment.amount))
+  );
   const oldBalanceAfterPayment = oldBalanceBeforePayment;
+  const advanceCreatedAmount = Math.max(0, cleanPayment.amount - amountAppliedToInvoice);
 
   return {
     payload: {
@@ -1152,6 +1239,9 @@ const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstand
       // Payments entered against an invoice reduce that selected invoice directly.
       // Legacy old-balance allocations are still preserved on older payment documents.
       amountAppliedToInvoice,
+      advanceCreatedAmount,
+      advanceAppliedAmount: 0,
+      paymentKind: 'receipt' as const,
       amountUsedForOldBalance,
       oldBalanceBeforePayment,
       oldBalanceAfterPayment
@@ -1172,6 +1262,13 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     const allocation = buildAllocatedPaymentPayload(payment, previousOutstandingAmount);
 
     allocatedPayment = allocation.payload;
+
+    if (customerSnapshot.exists() && allocation.payload.advanceCreatedAmount > 0) {
+      transaction.update(customerRef, {
+        advanceBalance: Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance)) + allocation.payload.advanceCreatedAmount,
+        updatedAt: timestamp
+      });
+    }
 
     transaction.set(paymentRef, {
       ...allocatedPayment,
@@ -1194,6 +1291,11 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   await runTransaction(db, async (transaction) => {
     const paymentSnapshot = await transaction.get(paymentRef);
     const existingPayment = paymentSnapshot.exists() ? mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()) : undefined;
+
+    if (existingPayment?.paymentKind === 'advance_application') {
+      throw new Error('Automatic advance adjustments cannot be edited. Edit the invoice or delete the adjustment instead.');
+    }
+
     const oldCustomerId = existingPayment?.customerId || payment.customerId;
     affectedCustomerIds = [...new Set([oldCustomerId, payment.customerId].filter(Boolean))];
     const oldCustomerRef = oldCustomerId ? doc(db, CUSTOMERS, oldCustomerId) : undefined;
@@ -1210,21 +1312,52 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
           ? numberOrZero(newCustomerSnapshot.data().previousOutstandingAmount)
           : 0;
     const allocation = buildAllocatedPaymentPayload(payment, newCustomerOldBalanceBeforePayment);
+    const oldAdvanceCreated = existingPayment?.advanceCreatedAmount ?? 0;
+    const newAdvanceCreated = allocation.payload.advanceCreatedAmount;
 
     allocatedPayment = allocation.payload;
 
-    if (oldCustomerRef && oldCustomerSnapshot?.exists() && oldCustomerId !== payment.customerId && (existingPayment?.amountUsedForOldBalance ?? 0) > 0) {
-      transaction.update(oldCustomerRef, {
-        previousOutstandingAmount: oldBalanceRestored,
-        updatedAt: timestamp
-      });
-    }
+    if (oldCustomerId === payment.customerId) {
+      const currentAdvance = newCustomerSnapshot?.exists()
+        ? Math.max(0, numberOrZero(newCustomerSnapshot.data().advanceBalance))
+        : 0;
+      const nextAdvance = currentAdvance - oldAdvanceCreated + newAdvanceCreated;
 
-    if (newCustomerSnapshot?.exists()) {
-      transaction.update(newCustomerRef, {
-        previousOutstandingAmount: allocation.oldBalanceAfterPayment,
-        updatedAt: timestamp
-      });
+      if (nextAdvance < 0) {
+        throw new Error('This payment advance has already been used on a newer invoice and cannot be reduced.');
+      }
+
+      if (newCustomerSnapshot?.exists()) {
+        transaction.update(newCustomerRef, {
+          previousOutstandingAmount: allocation.oldBalanceAfterPayment,
+          advanceBalance: nextAdvance,
+          updatedAt: timestamp
+        });
+      }
+    } else {
+      const oldCustomerAdvance = oldCustomerSnapshot?.exists()
+        ? Math.max(0, numberOrZero(oldCustomerSnapshot.data().advanceBalance))
+        : 0;
+
+      if (oldCustomerAdvance < oldAdvanceCreated) {
+        throw new Error('This payment advance has already been used and the payment cannot be moved to another customer.');
+      }
+
+      if (oldCustomerRef && oldCustomerSnapshot?.exists()) {
+        transaction.update(oldCustomerRef, {
+          previousOutstandingAmount: oldBalanceRestored,
+          advanceBalance: oldCustomerAdvance - oldAdvanceCreated,
+          updatedAt: timestamp
+        });
+      }
+
+      if (newCustomerSnapshot?.exists()) {
+        transaction.update(newCustomerRef, {
+          previousOutstandingAmount: allocation.oldBalanceAfterPayment,
+          advanceBalance: Math.max(0, numberOrZero(newCustomerSnapshot.data().advanceBalance)) + newAdvanceCreated,
+          updatedAt: timestamp
+        });
+      }
     }
 
     transaction.update(paymentRef, {
@@ -1250,15 +1383,25 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
 
     deletedPayment = mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data());
     const oldBalanceAllocation = deletedPayment.amountUsedForOldBalance ?? 0;
+    const advanceCreatedAmount = deletedPayment.advanceCreatedAmount ?? 0;
+    const advanceAppliedAmount = deletedPayment.advanceAppliedAmount ?? 0;
 
-    if (oldBalanceAllocation > 0) {
+    if (oldBalanceAllocation > 0 || advanceCreatedAmount > 0 || advanceAppliedAmount > 0) {
       const customerRef = doc(db, CUSTOMERS, deletedPayment.customerId);
       const customerSnapshot = await transaction.get(customerRef);
 
       if (customerSnapshot.exists()) {
+        const currentAdvance = Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance));
+        const nextAdvance = currentAdvance - advanceCreatedAmount + advanceAppliedAmount;
+
+        if (nextAdvance < 0) {
+          throw new Error('This payment advance has already been used on a newer invoice and cannot be deleted.');
+        }
+
         // Deleting a payment reverses the old-balance clearing that payment originally performed.
         transaction.update(customerRef, {
           previousOutstandingAmount: Math.max(0, numberOrZero(customerSnapshot.data().previousOutstandingAmount) + oldBalanceAllocation),
+          advanceBalance: nextAdvance,
           updatedAt: nowIso()
         });
       }
@@ -1773,6 +1916,64 @@ export const getApprovedBonusPcRequestsForCustomer = async (customerId: string, 
     const snapshot = await getDocs(requestsQuery);
     return snapshot.docs.map((requestDoc) => mapBonusPcRequestDoc(requestDoc.id, requestDoc.data()));
   });
+};
+
+export const approveReferralBonus = async (customerId: string, auditUser?: AuditUser) => {
+  if (auditUser?.role !== 'Admin') {
+    throw new Error('Only Admin users can approve referral bonuses.');
+  }
+
+  const [customer, appSettings] = await Promise.all([
+    getCustomerById(customerId),
+    getAppSettings()
+  ]);
+
+  if (!customer) {
+    throw new Error('Selected customer no longer exists.');
+  }
+
+  const referralCoins = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.referralBonus)));
+
+  if (referralCoins <= 0) {
+    throw new Error('Set the referral bonus above 0 in Partner Program settings before approving it.');
+  }
+
+  const requestRef = doc(collection(db, BONUS_PC_REQUESTS));
+  const timestamp = nowIso();
+  const reviewer = auditUser.userEmail || auditUser.userId || '';
+  const notes = 'Referral bonus approved by Admin';
+
+  await runTransaction(db, async (transaction) => {
+    transaction.set(requestRef, {
+      customerId: customer.id,
+      customerName: customer.name,
+      bonusType: 'referral',
+      bonusLabel: BONUS_PC_LABELS.referral,
+      triggerType: 'admin_referral_approval',
+      referenceId: requestRef.id,
+      suggestedCoins: referralCoins,
+      approvedCoins: referralCoins,
+      status: 'Approved',
+      generatedAt: timestamp,
+      reviewedAt: timestamp,
+      reviewedBy: reviewer,
+      customerSeenAt: '',
+      notes
+    });
+
+    transaction.set(doc(db, LOYALTY_LEDGER, `${customer.id}_${requestRef.id}_bonus_pc`), {
+      customerId: customer.id,
+      type: 'bonus',
+      points: referralCoins,
+      reason: `${BONUS_PC_LABELS.referral}: ${notes}`,
+      referenceId: requestRef.id,
+      month: timestamp.slice(0, 7),
+      createdAt: timestamp
+    });
+  });
+
+  clearFirestoreSessionCache();
+  return { requestId: requestRef.id, customer, referralCoins };
 };
 
 export const generateBonusPcRequests = async (auditUser?: AuditUser, month = getCurrentMonthKey()) => {

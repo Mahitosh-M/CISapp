@@ -15,9 +15,9 @@ import {
 import type { AppSettings, BonusPcRequest, Customer, CustomerApcSummary, Invoice, Offer, OverduePcRequest, Payment, RedemptionRequest, RewardItem } from '../types';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { calculateDueStatus, calculateInvoiceApcInfo, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
-import { calculateCustomerApcBonuses } from '../utils/giftUtils';
 import { canViewRewardAtLevel, getNextPartnerLevel, getPartnerLevelForTier, getPcThresholdProgress } from '../utils/loyalty';
 import { getBusinessInvoices } from '../utils/openingBalance';
+import { buildCustomerPortalPcBalance } from '../utils/pcBalance';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 
 const isPermissionError = (err: unknown) => {
@@ -86,16 +86,10 @@ export const useCustomerPortalData = () => {
       const businessInvoices = getBusinessInvoices(scopedInvoices);
       const intelligenceResult = linkedCustomer ? buildCustomerScores([linkedCustomer], businessInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
       const customerWithIntelligenceTier = linkedCustomer && intelligenceResult ? { ...linkedCustomer, tier: intelligenceResult.tier } : linkedCustomer;
-      const baseApcEarned = customerWithIntelligenceTier
-        ? businessInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, scopedPayments, customerWithIntelligenceTier.tier, appSettings).earnedApc, 0)
-        : 0;
-      const bonusApcEarned = customerWithIntelligenceTier ? calculateCustomerApcBonuses(customerWithIntelligenceTier, businessInvoices, scopedPayments, appSettings).totalBonus : 0;
-      const redeemedApc = redemptions
-        .filter((request) => request.status === 'Gifted')
-        .reduce((sum, request) => sum + request.points, 0);
-      const approvedOverduePc = approvedOverduePcRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
-      const approvedBonusPc = approvedBonusPcRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
-      const apcBalance = Math.max(0, Math.round(baseApcEarned + bonusApcEarned + approvedOverduePc + approvedBonusPc - redeemedApc));
+      const pcBalance = customerWithIntelligenceTier
+        ? buildCustomerPortalPcBalance(customerWithIntelligenceTier, businessInvoices, scopedPayments, appSettings, redemptions, approvedOverduePcRequests, approvedBonusPcRequests)
+        : undefined;
+      const apcBalance = pcBalance?.availablePc ?? 0;
       const monthlyApcEarned = customerWithIntelligenceTier
         ? scopedInvoices
             .filter((invoice) => businessInvoices.some((businessInvoice) => businessInvoice.id === invoice.id))

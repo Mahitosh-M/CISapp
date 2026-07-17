@@ -13,7 +13,7 @@ import {
   syncCustomerPartnerLevelsFromFirestore,
   updatePaymentRecord
 } from '../services/firestoreService';
-import type { Customer, Invoice, Payment, PaymentFormData, PaymentMode } from '../types';
+import type { Customer, Invoice, Payment, PaymentFormData } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
@@ -21,7 +21,6 @@ import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../
 import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../utils/openingBalance';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
-const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Other'];
 const LIST_PAGE_SIZE = 1;
 const CUSTOMER_LIST_PAGE_SIZE = 3;
 const LOAD_MORE_PAGE_SIZE = 5;
@@ -69,7 +68,6 @@ const Payments = () => {
   const [editingPaymentId, setEditingPaymentId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
-  const [modeFilter, setModeFilter] = useState('all');
   const [paymentLimit, setPaymentLimit] = useState(LIST_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -185,6 +183,7 @@ const Payments = () => {
     () => invoiceOptions.filter((invoice) => invoice.pendingAmount > 0),
     [invoiceOptions]
   );
+  const selectedCustomer = customers.find((customer) => customer.id === formData.customerId);
 
   const selectedInvoice = invoices.find((invoice) => invoice.id === formData.invoiceId);
   const selectedInvoicePaid = selectedInvoice ? getPaidAmountForInvoice(selectedInvoice.id, editingPaymentId) : 0;
@@ -205,24 +204,34 @@ const Payments = () => {
     let remainingEffect = paymentEffect;
     let remainingAmount = formData.amount;
     let remainingDiscount = formData.cashDiscount;
+    const invoicesForAllocation = editingPaymentId ? selectedInvoiceOptions : pendingInvoiceOptions;
 
-    return selectedInvoiceOptions.map((invoice) => {
+    const allocations = invoicesForAllocation.map((invoice) => {
       const appliedTotal = Math.min(invoice.pendingAmount, Math.max(0, remainingEffect));
-      const amount = Math.min(remainingAmount, appliedTotal);
-      const cashDiscount = Math.min(remainingDiscount, appliedTotal - amount);
+      const amountAppliedToInvoice = Math.min(remainingAmount, appliedTotal);
+      const cashDiscount = Math.min(remainingDiscount, appliedTotal - amountAppliedToInvoice);
 
       remainingEffect -= appliedTotal;
-      remainingAmount -= amount;
+      remainingAmount -= amountAppliedToInvoice;
       remainingDiscount -= cashDiscount;
 
       return {
         invoice,
-        amount,
+        amount: amountAppliedToInvoice,
+        amountAppliedToInvoice,
         cashDiscount,
         appliedTotal
       };
     });
-  }, [formData.amount, formData.cashDiscount, paymentEffect, selectedInvoiceOptions]);
+
+    // Keep the full cash amount received even when it is slightly above the selected
+    // invoice balance. Only amountAppliedToInvoice reduces outstanding.
+    if (remainingAmount > 0 && allocations.length > 0) {
+      allocations[allocations.length - 1].amount += remainingAmount;
+    }
+
+    return allocations;
+  }, [editingPaymentId, formData.amount, formData.cashDiscount, paymentEffect, pendingInvoiceOptions, selectedInvoiceOptions]);
 
   const appliedTotalPreview = allocationPreview.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
 
@@ -264,8 +273,6 @@ const Payments = () => {
       return;
     }
 
-    if (manualInvoiceSelection) return;
-
     let remainingEffect = paymentEffect;
     const autoSelectedInvoices: typeof pendingInvoiceOptions = [];
 
@@ -296,13 +303,12 @@ const Payments = () => {
     return sortNewestFirst(payments.filter((payment) => {
       const matchesSearch =
         !term ||
-        [payment.customerName, payment.invoiceNumber, payment.mode].some((value) => value.toLowerCase().includes(term));
+        [payment.customerName, payment.invoiceNumber].some((value) => value.toLowerCase().includes(term));
       const matchesCustomer = customerFilter === 'all' || payment.customerId === customerFilter;
-      const matchesMode = modeFilter === 'all' || payment.mode === modeFilter;
 
-      return matchesSearch && matchesCustomer && matchesMode;
+      return matchesSearch && matchesCustomer;
     }), ['createdAt', 'date']);
-  }, [customerFilter, modeFilter, payments, searchText]);
+  }, [customerFilter, payments, searchText]);
 
   const paymentRows = filteredPaymentRows;
 
@@ -404,13 +410,13 @@ const Payments = () => {
     });
   };
 
-  const canEditPayment = (_payment: Payment) => true;
+  const canEditPayment = (payment: Payment) => payment.paymentKind !== 'advance_application';
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
-    if (!formData.customerId || selectedInvoiceIds.length === 0 || formData.amount <= 0) {
-      setError('Customer, invoice, and payment amount are required.');
+    if (!formData.customerId || formData.amount <= 0) {
+      setError('Customer and payment amount are required.');
       return;
     }
 
@@ -420,50 +426,58 @@ const Payments = () => {
       return;
     }
 
-    if (!editingPaymentId && allocationPreview.every((allocation) => allocation.appliedTotal <= 0)) {
-      setError('Select at least one invoice with pending amount.');
-      return;
-    }
-
-    const oldestPendingInvoice = pendingInvoiceOptions[0];
-    if (!editingPaymentId && oldestPendingInvoice && !selectedInvoiceIds.includes(oldestPendingInvoice.id)) {
-      setError(`Payment must be applied to the oldest pending invoice first (${getInvoiceDisplayNumber(oldestPendingInvoice)}).`);
-      return;
-    }
-
     try {
       setSaving(true);
       setError('');
 
       if (editingPaymentId) {
-        await updatePaymentRecord(editingPaymentId, formData, auditUser);
-        setMessage(`Payment updated. ${formatMoney(amountAppliedToInvoicePreview)} applied to ${formData.invoiceNumber}.`);
+        const amountAppliedToInvoice = Math.min(
+          formData.amount,
+          Math.max(0, selectedInvoiceOutstanding - formData.cashDiscount)
+        );
+        await updatePaymentRecord(editingPaymentId, { ...formData, amountAppliedToInvoice }, auditUser);
+        setMessage(`Payment updated. ${formatMoney(formData.amount)} received; ${formatMoney(amountAppliedToInvoice)} applied to ${formData.invoiceNumber}.`);
       } else {
         const payableAllocations = allocationPreview.filter((allocation) => allocation.appliedTotal > 0);
         const splitPaymentGroupId = payableAllocations.length > 1 ? createSplitPaymentGroupId() : '';
-        await Promise.all(
-          payableAllocations.map((allocation, index) =>
-            createPayment({
-              ...formData,
-              invoiceId: allocation.invoice.id,
-              invoiceNumber: allocation.invoice.invoiceNumber,
-              customerId: allocation.invoice.customerId,
-              customerName: allocation.invoice.customerName,
-              amount: allocation.amount,
-              cashDiscount: allocation.cashDiscount,
-              splitPaymentGroupId: splitPaymentGroupId || undefined,
-              splitPaymentTotalAmount: payableAllocations.length > 1 ? formData.amount : undefined,
-              splitPaymentPart: payableAllocations.length > 1 ? index + 1 : undefined,
-              splitPaymentCount: payableAllocations.length > 1 ? payableAllocations.length : undefined,
-              notes:
-                selectedInvoiceIds.length > 1
+        if (payableAllocations.length > 0) {
+          for (const [index, allocation] of payableAllocations.entries()) {
+            await createPayment({
+                ...formData,
+                invoiceId: allocation.invoice.id,
+                invoiceNumber: allocation.invoice.invoiceNumber,
+                customerId: allocation.invoice.customerId,
+                customerName: allocation.invoice.customerName,
+                amount: allocation.amount,
+                amountAppliedToInvoice: allocation.amountAppliedToInvoice,
+                cashDiscount: allocation.cashDiscount,
+                splitPaymentGroupId: splitPaymentGroupId || undefined,
+                splitPaymentTotalAmount: payableAllocations.length > 1 ? formData.amount : undefined,
+                splitPaymentPart: payableAllocations.length > 1 ? index + 1 : undefined,
+                splitPaymentCount: payableAllocations.length > 1 ? payableAllocations.length : undefined,
+                notes:
+                  payableAllocations.length > 1
                   ? [formData.notes, `Split payment ${index + 1}/${payableAllocations.length}`].filter(Boolean).join(' | ')
                   : formData.notes
-            }, auditUser)
-          )
+              }, auditUser);
+          }
+        } else {
+          await createPayment({
+            ...formData,
+            invoiceId: '',
+            invoiceNumber: '',
+            amountAppliedToInvoice: 0,
+            cashDiscount: 0,
+            notes: [formData.notes, 'Advance payment'].filter(Boolean).join(' | ')
+          }, auditUser);
+        }
+        const appliedAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
+        const appliedCashAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.amountAppliedToInvoice, 0);
+        const advanceAmount = Math.max(0, formData.amount - appliedCashAmount);
+        setMessage(
+          `Payment added. ${formatMoney(formData.amount)} received; ${formatMoney(appliedAmount)} applied across ${payableAllocations.length} invoice(s)` +
+          (advanceAmount > 0 ? `; ${formatMoney(advanceAmount)} stored as advance.` : '.')
         );
-        const recordedAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
-        setMessage(`Payment added. ${formatMoney(recordedAmount)} recorded across ${payableAllocations.length} invoice(s).`);
       }
 
       await syncCustomerPartnerLevelsFromFirestore();
@@ -486,6 +500,7 @@ const Payments = () => {
       invoiceNumber: payment.invoiceNumber,
       date: payment.date,
       amount: payment.amount,
+      amountAppliedToInvoice: payment.amountAppliedToInvoice,
       cashDiscount: payment.cashDiscount,
       mode: payment.mode,
       notes: payment.notes
@@ -587,19 +602,22 @@ const Payments = () => {
     <div>
       <SectionHeader
         title="Payments"
-        description="Add, edit, filter, and delete Firestore payments. Multiple and partial payments per invoice are supported."
+        description="Payments clear invoices oldest-first. Any extra amount is saved as customer advance."
       />
 
       <form style={cardStyle} onSubmit={handleSubmit}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingPaymentId ? 'Edit Payment' : 'Add Payment'}</div>
-            <div style={{ color: '#67738E', marginTop: 4 }}>Enter any amount to record a partial or full payment against the selected invoice.</div>
+            <div style={{ color: '#67738E', marginTop: 4 }}>Enter the received amount; it will clear all pending invoices in oldest-first order.</div>
           </div>
           <div style={{ color: '#0B1F3A', fontWeight: 800 }}>
             <div style={{ color: selectedPendingTotal > 0 ? '#B42318' : '#1B7F3A' }}>
-              Selected Pending: {selectedInvoiceIds.length > 0 ? formatMoney(selectedPendingTotal) : 'Select invoice(s)'}
+              Selected Pending: {selectedInvoiceIds.length > 0 ? formatMoney(selectedPendingTotal) : 'No pending invoice'}
             </div>
+            {selectedCustomer ? (
+              <div style={{ color: '#166534', fontSize: 12, marginTop: 4 }}>Available advance: {formatMoney(selectedCustomer.advanceBalance)}</div>
+            ) : null}
             {selectedInvoiceIds.length > 0 ? (
               <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>This payment applies: {formatMoney(appliedTotalPreview)}</div>
             ) : null}
@@ -631,14 +649,6 @@ const Payments = () => {
                   Selected pending: {formatMoney(selectedPendingTotal)}
                 </div>
               </div>
-              {!editingPaymentId ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
-                  <label style={labelStyle}>
-                    Payment Amount
-                    <input style={inputStyle} type="number" min="0" value={formData.amount} onChange={(event) => handleFieldChange('amount', event.target.value)} />
-                  </label>
-                </div>
-              ) : null}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
                 {invoiceOptions.map((invoice) => {
                   const checked = selectedInvoiceIds.includes(invoice.id);
@@ -677,25 +687,14 @@ const Payments = () => {
             </div>
           ) : null}
 
-          {editingPaymentId ? (
-            <label style={labelStyle}>
-              Payment Amount
-              <input style={inputStyle} type="number" min="0" value={formData.amount} onChange={(event) => handleFieldChange('amount', event.target.value)} />
-            </label>
-          ) : null}
+          <label style={labelStyle}>
+            Payment Amount
+            <input style={inputStyle} type="number" min="0" value={formData.amount} onChange={(event) => handleFieldChange('amount', event.target.value)} />
+          </label>
 
           <label style={labelStyle}>
             Cash Discount
             <input style={inputStyle} type="number" min="0" value={formData.cashDiscount} onChange={(event) => handleFieldChange('cashDiscount', event.target.value)} />
-          </label>
-
-          <label style={labelStyle}>
-            Payment Mode
-            <select style={inputStyle} value={formData.mode} onChange={(event) => handleFieldChange('mode', event.target.value as PaymentMode)}>
-              {paymentModes.map((mode) => (
-                <option key={mode} value={mode}>{mode}</option>
-              ))}
-            </select>
           </label>
 
           <label style={labelStyle}>
@@ -712,7 +711,7 @@ const Payments = () => {
         {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
         {overpaymentAmount > 0 ? (
           <div style={{ color: '#B7791F', marginTop: 12, fontWeight: 800 }}>
-            Extra amount of {formatMoney(overpaymentAmount)} is not applied to invoice outstanding.
+            Extra amount of {formatMoney(overpaymentAmount)} will be stored as customer advance.
           </div>
         ) : null}
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
@@ -733,7 +732,7 @@ const Payments = () => {
         <div style={formGridStyle}>
           <label style={labelStyle}>
             Search Payments
-            <input style={inputStyle} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Customer, invoice, or mode" />
+            <input style={inputStyle} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Customer or invoice" />
           </label>
 
           <label style={labelStyle}>
@@ -746,15 +745,6 @@ const Payments = () => {
             </select>
           </label>
 
-          <label style={labelStyle}>
-            Mode Filter
-            <select style={inputStyle} value={modeFilter} onChange={(event) => setModeFilter(event.target.value)}>
-              <option value="all">All modes</option>
-              {paymentModes.map((mode) => (
-                <option key={mode} value={mode}>{mode}</option>
-              ))}
-            </select>
-          </label>
         </div>
 
         <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
@@ -780,7 +770,7 @@ const Payments = () => {
               ) : (
                 paymentRows.map((payment) => {
                   const linkedInvoice = invoices.find((invoice) => invoice.id === payment.invoiceId);
-                  const invoiceLabel = linkedInvoice ? getInvoiceDisplayNumber(linkedInvoice) : payment.invoiceNumber;
+                  const invoiceLabel = linkedInvoice ? getInvoiceDisplayNumber(linkedInvoice) : payment.invoiceNumber || 'Advance';
                   const splitPaymentTotal = splitPaymentTotalById.get(payment.id);
 
                   return (
@@ -789,7 +779,14 @@ const Payments = () => {
                     <td style={cellStyle}>{payment.customerName}</td>
                     <td style={cellStyle}>{invoiceLabel}</td>
                     <td style={{ ...cellStyle, fontWeight: 800 }}>
-                      {formatMoney(payment.amount)}
+                      {payment.paymentKind === 'advance_application'
+                        ? `${formatMoney(payment.advanceAppliedAmount)} advance adjusted`
+                        : formatMoney(payment.amount)}
+                      {payment.advanceCreatedAmount > 0 ? (
+                        <div style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>
+                          Advance stored: {formatMoney(payment.advanceCreatedAmount)}
+                        </div>
+                      ) : null}
                       {(payment.notes || '').includes('Split payment') ? (
                         <div style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>
                           Split paid: {formatMoney(splitPaymentTotal ?? payment.amount)}

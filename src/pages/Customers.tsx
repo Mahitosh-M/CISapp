@@ -55,6 +55,8 @@ const Customers = () => {
   const [showFullTable, setShowFullTable] = useState(false);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [searchCustomers, setSearchCustomers] = useState<Customer[] | null>(null);
+  const [loadingSearchCustomers, setLoadingSearchCustomers] = useState(false);
   const [inactiveSearchText, setInactiveSearchText] = useState('');
   const [calledCustomerIds, setCalledCustomerIds] = useState<Set<string>>(() => new Set());
   const [customerLimit, setCustomerLimit] = useState(LIST_PAGE_SIZE);
@@ -112,18 +114,44 @@ const Customers = () => {
     loadCustomers();
   }, [customerLimit]);
 
+  useEffect(() => {
+    if (!searchText.trim()) {
+      setSearchCustomers(null);
+      setLoadingSearchCustomers(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingSearchCustomers(true);
+
+    getCustomers()
+      .then((customerRows) => {
+        if (!cancelled) setSearchCustomers(customerRows);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to search customers.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSearchCustomers(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchText]);
+
   const filteredCustomers = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
     if (!term) return [];
 
     return sortNewestFirst(
-      customers.filter((customer) =>
+      (searchCustomers ?? customers).filter((customer) =>
         [customer.name, customer.mobile, customer.area].some((value) => value.toLowerCase().includes(term))
       ),
       ['updatedAt', 'createdAt']
     );
-  }, [customers, searchText]);
+  }, [customers, searchCustomers, searchText]);
 
   const suggestions = useMemo(() => {
     if (searchText.trim().length < 2) return [];
@@ -694,7 +722,7 @@ const Customers = () => {
           </div>
           {showFullTable ? (
             <div style={{ ...latestFiveScrollStyle, display: 'grid', gap: 12 }}>
-              {loading ? (
+              {loading || loadingSearchCustomers ? (
                 <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>Loading customers...</div>
               ) : filteredCustomers.length === 0 ? (
                 <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>
@@ -757,7 +785,7 @@ const Customers = () => {
                   </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {loading || loadingSearchCustomers ? (
                   <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
                 ) : filteredCustomers.length === 0 ? (
                   <tr><td style={cellStyle} colSpan={4}>{searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}</td></tr>

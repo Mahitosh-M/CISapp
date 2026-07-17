@@ -288,6 +288,14 @@ const CustomerDashboard = () => {
         </div>
       </div>
 
+      {(customer?.advanceBalance ?? 0) > 0 ? (
+        <div style={{ background: '#ECFDF3', color: '#166534', border: '1px solid #BBE7C8', borderRadius: 20, padding: 16, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900 }}>Available Advance</div>
+          <div style={{ fontSize: 26, fontWeight: 900, marginTop: 5 }}>{formatMoney(customer?.advanceBalance ?? 0)}</div>
+          <div style={{ color: '#477A58', fontSize: 12, fontWeight: 800, marginTop: 5 }}>Automatically adjusted on your next invoice.</div>
+        </div>
+      ) : null}
+
       {currentMonthBonusPc > 0 ? (
         <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12, border: '1px solid #F4DE91' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>

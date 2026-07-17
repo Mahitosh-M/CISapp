@@ -45,7 +45,6 @@ const buildEmptyInvoiceForm = (): InvoiceFormData => ({
 const LIST_PAGE_SIZE = 1;
 const CUSTOMER_LIST_PAGE_SIZE = 3;
 const LOAD_MORE_PAGE_SIZE = 5;
-const paymentModes: PaymentMode[] = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Card', 'Other'];
 const invoiceCreationPaymentNote = 'Payment entered during invoice creation';
 
 const getInvoiceNumberRank = (invoiceNumber: string) => {
@@ -272,6 +271,11 @@ const Invoices = () => {
       return;
     }
 
+    if (!formData.date || !formData.dueDate) {
+      setError('Invoice date and due date must be valid dates.');
+      return;
+    }
+
     try {
       setSaving(true);
       setError('');
@@ -311,6 +315,10 @@ const Invoices = () => {
         const cleanCashDiscount = Math.max(0, Number(sameDayCashDiscount) || 0);
 
         if (cleanPaymentAmount > 0) {
+          const remainingAfterAdvance = Math.max(0, formData.totalSales - createdInvoice.advanceAppliedAmount);
+          const amountAppliedToInvoice = Math.min(cleanPaymentAmount, remainingAfterAdvance);
+          const cashDiscountApplied = Math.min(cleanCashDiscount, Math.max(0, remainingAfterAdvance - amountAppliedToInvoice));
+
           await createPayment({
             customerId: formData.customerId,
             customerName: formData.customerName,
@@ -318,13 +326,19 @@ const Invoices = () => {
             invoiceNumber: createdInvoice.invoiceNumber,
             date: formData.date,
             amount: cleanPaymentAmount,
-            cashDiscount: cleanCashDiscount,
+            amountAppliedToInvoice,
+            cashDiscount: cashDiscountApplied,
             mode: sameDayPaymentMode,
             notes: invoiceCreationPaymentNote
           }, auditUser);
         }
 
-        setMessage(cleanPaymentAmount > 0 ? 'Invoice and same-day payment created successfully.' : 'Invoice created successfully.');
+        const advanceMessage = createdInvoice.advanceAppliedAmount > 0
+          ? ` ${formatMoney(createdInvoice.advanceAppliedAmount)} customer advance was adjusted automatically.`
+          : '';
+        setMessage(
+          (cleanPaymentAmount > 0 ? 'Invoice and same-day payment created successfully.' : 'Invoice created successfully.') + advanceMessage
+        );
       }
 
       await syncCustomerPartnerLevelsFromFirestore();
@@ -561,12 +575,12 @@ const Invoices = () => {
 
           <label style={labelStyle}>
             Invoice Date
-            <input style={inputStyle} type="date" value={formData.date} onChange={(event) => handleFieldChange('date', event.target.value)} />
+            <input style={inputStyle} type="date" required value={formData.date} onChange={(event) => handleFieldChange('date', event.target.value)} />
           </label>
 
           <label style={labelStyle}>
             Due Date
-            <input style={inputStyle} type="date" value={formData.dueDate} onChange={(event) => handleFieldChange('dueDate', event.target.value)} />
+            <input style={inputStyle} type="date" required value={formData.dueDate} onChange={(event) => handleFieldChange('dueDate', event.target.value)} />
           </label>
 
           <label style={labelStyle}>
@@ -611,14 +625,6 @@ const Invoices = () => {
             />
           </label>
 
-          <label style={labelStyle}>
-            Payment Mode
-            <select style={inputStyle} value={sameDayPaymentMode} onChange={(event) => setSameDayPaymentMode(event.target.value as PaymentMode)}>
-              {paymentModes.map((mode) => (
-                <option key={mode} value={mode}>{mode}</option>
-              ))}
-            </select>
-          </label>
         </div>
 
         {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}

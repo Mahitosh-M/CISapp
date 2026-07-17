@@ -55,6 +55,7 @@ export interface Customer {
   area: string;
   tier: CustomerTier;
   previousOutstandingAmount: number;
+  advanceBalance: number;
   totalOutstandingAmount?: number;
   invoiceOutstandingAmount?: number;
   openingBalanceOutstandingAmount?: number;
@@ -98,6 +99,10 @@ export interface Payment {
   amount: number;
   // Amount that reduces the selected invoice. Older documents may also track old-balance allocation separately.
   amountAppliedToInvoice: number;
+  // Cash left after clearing invoices is stored as advance; advance applications contain no new cash.
+  advanceCreatedAmount: number;
+  advanceAppliedAmount: number;
+  paymentKind?: 'receipt' | 'advance_application';
   amountUsedForOldBalance: number;
   oldBalanceBeforePayment: number;
   oldBalanceAfterPayment: number;
@@ -308,6 +313,7 @@ export interface PaymentFormData {
   invoiceNumber: string;
   date: string;
   amount: number;
+  amountAppliedToInvoice?: number;
   cashDiscount: number;
   splitPaymentGroupId?: string;
   splitPaymentTotalAmount?: number;
