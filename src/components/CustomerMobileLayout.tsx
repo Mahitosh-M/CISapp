@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
-import { Bell, CalendarDays, Coins, FileText, Gift, Home, Tags, Wallet } from 'lucide-react';
+import { Bell, CalendarDays, Coins, FileText, Gift, Home, Sparkles, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ExternalImage from './ExternalImage';
@@ -8,6 +8,7 @@ import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { markBonusPcRequestSeen } from '../services/firestoreService';
 import { getLatestUnreadOffer, getOfferDateRangeLabel, markOfferAsViewed } from '../utils/offers';
+import { formatApc } from '../utils/loyalty';
 import { getTierDisplayName } from '../utils/tiers';
 
 const navItems = [
@@ -17,14 +18,20 @@ const navItems = [
   { to: '/customer/offers', label: 'Offers', icon: Tags }
 ];
 
+const getPcBalanceStorageKey = (userId?: string, customerId?: string) =>
+  `customerPcBalanceSeen_${userId || customerId || 'customerPortal'}`;
+
 const CustomerMobileLayout = () => {
   const portalData = useCustomerPortalData();
   const { logout, role } = useAuth();
   const navigate = useNavigate();
   const [viewedOfferVersion, setViewedOfferVersion] = useState(0);
   const [viewedBonusVersion, setViewedBonusVersion] = useState(0);
+  const [pcBalancePopup, setPcBalancePopup] = useState<{ change: number; balance: number } | null>(null);
   const customerHeading = (portalData.customer?.name || portalData.userProfile?.customerName || portalData.userProfile?.email || 'Customer').toUpperCase();
   const customerPartnerLevel = getTierDisplayName(portalData.customer?.tier);
+  const pcBalance = portalData.apcSummary?.apcBalance ?? 0;
+  const pcBalanceStorageKey = getPcBalanceStorageKey(portalData.userProfile?.uid, portalData.customer?.id);
 
   const latestUnreadBonus = useMemo(() => {
     return [...portalData.bonusPcRequests]
@@ -38,7 +45,28 @@ const CustomerMobileLayout = () => {
 
   useEffect(() => {
     setViewedOfferVersion((current) => current + 1);
+    setPcBalancePopup(null);
   }, [portalData.userProfile?.uid]);
+
+  useEffect(() => {
+    if (portalData.loading || !portalData.apcSummary) return;
+
+    try {
+      const storedBalance = window.localStorage.getItem(pcBalanceStorageKey);
+
+      if (storedBalance === null) {
+        window.localStorage.setItem(pcBalanceStorageKey, String(pcBalance));
+        return;
+      }
+
+      const previousBalance = Number(storedBalance);
+      if (!Number.isFinite(previousBalance) || previousBalance === pcBalance || pcBalancePopup) return;
+
+      setPcBalancePopup({ change: pcBalance - previousBalance, balance: pcBalance });
+    } catch {
+      // If localStorage is unavailable, the customer portal still works without the once-only popup.
+    }
+  }, [pcBalance, pcBalancePopup, pcBalanceStorageKey, portalData.apcSummary, portalData.loading]);
 
   const closeOffer = () => {
     if (!latestUnreadOffer) return;
@@ -61,6 +89,16 @@ const CustomerMobileLayout = () => {
     await markBonusPcRequestSeen(latestUnreadBonus.id);
     setViewedBonusVersion((current) => current + 1);
     await portalData.refreshData();
+  };
+
+  const closePcBalancePopup = () => {
+    try {
+      window.localStorage.setItem(pcBalanceStorageKey, String(pcBalance));
+    } catch {
+      // Ignore storage failures; the popup can still close for this session.
+    }
+
+    setPcBalancePopup(null);
   };
 
   if (portalData.loading) {
@@ -118,9 +156,61 @@ const CustomerMobileLayout = () => {
         })}
       </nav>
 
-      <InstallAppPrompt disabled={role !== 'customer' || Boolean(latestUnreadBonus || latestUnreadOffer)} />
+      <InstallAppPrompt disabled={role !== 'customer' || Boolean(pcBalancePopup || latestUnreadBonus || latestUnreadOffer)} />
 
-      {latestUnreadBonus ? (
+      {pcBalancePopup ? (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(11,31,58,0.72)', display: 'grid', placeItems: 'center', padding: 18, zIndex: 40 }}>
+          <style>
+            {`
+              @keyframes customerPcPopupIn {
+                0% { opacity: 0; transform: translateY(18px) scale(0.94); }
+                100% { opacity: 1; transform: translateY(0) scale(1); }
+              }
+              @keyframes customerPcCoinPulse {
+                0% { transform: scale(0.9) rotate(-4deg); filter: brightness(1); }
+                40% { transform: scale(1.08) rotate(2deg); filter: brightness(1.18); }
+                100% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+              }
+              @keyframes customerPcFloat {
+                0% { opacity: 0; transform: translate(-50%, 12px) scale(0.9); }
+                18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -46px) scale(1.08); }
+              }
+              @keyframes customerPcSpark {
+                0%, 100% { opacity: 0.2; transform: scale(0.8) rotate(0deg); }
+                45% { opacity: 1; transform: scale(1.22) rotate(16deg); }
+              }
+            `}
+          </style>
+          <div style={{ background: 'linear-gradient(145deg, #0B1F3A 0%, #12345A 100%)', border: '1px solid rgba(212,175,55,0.32)', borderRadius: 24, padding: 20, maxWidth: 360, width: '100%', color: '#FFFFFF', boxShadow: '0 24px 50px rgba(11,31,58,0.34)', textAlign: 'center', animation: 'customerPcPopupIn 260ms ease-out' }}>
+            <div style={{ width: 132, height: 132, margin: '0 auto 14px', position: 'relative', display: 'grid', placeItems: 'center' }}>
+              <div style={{ width: 122, height: 122, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 34% 27%, #FFFBE8 0 10%, #FDE68A 28%, #D4AF37 62%, #8A5A00 100%)', border: '6px solid #F8E7A3', boxShadow: 'inset 0 0 0 4px rgba(138,90,0,0.42), 0 16px 30px rgba(212,175,55,0.36)', animation: 'customerPcCoinPulse 900ms ease-out' }}>
+                <div style={{ width: 88, height: 88, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.55)', color: '#4A3000', textAlign: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 31, lineHeight: 1, fontWeight: 900 }}>{formatApc(pcBalancePopup.balance)}</div>
+                    <div style={{ fontSize: 11, fontWeight: 900, marginTop: 5 }}>PC</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ position: 'absolute', left: '50%', top: -4, color: pcBalancePopup.change > 0 ? '#00E676' : '#FCA5A5', background: '#0B1F3A', border: '1px solid rgba(255,255,255,0.22)', borderRadius: 999, padding: '5px 9px', fontSize: 12, fontWeight: 900, boxShadow: '0 10px 18px rgba(0,0,0,0.25)', animation: 'customerPcFloat 1500ms ease-out forwards' }}>
+                {pcBalancePopup.change > 0 ? '+' : '-'}{formatApc(Math.abs(pcBalancePopup.change))}
+              </div>
+              <Sparkles size={16} style={{ position: 'absolute', right: 4, top: 14, color: '#FFF7D6', animation: 'customerPcSpark 900ms ease-in-out infinite' }} />
+              <Sparkles size={13} style={{ position: 'absolute', left: 6, bottom: 24, color: '#FDE68A', animation: 'customerPcSpark 900ms ease-in-out 140ms infinite' }} />
+            </div>
+            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 14, marginBottom: 6 }}>
+              {pcBalancePopup.change > 0 ? 'Partner Coins Added' : 'Partner Coins Redeemed'}
+            </div>
+            <div style={{ fontWeight: 900, fontSize: 24, marginBottom: 8 }}>Your PC balance changed</div>
+            <div style={{ color: '#D7DEEA', lineHeight: 1.5, fontSize: 14 }}>
+              {pcBalancePopup.change > 0 ? 'Gold coins were added to your Available PC balance.' : 'A reward redemption changed your Available PC balance.'}
+            </div>
+            <button type="button" onClick={closePcBalancePopup} style={{ marginTop: 18, width: '100%', border: 0, borderRadius: 14, background: '#D4AF37', color: '#0B1F3A', padding: 13, fontWeight: 900 }}>
+              View Dashboard
+            </button>
+          </div>
+        </div>
+      ) : latestUnreadBonus ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(11,31,58,0.68)', display: 'grid', placeItems: 'center', padding: 18, zIndex: 30 }}>
           <div style={{ background: '#FFFFFF', borderRadius: 24, padding: 20, maxWidth: 360, width: '100%', color: '#0B1F3A', boxShadow: '0 24px 50px rgba(11,31,58,0.30)', textAlign: 'center' }}>
             <div style={{ display: 'grid', placeItems: 'center', marginBottom: 12 }}>

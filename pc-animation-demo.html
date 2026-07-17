@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PC Popup Playground</title>
+    <style>
+      @keyframes modalIn {
+        0% { opacity: 0; transform: translateY(18px) scale(0.94); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
+      }
+
+      @keyframes coinPulse {
+        0% { transform: scale(0.9) rotate(-4deg); filter: brightness(1); }
+        40% { transform: scale(1.08) rotate(2deg); filter: brightness(1.18); }
+        100% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+      }
+
+      @keyframes coinFloat {
+        0% { opacity: 0; transform: translate(-50%, 12px) scale(0.9); }
+        18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -46px) scale(1.08); }
+      }
+
+      @keyframes spark {
+        0%, 100% { opacity: 0.2; transform: scale(0.8) rotate(0deg); }
+        45% { opacity: 1; transform: scale(1.22) rotate(16deg); }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #eef2f7;
+        color: #0b1f3a;
+        font-family: Arial, sans-serif;
+      }
+
+      .page {
+        width: min(390px, 100vw);
+        min-height: 100vh;
+        padding: 20px 16px 28px;
+        background: #f8f9fb;
+      }
+
+      .hero {
+        border-radius: 24px;
+        padding: 18px;
+        color: #fff;
+        background: linear-gradient(135deg, #0b1f3a 0%, #173b66 58%, #0b1f3a 100%);
+        box-shadow: 0 18px 36px rgba(11, 31, 58, 0.22);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        right: -28px;
+        top: -28px;
+        width: 124px;
+        height: 124px;
+        border-radius: 50%;
+        border: 18px solid rgba(212, 175, 55, 0.16);
+      }
+
+      .label {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: rgba(212, 175, 55, 0.16);
+        color: #fde68a;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .hero-row {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .sub {
+        color: #bfc8d9;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.45;
+        margin-top: 10px;
+      }
+
+      .coin-wrap {
+        position: relative;
+        flex: 0 0 auto;
+        width: 132px;
+        height: 132px;
+        display: grid;
+        place-items: center;
+      }
+
+      .coin {
+        width: 122px;
+        height: 122px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at 34% 27%, #fffbe8 0 10%, #fde68a 28%, #d4af37 62%, #8a5a00 100%);
+        border: 6px solid #f8e7a3;
+        box-shadow: inset 0 0 0 4px rgba(138, 90, 0, 0.42), 0 16px 30px rgba(212, 175, 55, 0.36);
+      }
+
+      .coin.animate {
+        animation: coinPulse 900ms ease-out;
+      }
+
+      .inner {
+        width: 88px;
+        height: 88px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        color: #4a3000;
+        text-align: center;
+      }
+
+      .amount {
+        font-size: 31px;
+        line-height: 1;
+        font-weight: 900;
+      }
+
+      .pc {
+        font-size: 11px;
+        font-weight: 900;
+        margin-top: 5px;
+      }
+
+      .float {
+        position: absolute;
+        left: 50%;
+        top: -4px;
+        background: #0b1f3a;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-weight: 900;
+        box-shadow: 0 10px 18px rgba(0, 0, 0, 0.25);
+        animation: coinFloat 1500ms ease-out forwards;
+      }
+
+      .spark {
+        position: absolute;
+        color: #fff7d6;
+        animation: spark 900ms ease-in-out infinite;
+      }
+
+      .spark.one {
+        right: 4px;
+        top: 14px;
+      }
+
+      .spark.two {
+        left: 6px;
+        bottom: 24px;
+        color: #fde68a;
+        animation-delay: 140ms;
+      }
+
+      .panel {
+        margin-top: 14px;
+        padding: 14px;
+        background: #fff;
+        border: 1px solid #e8edf4;
+        border-radius: 18px;
+        box-shadow: 0 10px 24px rgba(11, 31, 58, 0.08);
+      }
+
+      .panel-title {
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
+
+      .buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 14px;
+        padding: 12px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .earn {
+        background: linear-gradient(135deg, #fff7d6, #d4af37);
+        color: #0b1f3a;
+      }
+
+      .redeem {
+        background: #0b1f3a;
+        color: #fff;
+      }
+
+      .secondary {
+        background: #eef2f7;
+        color: #0b1f3a;
+      }
+
+      .overlay {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(5, 15, 30, 0.62);
+        z-index: 20;
+      }
+
+      .overlay.show {
+        display: flex;
+      }
+
+      .modal {
+        width: min(360px, 100%);
+        border-radius: 24px;
+        padding: 18px;
+        color: #fff;
+        background: linear-gradient(145deg, #0b1f3a 0%, #12345a 100%);
+        border: 1px solid rgba(212, 175, 55, 0.32);
+        box-shadow: 0 22px 44px rgba(0, 0, 0, 0.32);
+        animation: modalIn 260ms ease-out;
+      }
+
+      .modal-center {
+        text-align: center;
+      }
+
+      .popup-coin {
+        margin: 6px auto 14px;
+      }
+
+      .modal h2 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .modal p {
+        margin: 8px 0 0;
+        color: #d7deea;
+        line-height: 1.45;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .popup-change {
+        display: inline-flex;
+        margin-top: 12px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+        font-weight: 900;
+      }
+
+      .modal-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .offer-image {
+        width: 100%;
+        height: auto;
+        max-height: 240px;
+        object-fit: contain;
+        border-radius: 16px;
+        background: #fff;
+        display: block;
+        margin-bottom: 12px;
+      }
+
+      .offer-pill {
+        display: inline-flex;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #fff7d6;
+        color: #0b1f3a;
+        font-size: 11px;
+        font-weight: 900;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div class="hero-row">
+          <div>
+            <div class="label">Available PC</div>
+            <div class="sub">This is the dashboard. Balance-change popup appears once after login/open.</div>
+          </div>
+          <section class="coin-wrap">
+            <div id="coin" class="coin">
+              <div class="inner">
+                <div>
+                  <div id="balance" class="amount">120</div>
+                  <div class="pc">PC</div>
+                </div>
+              </div>
+            </div>
+            <div id="effects"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">Playground Controls</div>
+        <div class="buttons">
+          <button class="earn" type="button" onclick="adminBalanceChange(25)">Admin adds +25</button>
+          <button class="redeem" type="button" onclick="adminBalanceChange(-50)">Admin redeems -50</button>
+          <button class="secondary" type="button" onclick="simulateLogin()">Simulate login</button>
+          <button class="secondary" type="button" onclick="resetOnceFlags()">Reset once flags</button>
+        </div>
+      </section>
+    </main>
+
+    <section id="pcPopup" class="overlay">
+      <div class="modal modal-center">
+        <section class="coin-wrap popup-coin">
+          <div id="popupCoin" class="coin animate">
+            <div class="inner">
+              <div>
+                <div id="popupBalance" class="amount">120</div>
+                <div class="pc">PC</div>
+              </div>
+            </div>
+          </div>
+          <div id="popupEffects"></div>
+        </section>
+        <h2 id="pcPopupTitle">Partner Coins Updated</h2>
+        <p id="pcPopupText">Your Available PC balance changed since your last visit.</p>
+        <div id="pcPopupChange" class="popup-change">+25 PC</div>
+        <div class="modal-actions">
+          <button class="secondary" type="button" onclick="closePcPopup()">Close</button>
+          <button class="earn" type="button" onclick="closePcPopup()">Nice</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="offerPopup" class="overlay">
+      <div class="modal">
+        <img
+          class="offer-image"
+          alt="Offer poster"
+          src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='720' height='420' viewBox='0 0 720 420'%3E%3Crect width='720' height='420' fill='%23FFF7D6'/%3E%3Ccircle cx='606' cy='68' r='86' fill='%23D4AF37' opacity='0.35'/%3E%3Crect x='58' y='70' width='604' height='280' rx='34' fill='%230B1F3A'/%3E%3Ctext x='96' y='150' font-family='Arial' font-size='42' font-weight='900' fill='%23FDE68A'%3EFestival Offer%3C/text%3E%3Ctext x='96' y='218' font-family='Arial' font-size='28' font-weight='800' fill='%23FFFFFF'%3EExtra rewards on your next order%3C/text%3E%3Ctext x='96' y='280' font-family='Arial' font-size='24' font-weight='800' fill='%23D7DEEA'%3EValid for selected partners%3C/text%3E%3C/svg%3E"
+        />
+        <div class="offer-pill">Active Offer</div>
+        <h2 style="margin-top: 12px;">Festival Offer</h2>
+        <p>This offer popup appears after the PC update popup, and only once for the same offer after the customer closes it.</p>
+        <div class="modal-actions">
+          <button class="secondary" type="button" onclick="closeOfferPopup()">Close</button>
+          <button class="earn" type="button" onclick="closeOfferPopup()">View Offers</button>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      let balance = 120;
+      let lastSeenBalance = 95;
+      const offerId = 'festival-offer-001';
+
+      const coin = document.getElementById('coin');
+      const balanceEl = document.getElementById('balance');
+      const effects = document.getElementById('effects');
+      const pcPopup = document.getElementById('pcPopup');
+      const offerPopup = document.getElementById('offerPopup');
+      const popupCoin = document.getElementById('popupCoin');
+      const popupBalance = document.getElementById('popupBalance');
+      const popupEffects = document.getElementById('popupEffects');
+      const pcPopupTitle = document.getElementById('pcPopupTitle');
+      const pcPopupText = document.getElementById('pcPopupText');
+      const pcPopupChange = document.getElementById('pcPopupChange');
+
+      function getFlag(key) {
+        return window.localStorage.getItem(key) === 'true';
+      }
+
+      function setFlag(key) {
+        window.localStorage.setItem(key, 'true');
+      }
+
+      function formatPc(value) {
+        return Math.round(value || 0).toLocaleString();
+      }
+
+      function animateCoin(targetCoin, targetEffects, change) {
+        targetCoin.classList.remove('animate');
+        void targetCoin.offsetWidth;
+        targetCoin.classList.add('animate');
+
+        targetEffects.innerHTML = '';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'float';
+        bubble.style.color = change > 0 ? '#00E676' : '#FCA5A5';
+        bubble.textContent = `${change > 0 ? '+' : '-'}${formatPc(Math.abs(change))}`;
+
+        const sparkOne = document.createElement('div');
+        sparkOne.className = 'spark one';
+        sparkOne.textContent = '✦';
+
+        const sparkTwo = document.createElement('div');
+        sparkTwo.className = 'spark two';
+        sparkTwo.textContent = '✦';
+
+        targetEffects.append(bubble, sparkOne, sparkTwo);
+        window.setTimeout(() => {
+          targetEffects.innerHTML = '';
+        }, 1500);
+      }
+
+      function adminBalanceChange(change) {
+        balance = Math.max(0, balance + change);
+        balanceEl.textContent = formatPc(balance);
+        window.localStorage.removeItem('pcPopupSeenForBalance');
+        animateCoin(coin, effects, change);
+      }
+
+      function simulateLogin() {
+        const change = balance - lastSeenBalance;
+        const pcPopupSeen = getFlag('pcPopupSeenForBalance');
+
+        if (change !== 0 && !pcPopupSeen) {
+          showPcPopup(change);
+          return;
+        }
+
+        maybeShowOfferPopup();
+      }
+
+      function showPcPopup(change) {
+        popupBalance.textContent = formatPc(balance);
+        pcPopupTitle.textContent = change > 0 ? 'Partner Coins Added' : 'Partner Coins Redeemed';
+        pcPopupText.textContent = change > 0
+          ? 'Gold coins were added to your Available PC balance since your last visit.'
+          : 'A reward redemption changed your Available PC balance since your last visit.';
+        pcPopupChange.textContent = `${change > 0 ? '+' : '-'}${formatPc(Math.abs(change))} PC`;
+        pcPopupChange.style.color = change > 0 ? '#00E676' : '#FCA5A5';
+        pcPopup.classList.add('show');
+        animateCoin(popupCoin, popupEffects, change);
+      }
+
+      function closePcPopup() {
+        pcPopup.classList.remove('show');
+        lastSeenBalance = balance;
+        setFlag('pcPopupSeenForBalance');
+        maybeShowOfferPopup();
+      }
+
+      function maybeShowOfferPopup() {
+        if (!getFlag(`offerClosed:${offerId}`)) {
+          offerPopup.classList.add('show');
+        }
+      }
+
+      function closeOfferPopup() {
+        offerPopup.classList.remove('show');
+        setFlag(`offerClosed:${offerId}`);
+      }
+
+      function resetOnceFlags() {
+        window.localStorage.removeItem('pcPopupSeenForBalance');
+        window.localStorage.removeItem(`offerClosed:${offerId}`);
+        lastSeenBalance = 95;
+      }
+
+      window.addEventListener('load', () => {
+        window.setTimeout(simulateLogin, 450);
+      });
+    </script>
+  </body>
+</html>

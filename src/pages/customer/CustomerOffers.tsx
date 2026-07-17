@@ -4,6 +4,25 @@ import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../../utils/offers';
 
+const customerPromoCardStyle = {
+  background: 'linear-gradient(145deg, #0B1F3A 0%, #12345A 100%)',
+  border: '1px solid rgba(212,175,55,0.32)',
+  borderRadius: 18,
+  padding: 14,
+  boxShadow: '0 14px 30px rgba(11,31,58,0.24)',
+  overflow: 'hidden'
+};
+
+const customerPromoImageStyle = {
+  width: '100%',
+  height: 'auto',
+  maxHeight: 260,
+  objectFit: 'contain' as const,
+  borderRadius: 14,
+  display: 'block',
+  background: '#F8F9FB'
+};
+
 const CustomerOffers = () => {
   const { offers } = useCustomerPortalContext();
   const activeOffers = useMemo(() => {
@@ -29,11 +48,11 @@ const CustomerOffers = () => {
       ) : (
         <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollSnapType: 'x mandatory', paddingBottom: 12 }}>
           {activeOffers.map((offer) => (
-            <div key={offer.id} style={{ minWidth: '85%', scrollSnapAlign: 'start', background: '#FFFFFF', borderRadius: 22, padding: 14, boxShadow: '0 12px 28px rgba(11,31,58,0.10)', overflow: 'hidden' }}>
+            <div key={offer.id} style={{ ...customerPromoCardStyle, minWidth: '85%', scrollSnapAlign: 'start' }}>
               {offer.imageUrl ? (
-                <ExternalImage src={offer.imageUrl} alt={offer.title} style={{ width: '100%', height: 170, objectFit: 'cover', borderRadius: 18, display: 'block' }} />
+                <ExternalImage src={offer.imageUrl} alt={offer.title} style={customerPromoImageStyle} />
               ) : (
-                <div style={{ background: '#FFF7D6', borderRadius: 18, minHeight: 170, display: 'grid', placeItems: 'center', color: '#0B1F3A', fontWeight: 900 }}>
+                <div style={{ background: '#FFF7D6', borderRadius: 14, minHeight: 170, display: 'grid', placeItems: 'center', color: '#0B1F3A', fontWeight: 900 }}>
                   Offer poster will appear here
                 </div>
               )}
@@ -41,10 +60,10 @@ const CustomerOffers = () => {
                 <Tags size={14} color="#D4AF37" />
                 Active Offer
               </div>
-              <div style={{ fontWeight: 900, fontSize: 20, marginTop: 10 }}>{offer.title}</div>
-              {offer.description ? <div style={{ color: '#4B5871', marginTop: 8, lineHeight: 1.5 }}>{offer.description}</div> : null}
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'linear-gradient(135deg, #0B1F3A, #173B66)', color: '#FDE68A', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 900, marginTop: 12, boxShadow: '0 8px 18px rgba(11,31,58,0.14)' }}>
-                <CalendarDays size={14} color="#FDE68A" />
+              <div style={{ color: '#FFFFFF', fontWeight: 900, fontSize: 20, marginTop: 10 }}>{offer.title}</div>
+              {offer.description ? <div style={{ color: '#D7DEEA', marginTop: 8, lineHeight: 1.5 }}>{offer.description}</div> : null}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'linear-gradient(135deg, #FFF7D6, #D4AF37)', color: '#0B1F3A', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 900, marginTop: 12, boxShadow: '0 8px 18px rgba(212,175,55,0.22)' }}>
+                <CalendarDays size={14} color="#0B1F3A" />
                 Valid: {getOfferDateRangeLabel(offer)}
               </div>
             </div>

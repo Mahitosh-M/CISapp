@@ -23,14 +23,17 @@ const CustomerDashboard = () => {
   const navigate = useNavigate();
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const hasScrolledRef = useRef(false);
+  const previousPcBalanceRef = useRef<number | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showPcHistory, setShowPcHistory] = useState(false);
   const [pcHistoryFilter, setPcHistoryFilter] = useState<PcHistoryFilter>('all');
+  const [pcBalanceChange, setPcBalanceChange] = useState<number | null>(null);
   const totalOutstanding = customer?.totalOutstandingAmount ?? calculateCustomerTotalOutstanding(customer, invoiceViews);
   const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
   const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
   const currentMonthBonusRequests = bonusPcRequests.filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)));
   const currentMonthBonusPc = currentMonthBonusRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
+  const pcBalance = apcSummary?.apcBalance ?? 0;
   const pcProgressPercent = apcSummary?.progressPercent ?? 0;
   const currentMonthPcHistory: PcHistoryItem[] = [
     ...(customer
@@ -112,8 +115,42 @@ const CustomerDashboard = () => {
     return () => observer.disconnect();
   }, [isTransitioning, navigate]);
 
+  useEffect(() => {
+    if (previousPcBalanceRef.current === null) {
+      previousPcBalanceRef.current = pcBalance;
+      return undefined;
+    }
+
+    const change = pcBalance - previousPcBalanceRef.current;
+    previousPcBalanceRef.current = pcBalance;
+
+    if (change === 0) return undefined;
+
+    setPcBalanceChange(change);
+    const timeout = window.setTimeout(() => setPcBalanceChange(null), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [pcBalance]);
+
   return (
     <div style={{ opacity: isTransitioning ? 0 : 1, transform: isTransitioning ? 'translateY(-10px)' : 'translateY(0)', transition: 'opacity 220ms ease, transform 220ms ease' }}>
+      <style>
+        {`
+          @keyframes dashboardCoinPulse {
+            0% { transform: scale(1); filter: brightness(1); }
+            34% { transform: scale(1.08); filter: brightness(1.16); }
+            100% { transform: scale(1); filter: brightness(1); }
+          }
+          @keyframes dashboardCoinFloat {
+            0% { opacity: 0; transform: translate(-50%, 8px) scale(0.92); }
+            18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -34px) scale(1.08); }
+          }
+          @keyframes dashboardCoinSpark {
+            0%, 100% { opacity: 0.25; transform: scale(0.8); }
+            45% { opacity: 1; transform: scale(1.15); }
+          }
+        `}
+      </style>
       <div style={{ marginBottom: 14 }}>
         <div style={{ color: '#67738E', fontSize: 13, fontWeight: 800 }}>Welcome back</div>
       </div>
@@ -131,31 +168,59 @@ const CustomerDashboard = () => {
         }}
       >
         <div style={{ position: 'absolute', right: -22, top: -24, width: 110, height: 110, borderRadius: '50%', border: '18px solid rgba(212,175,55,0.16)' }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setShowPcHistory((current) => !current)}
-            style={{ border: 0, background: 'transparent', color: 'inherit', padding: 0, textAlign: 'left', cursor: 'pointer' }}
-          >
+        <div style={{ position: 'absolute', left: -44, top: -18, width: 190, height: 132, opacity: 0.18, pointerEvents: 'none', transform: 'rotate(-10deg)' }}>
+          <div style={{ position: 'absolute', inset: '16px 6px 10px 20px', border: '3px solid #FDE68A', borderRadius: 26, background: 'linear-gradient(135deg, rgba(212,175,55,0.22), rgba(253,230,138,0.04))', boxShadow: 'inset 0 0 0 2px rgba(212,175,55,0.30), 0 0 28px rgba(212,175,55,0.28)' }} />
+          <div style={{ position: 'absolute', right: 10, top: 48, width: 58, height: 40, border: '3px solid #FDE68A', borderRadius: 16, background: 'rgba(212,175,55,0.18)' }}>
+            <div style={{ position: 'absolute', left: 15, top: 13, width: 10, height: 10, borderRadius: '50%', background: '#FDE68A', boxShadow: '0 0 14px rgba(253,230,138,0.80)' }} />
+          </div>
+          <Wallet size={82} strokeWidth={1.5} style={{ position: 'absolute', left: 24, top: 28, color: '#FDE68A' }} />
+          <div style={{ position: 'absolute', left: 48, top: 18, width: 76, height: 2, background: '#FDE68A', boxShadow: '20px 18px 0 #FDE68A, 44px 36px 0 #FDE68A' }} />
+          <div style={{ position: 'absolute', left: 78, top: 18, width: 2, height: 62, background: '#FDE68A', boxShadow: '34px 16px 0 #FDE68A, -18px 34px 0 #FDE68A' }} />
+          <div style={{ position: 'absolute', left: 42, top: 84, width: 8, height: 8, borderRadius: '50%', background: '#FDE68A', boxShadow: '32px -22px 0 #FDE68A, 76px -8px 0 #FDE68A, 102px -38px 0 #FDE68A' }} />
+        </div>
+        <div style={{ display: 'grid', justifyItems: 'center', gap: 12, position: 'relative' }}>
+          <div style={{ textAlign: 'center', justifySelf: 'start' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(212,175,55,0.16)', color: '#FDE68A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
               <Sparkles size={14} />
               Available PC
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 12 }}>
-              <div style={{ color: '#FDE68A', fontSize: 38, fontWeight: 900, lineHeight: 1 }}>{formatApc(apcSummary?.apcBalance ?? 0)}</div>
-              <div style={{ color: '#DDE6F2', fontWeight: 900 }}>PC</div>
-            </div>
-            <div style={{ color: '#DDE6F2', fontSize: 11, fontWeight: 900, marginTop: 5 }}>{showPcHistory ? 'Hide monthly history' : 'Tap for monthly history'}</div>
-            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 800, marginTop: 5 }}>
-              {apcSummary?.nextLevel ? `${formatApc(apcSummary.pointsNeededForNextLevel)} PC to ${apcSummary.nextLevel}` : 'Highest partner level reached'}
-            </div>
-          </button>
-          <div style={{ width: 76, height: 76, borderRadius: 24, background: '#FFF7D6', color: '#0B1F3A', display: 'grid', placeItems: 'center', boxShadow: '0 16px 28px rgba(0,0,0,0.20)', position: 'relative', flex: '0 0 auto' }}>
-            <Wallet size={34} />
-            <div style={{ position: 'absolute', right: -6, top: -7, width: 34, height: 34, borderRadius: '50%', background: '#D4AF37', border: '3px solid #0B1F3A', display: 'grid', placeItems: 'center' }}>
-              <Coins size={18} />
-            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowPcHistory((current) => !current)}
+            aria-label="Toggle monthly PC history"
+            style={{ position: 'relative', flex: '0 0 auto', width: 122, height: 122, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}
+          >
+            <div
+              style={{
+                width: 122,
+                height: 122,
+                borderRadius: '50%',
+                display: 'grid',
+                placeItems: 'center',
+                background: 'radial-gradient(circle at 34% 27%, #FFFBE8 0 10%, #FDE68A 28%, #D4AF37 62%, #8A5A00 100%)',
+                border: '6px solid #F8E7A3',
+                boxShadow: 'inset 0 0 0 4px rgba(138,90,0,0.42), 0 16px 30px rgba(212,175,55,0.36)',
+                animation: pcBalanceChange !== null ? 'dashboardCoinPulse 900ms ease-out' : undefined
+              }}
+            >
+              <div style={{ width: 88, height: 88, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.55)', color: '#4A3000', textAlign: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 31, lineHeight: 1, fontWeight: 900 }}>{formatApc(pcBalance)}</div>
+                  <div style={{ fontSize: 11, fontWeight: 900, marginTop: 5 }}>PC</div>
+                </div>
+              </div>
+            </div>
+            {pcBalanceChange !== null ? (
+              <>
+                <div style={{ position: 'absolute', left: '50%', top: -2, color: pcBalanceChange > 0 ? '#00E676' : '#FCA5A5', background: '#0B1F3A', border: '1px solid rgba(255,255,255,0.22)', borderRadius: 999, padding: '5px 9px', fontSize: 12, fontWeight: 900, boxShadow: '0 10px 18px rgba(0,0,0,0.25)', animation: 'dashboardCoinFloat 1500ms ease-out forwards' }}>
+                  {pcBalanceChange > 0 ? '+' : '-'}{formatApc(Math.abs(pcBalanceChange))}
+                </div>
+                <Sparkles size={16} style={{ position: 'absolute', right: 4, top: 12, color: '#FFF7D6', animation: 'dashboardCoinSpark 900ms ease-in-out infinite' }} />
+                <Sparkles size={13} style={{ position: 'absolute', left: 6, bottom: 20, color: '#FDE68A', animation: 'dashboardCoinSpark 900ms ease-in-out 140ms infinite' }} />
+              </>
+            ) : null}
+          </button>
         </div>
 
         <div style={{ position: 'relative', marginTop: 16 }}>

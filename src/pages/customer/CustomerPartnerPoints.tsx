@@ -6,6 +6,26 @@ import { createRedemptionRequest } from '../../services/firestoreService';
 import { formatApc } from '../../utils/loyalty';
 import { sortNewestFirst } from '../../utils/listDisplay';
 
+const customerPromoCardStyle = {
+  background: 'linear-gradient(145deg, #0B1F3A 0%, #12345A 100%)',
+  border: '1px solid rgba(212,175,55,0.32)',
+  borderRadius: 18,
+  padding: 14,
+  boxShadow: '0 14px 30px rgba(11,31,58,0.24)',
+  overflow: 'hidden'
+};
+
+const customerPromoImageStyle = {
+  width: '100%',
+  height: 'auto',
+  maxHeight: 260,
+  objectFit: 'contain' as const,
+  borderRadius: 14,
+  display: 'block',
+  marginBottom: 12,
+  background: '#F8F9FB'
+};
+
 const CustomerPartnerPoints = () => {
   const { customer, apcSummary, availableRewards, redemptionRequests, refreshData } = useCustomerPortalContext();
   const [redemptionMessage, setRedemptionMessage] = useState('');
@@ -39,10 +59,10 @@ const CustomerPartnerPoints = () => {
 
   return (
     <div>
-      <section style={{ background: '#FFFFFF', borderRadius: 18, padding: 14, boxShadow: '0 10px 24px rgba(11,31,58,0.08)' }}>
+      <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <div>
-            <div style={{ fontWeight: 900 }}>Available Rewards</div>
+            <div style={{ fontSize: 24, fontWeight: 900 }}>Available Rewards</div>
             <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 3 }}>
               {apcSummary?.rewardAvailable ? 'Some rewards are ready to request' : `You can view level rewards now; need ${formatApc(apcSummary?.pointsNeededForNextReward ?? 0)} more PC for the next request`}
             </div>
@@ -66,19 +86,21 @@ const CustomerPartnerPoints = () => {
               const isButtonDisabled = !hasEnoughApc || isRequested || isGifted || requestingRewardId === reward.id;
 
               return (
-                <div key={reward.id} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 10 }}>
+                <div key={reward.id} style={customerPromoCardStyle}>
                   {reward.imageUrl ? (
                     <ExternalImage
                       src={reward.imageUrl}
                       alt={reward.name}
-                      style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 12, display: 'block', marginBottom: 10 }}
+                      style={customerPromoImageStyle}
                     />
                   ) : null}
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                     <div>
-                      <div style={{ fontWeight: 900 }}>{reward.name}</div>
-                      <div style={{ color: '#67738E', fontSize: 12 }}>{formatApc(reward.requiredPoints)} PC | {reward.levelRequired}</div>
-                      {reward.description ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{reward.description}</div> : null}
+                      <div style={{ color: '#FFFFFF', fontSize: 19, fontWeight: 900, lineHeight: 1.15 }}>{reward.name}</div>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '5px 9px', fontSize: 11, fontWeight: 900, marginTop: 7 }}>
+                        {formatApc(reward.requiredPoints)} PC | {reward.levelRequired}
+                      </div>
+                      {reward.description ? <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 7, lineHeight: 1.45 }}>{reward.description}</div> : null}
                     </div>
                     <button
                       type="button"
@@ -86,11 +108,13 @@ const CustomerPartnerPoints = () => {
                       disabled={isButtonDisabled}
                       style={{
                         border: 0,
-                        borderRadius: 10,
-                        background: isGifted ? '#EAF7EE' : isRequested || !hasEnoughApc ? '#E8EDF4' : '#D4AF37',
+                        borderRadius: 999,
+                        background: isGifted ? '#EAF7EE' : isRequested || !hasEnoughApc ? '#E8EDF4' : 'linear-gradient(135deg, #FFF7D6 0%, #D4AF37 70%, #B88912 100%)',
                         color: isGifted ? '#166534' : isRequested || !hasEnoughApc ? '#67738E' : '#0B1F3A',
-                        padding: '8px 10px',
-                        fontWeight: 900
+                        padding: '10px 12px',
+                        fontWeight: 900,
+                        boxShadow: isRequested || !hasEnoughApc ? 'none' : '0 8px 18px rgba(212,175,55,0.28)',
+                        whiteSpace: 'nowrap'
                       }}
                     >
                       <Award size={15} style={{ verticalAlign: 'middle', marginRight: 4 }} />
