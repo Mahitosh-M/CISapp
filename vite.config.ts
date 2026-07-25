@@ -8,10 +8,12 @@ export default defineConfig({
     minify: 'esbuild',
     rollupOptions: {
       output: {
-        manualChunks: {
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
-          charts: ['recharts'],
-          vendor: ['react', 'react-dom', 'react-router-dom']
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('firebase')) return 'firebase';
+          if (id.includes('recharts')) return 'charts';
+          if (id.includes('react')) return 'vendor';
+          return undefined;
         }
       }
     }

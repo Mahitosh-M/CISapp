@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { BellRing, ShoppingCart, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -17,16 +18,15 @@ import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Pa
 import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
 import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
-import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
-import { DEFAULT_SETTINGS, getGiftPercentageForTier } from '../utils/settings';
-import TierBadge from '../components/TierBadge';
+import { DEFAULT_SETTINGS } from '../utils/settings';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 
 const LIST_PAGE_SIZE = 1;
-const SELECTED_CUSTOMER_PAGE_SIZE = 3;
-const LOAD_MORE_PAGE_SIZE = 5;
+const ORDER_APP_URL = 'https://orderapp-35200.web.app';
 
 const emptyCustomerForm: CustomerFormData = {
   name: '',
@@ -52,14 +52,13 @@ const Customers = () => {
   const [formData, setFormData] = useState<CustomerFormData>(emptyCustomerForm);
   const [editingCustomerId, setEditingCustomerId] = useState('');
   const [showCustomerForm, setShowCustomerForm] = useState(false);
-  const [showFullTable, setShowFullTable] = useState(false);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [selectedSearchCustomerId, setSelectedSearchCustomerId] = useState('');
   const [searchCustomers, setSearchCustomers] = useState<Customer[] | null>(null);
   const [loadingSearchCustomers, setLoadingSearchCustomers] = useState(false);
   const [inactiveSearchText, setInactiveSearchText] = useState('');
   const [calledCustomerIds, setCalledCustomerIds] = useState<Set<string>>(() => new Set());
-  const [customerLimit, setCustomerLimit] = useState(LIST_PAGE_SIZE);
   const [showInactiveCustomers, setShowInactiveCustomers] = useState(false);
   const [inactiveDataLoaded, setInactiveDataLoaded] = useState(false);
   const [loadingInactiveCustomers, setLoadingInactiveCustomers] = useState(false);
@@ -69,6 +68,7 @@ const Customers = () => {
   const [error, setError] = useState('');
   const { canDeleteRecords, userProfile } = useAuth();
   const isAdmin = userProfile?.role === 'Admin';
+  const isStaff = userProfile?.role === 'Staff';
   const auditUser = {
     userId: userProfile?.uid,
     userEmail: userProfile?.email,
@@ -81,7 +81,7 @@ const Customers = () => {
       setError('');
 
       const [customerRows, appSettings] = await Promise.all([
-        getCustomers({ limitCount: customerLimit, sortBy: 'createdAt', sortDirection: 'desc' }),
+        getCustomers({ limitCount: LIST_PAGE_SIZE, sortBy: 'createdAt', sortDirection: 'desc' }),
         getAppSettings()
       ]);
       const [invoiceRows, paymentRows] = isAdmin ? await Promise.all([getInvoices(), getPayments()]) : [[], []];
@@ -112,7 +112,7 @@ const Customers = () => {
 
   useEffect(() => {
     loadCustomers();
-  }, [customerLimit]);
+  }, []);
 
   useEffect(() => {
     if (!searchText.trim()) {
@@ -141,26 +141,28 @@ const Customers = () => {
   }, [searchText]);
 
   const filteredCustomers = useMemo(() => {
+    if (selectedSearchCustomerId) {
+      return (searchCustomers ?? customers).filter((customer) => customer.id === selectedSearchCustomerId);
+    }
+
     const term = searchText.trim().toLowerCase();
 
     if (!term) return [];
 
     return sortNewestFirst(
       (searchCustomers ?? customers).filter((customer) =>
-        [customer.name, customer.mobile, customer.area].some((value) => value.toLowerCase().includes(term))
+        [customer.name, customer.area].some((value) => value.toLowerCase().includes(term))
       ),
       ['updatedAt', 'createdAt']
     );
-  }, [customers, searchCustomers, searchText]);
+  }, [customers, searchCustomers, searchText, selectedSearchCustomerId]);
 
   const suggestions = useMemo(() => {
     if (searchText.trim().length < 2) return [];
     return filteredCustomers.slice(0, 5);
   }, [filteredCustomers, searchText]);
 
-  const handleLoadMoreCustomers = () => {
-    setCustomerLimit((current) => current + LOAD_MORE_PAGE_SIZE);
-  };
+  const getStoredCustomerTotal = (customer: Customer) => customer.totalOutstandingAmount ?? 0;
 
   const handleToggleInactiveCustomers = async () => {
     if (showInactiveCustomers) {
@@ -192,49 +194,11 @@ const Customers = () => {
     }
   };
 
-  const outstandingByCustomerId = useMemo(() => {
-    if (invoices.length === 0 && payments.length === 0) {
-      return new Map(
-        customers.map((customer) => [
-          customer.id,
-          {
-            customerId: customer.id,
-            totalSales: 0,
-            totalPayments: 0,
-            previousOutstanding: customer.openingBalanceOutstandingAmount ?? 0,
-            newOutstanding: customer.invoiceOutstandingAmount ?? 0,
-            outstanding: customer.totalOutstandingAmount ?? 0,
-            overdueAmount: customer.overdueAmount ?? 0,
-            overdueDays: 0,
-            indicator: (customer.overdueAmount ?? 0) > 0 ? 'red' : (customer.totalOutstandingAmount ?? 0) > 0 ? 'yellow' : 'green'
-          }
-        ])
-      );
-    }
-
-    return new Map(
-      buildCustomerOutstandingRows(customers, invoices, payments, settings).map((row) => [row.customerId, row])
-    );
-  }, [customers, invoices, payments, settings]);
-
   const inactiveOutstandingByCustomerId = useMemo(() => {
     return new Map(
       buildCustomerOutstandingRows(inactiveCustomers, inactiveInvoices, inactivePayments, settings).map((row) => [row.customerId, row])
     );
   }, [inactiveCustomers, inactiveInvoices, inactivePayments, settings]);
-
-  const giftBudgetByCustomerId = useMemo(() => {
-    return new Map(
-      customers.map((customer) => {
-        const totalProfit = invoices
-          .filter((invoice) => invoice.customerId === customer.id)
-          .reduce((sum, invoice) => sum + invoice.totalProfit, 0);
-        const giftPercentage = getGiftPercentageForTier(customer.tier, settings);
-
-        return [customer.id, Math.max(0, Math.round(totalProfit * (giftPercentage / 100)))];
-      })
-    );
-  }, [customers, invoices, settings]);
 
   const inactiveCustomerRows = useMemo(() => {
     const today = getTodayDateString();
@@ -270,7 +234,7 @@ const Customers = () => {
       .filter((row) => {
         if (!term) return true;
 
-        return [row.customer.name, row.customer.mobile, row.customer.area].some((value) =>
+        return [row.customer.name, row.customer.area].some((value) =>
           value.toLowerCase().includes(term)
         );
       })
@@ -392,6 +356,23 @@ const Customers = () => {
     }
   };
 
+  const openStaffOrderApp = () => {
+    const orderUrl = new URL(ORDER_APP_URL);
+    orderUrl.searchParams.set('name', 'staff');
+    orderUrl.searchParams.set('role', 'staff');
+    orderUrl.searchParams.set('returnUrl', window.location.href);
+    window.open(orderUrl.toString(), '_blank', 'noopener,noreferrer');
+  };
+
+  const handleToggleCustomerForm = () => {
+    if (showCustomerForm && !editingCustomerId) {
+      resetForm();
+      return;
+    }
+
+    setShowCustomerForm(true);
+  };
+
   const pageGridStyle: CSSProperties = {
     display: 'grid',
     gridTemplateColumns: '1fr',
@@ -470,6 +451,41 @@ const Customers = () => {
     marginBottom: 6
   };
 
+  const staffTileGridStyle: CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: 12,
+    marginBottom: 16
+  };
+
+  const staffTileStyle: CSSProperties = {
+    border: '1px solid #E8EDF4',
+    borderRadius: 16,
+    padding: 14,
+    background: '#FFFFFF',
+    color: '#0B1F3A',
+    boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
+    cursor: 'pointer',
+    textAlign: 'center',
+    minHeight: 112,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease'
+  };
+
+  const staffTileIconStyle: CSSProperties = {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    display: 'grid',
+    placeItems: 'center',
+    background: '#FFF4BF',
+    color: '#0B1F3A'
+  };
+
   return (
     <div>
       <SectionHeader
@@ -477,24 +493,68 @@ const Customers = () => {
         description="Create, search, edit, and delete customer accounts directly in Firestore."
       />
 
-      <div style={pageGridStyle}>
-        <div style={cardStyle}>
+      {isStaff ? (
+        <div style={staffTileGridStyle}>
           <button
             type="button"
-            style={{ ...buttonStyle, width: '100%', background: '#D4AF37', color: '#0B1F3A', marginBottom: showCustomerForm ? 16 : 0 }}
-            onClick={() => {
-              if (showCustomerForm && !editingCustomerId) {
-                resetForm();
-                return;
-              }
-
-              setShowCustomerForm(true);
-            }}
+            className="customer-action-tile"
+            style={staffTileStyle}
+            onClick={openStaffOrderApp}
           >
-            {showCustomerForm && !editingCustomerId ? 'Hide Customer Form' : 'Add New Customer'}
+            <span style={staffTileIconStyle}><ShoppingCart size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>Order</span>
+              <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 4 }}>Open staff order entry</span>
+            </span>
           </button>
+          <button
+            type="button"
+            className="customer-action-tile"
+            style={staffTileStyle}
+            onClick={handleToggleCustomerForm}
+          >
+            <span style={staffTileIconStyle}><UserPlus size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId ? 'Hide Form' : 'Add Customer'}</span>
+              <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 4 }}>Create customer record</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="customer-action-tile"
+            style={{
+              ...staffTileStyle,
+              borderColor: showInactiveCustomers ? '#0B1F3A' : '#E8EDF4',
+              background: showInactiveCustomers ? '#F8FAFF' : '#FFFFFF'
+            }}
+            onClick={handleToggleInactiveCustomers}
+            disabled={loadingInactiveCustomers}
+          >
+            <span style={staffTileIconStyle}><BellRing size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showInactiveCustomers ? 'Hide Follow-up' : 'Follow-up'}</span>
+              <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 4 }}>
+                {loadingInactiveCustomers ? 'Loading customers' : 'Not ordered in 15+ days'}
+              </span>
+            </span>
+          </button>
+        </div>
+      ) : null}
 
-          {showCustomerForm ? (
+      <div style={pageGridStyle}>
+        {(!isStaff || showCustomerForm) ? (
+          <div style={cardStyle}>
+            {!isStaff ? (
+            <button
+              type="button"
+              style={{ ...buttonStyle, width: '100%', background: '#D4AF37', color: '#0B1F3A', marginBottom: showCustomerForm ? 16 : 0 }}
+              onClick={handleToggleCustomerForm}
+            >
+              {showCustomerForm && !editingCustomerId ? 'Hide Customer Form' : 'Add New Customer'}
+            </button>
+            ) : null}
+
+            {showCustomerForm ? (
             <form onSubmit={handleSubmit}>
               <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 14 }}>
                 {editingCustomerId ? 'Edit Customer' : 'Add Customer'}
@@ -586,22 +646,25 @@ const Customers = () => {
             ) : null}
           </div>
         </form>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : null}
 
-        {!isAdmin ? (
+        {!isAdmin && (!isStaff || showInactiveCustomers) ? (
           <div style={cardStyle}>
-            <button
-              type="button"
-              style={{ ...buttonStyle, width: '100%', background: showInactiveCustomers ? '#0B1F3A' : '#E8EDF4', color: showInactiveCustomers ? '#FFFFFF' : '#0B1F3A' }}
-              onClick={handleToggleInactiveCustomers}
-              disabled={loadingInactiveCustomers}
-            >
-              {loadingInactiveCustomers ? 'Loading customers...' : showInactiveCustomers ? 'Hide customers not ordered in 15+ days' : 'Customers not ordered in 15+ days'}
-            </button>
+            {!isStaff ? (
+              <button
+                type="button"
+                style={{ ...buttonStyle, width: '100%', background: showInactiveCustomers ? '#0B1F3A' : '#E8EDF4', color: showInactiveCustomers ? '#FFFFFF' : '#0B1F3A' }}
+                onClick={handleToggleInactiveCustomers}
+                disabled={loadingInactiveCustomers}
+              >
+                {loadingInactiveCustomers ? 'Loading customers...' : showInactiveCustomers ? 'Hide customers not ordered in 15+ days' : 'Customers not ordered in 15+ days'}
+              </button>
+            ) : null}
 
             {showInactiveCustomers ? (
-              <div style={{ marginTop: 16 }}>
+              <div style={{ marginTop: isStaff ? 0 : 16 }}>
                 <label style={labelStyle}>
                   Search follow-up customers
                   <input
@@ -645,7 +708,6 @@ const Customers = () => {
                                   <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                                 </div>
                               ) : null}
-                              <div style={{ color: '#67738E', fontSize: 11 }}>{customer.mobile}</div>
                             </td>
                             <td style={{ ...cellStyle, color: '#B7791F', fontWeight: 900 }}>
                               {daysSinceLastOrder === null ? '-' : `${daysSinceLastOrder} day(s)`}
@@ -674,13 +736,14 @@ const Customers = () => {
         <div style={cardStyle}>
           <div style={{ position: 'relative', marginBottom: 16 }}>
             <label style={labelStyle}>
-              Search by Name, Mobile, or Area
+              Search by Name or Area
               <input
                 style={inputStyle}
                 value={searchText}
                 onFocus={() => setShowSearchSuggestions(true)}
                 onChange={(event) => {
                   setSearchText(event.target.value);
+                  setSelectedSearchCustomerId('');
                   setShowSearchSuggestions(true);
                 }}
                 placeholder="Type at least 2 letters, e.g. ab"
@@ -695,105 +758,45 @@ const Customers = () => {
                     type="button"
                     style={{ display: 'block', width: '100%', padding: 12, textAlign: 'left', background: '#FFFFFF', border: 0, borderBottom: '1px solid #EEF2F6', cursor: 'pointer' }}
                     onClick={() => {
-                      setSearchText(customer.name);
+                      setSearchText(formatCustomerSelectLabel(customer));
+                      setSelectedSearchCustomerId(customer.id);
                       setShowSearchSuggestions(false);
-                      setCustomerLimit(SELECTED_CUSTOMER_PAGE_SIZE);
                     }}
                   >
                     <strong>{customer.name}</strong>
-                    <div style={{ color: '#67738E', fontSize: 12 }}>{customer.mobile} | {customer.area}</div>
+                    <div style={{ color: '#67738E', fontSize: 12 }}>{customer.area || 'No area'}</div>
                   </button>
                 ))}
               </div>
             ) : null}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-            <button
-              type="button"
-              style={{ ...buttonStyle, background: showFullTable ? '#0B1F3A' : '#E8EDF4', color: showFullTable ? '#FFFFFF' : '#0B1F3A' }}
-              onClick={() => setShowFullTable((current) => !current)}
-            >
-              {showFullTable ? 'Compact View' : 'View Full'}
-            </button>
-          </div>
           <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
-            {searchText.trim() ? latestEntriesNotice : 'Search to show matching customers.'}
+            {selectedSearchCustomerId ? 'Selected customer only.' : searchText.trim() ? 'Matching customers.' : 'Search to show matching customers.'}
           </div>
-          {showFullTable ? (
-            <div style={{ ...latestFiveScrollStyle, display: 'grid', gap: 12 }}>
-              {loading || loadingSearchCustomers ? (
-                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>Loading customers...</div>
-              ) : filteredCustomers.length === 0 ? (
-                <div style={{ ...cellStyle, border: '1px solid #E8EDF4', borderRadius: 12 }}>
-                  {searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}
-                </div>
-              ) : (
-                filteredCustomers.map((customer) => {
-                  const outstanding = outstandingByCustomerId.get(customer.id);
-                  const giftBudget = giftBudgetByCustomerId.get(customer.id) ?? 0;
-
-                  return (
-                    <div key={customer.id} style={{ border: '1px solid #E8EDF4', borderRadius: 12, padding: 12, background: '#FFFFFF' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
-                        <div>
-                          <div style={{ fontWeight: 900 }}>{customer.name}</div>
-                          <div style={{ color: '#67738E', fontSize: 12 }}>{customer.mobile}</div>
-                          {customer.area ? <div style={{ color: '#0B1F3A', fontSize: 12, fontWeight: 800 }}>Area: {customer.area}</div> : null}
-                          {customer.status ? <div style={{ color: '#67738E', fontSize: 12 }}>Status: {customer.status}</div> : null}
-                        </div>
-                        <TierBadge tier={customer.tier} />
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: 10 }}>
-                        <div><strong>Invoice Sales</strong><div>{formatMoney(outstanding?.totalSales ?? 0)}</div></div>
-                        <div><strong>Payments</strong><div>{formatMoney(outstanding?.totalPayments ?? 0)}</div></div>
-                        <div><strong>Previous Outstanding</strong><div>{formatMoney(outstanding?.previousOutstanding ?? 0)}</div></div>
-                        <div><strong>Invoice Outstanding</strong><div>{formatMoney(outstanding?.newOutstanding ?? 0)}</div></div>
-                        <div><strong>Total</strong><div>{formatMoney(outstanding?.outstanding ?? 0)}</div></div>
-                        <div><strong>Overdue</strong><div>{formatMoney(outstanding?.overdueAmount ?? 0)} | {outstanding?.overdueDays ?? 0} day(s)</div></div>
-                        <div><strong>PC Points</strong><div>{formatMoney(giftBudget)}</div></div>
-                        <div><strong>PC Status</strong><div>{giftBudget > 0 ? 'PC eligible' : 'No PC points yet'}</div></div>
-                        <div><strong>Payment Terms</strong><div>{customer.paymentTerms || '-'}</div></div>
-                        <div><strong>Notes</strong><div>{customer.notes || '-'}</div></div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-                        <button type="button" style={{ ...buttonStyle, padding: '8px 11px', background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => handleEdit(customer)}>
-                          Edit
-                        </button>
-                        {canDeleteRecords ? (
-                          <button type="button" style={{ ...buttonStyle, padding: '8px 11px', background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(customer)}>
-                            Delete
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          ) : (
           <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
             <table style={compactTableStyle}>
               <thead>
                   <tr>
-                    <th style={{ ...headerCellStyle, width: '42%' }}>Customer</th>
-                    <th style={{ ...headerCellStyle, width: '22%' }}>Total</th>
-                    <th style={{ ...headerCellStyle, width: '18%' }}>Overdue</th>
-                    <th style={{ ...headerCellStyle, width: '18%' }}>Action</th>
+                    <th style={{ ...headerCellStyle, width: '50%' }}>Customer</th>
+                    <th style={{ ...headerCellStyle, width: '25%' }}>Total</th>
+                    <th style={{ ...headerCellStyle, width: '25%' }}>Action</th>
                   </tr>
               </thead>
               <tbody>
                 {loading || loadingSearchCustomers ? (
-                  <tr><td style={cellStyle} colSpan={4}>Loading customers...</td></tr>
+                  <tr><td style={cellStyle} colSpan={3}>Loading customers...</td></tr>
                 ) : filteredCustomers.length === 0 ? (
-                  <tr><td style={cellStyle} colSpan={4}>{searchText.trim() ? 'No customers found.' : 'Search by name, mobile, or area to show customers.'}</td></tr>
+                  <tr><td style={cellStyle} colSpan={3}>{searchText.trim() ? 'No customers found.' : 'Search by name or area to show customers.'}</td></tr>
                 ) : (
-                  filteredCustomers.map((customer) => (
+                  filteredCustomers.map((customer) => {
+                    const storedTotal = getStoredCustomerTotal(customer);
+                    const totalColor = storedTotal <= 0 ? '#1B7F3A' : '#B7791F';
+
+                    return (
                     <tr key={customer.id}>
                       {/*
-                        Business totals are calculated from invoices/payments so the customer master record stays clean.
+                        Customer total mirrors the stored customer value shown in the customer portal.
                         Future edit point: add credit-limit logic beside these indicators.
                       */}
                         <>
@@ -805,15 +808,10 @@ const Customers = () => {
                                 <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                               </div>
                             ) : null}
-                            <div style={{ color: '#67738E', fontSize: 11 }}>{customer.mobile}</div>
                             {customer.status ? <div style={{ color: '#67738E', fontSize: 11 }}>Status: {customer.status}</div> : null}
                           </td>
-                          <td style={{ ...cellStyle, color: outstandingByCustomerId.get(customer.id)?.indicator === 'green' ? '#1B7F3A' : outstandingByCustomerId.get(customer.id)?.indicator === 'yellow' ? '#B7791F' : '#B42318', fontWeight: 800 }}>
-                            {formatMoney(outstandingByCustomerId.get(customer.id)?.outstanding ?? 0)}
-                          </td>
-                          <td style={{ ...cellStyle, color: (outstandingByCustomerId.get(customer.id)?.overdueAmount ?? 0) > 0 ? '#B42318' : '#1B7F3A', fontWeight: 800 }}>
-                            {formatMoney(outstandingByCustomerId.get(customer.id)?.overdueAmount ?? 0)}
-                            <div style={{ color: '#67738E', fontSize: 11 }}>{outstandingByCustomerId.get(customer.id)?.overdueDays ?? 0} day(s)</div>
+                          <td style={{ ...cellStyle, color: totalColor, fontWeight: 800 }}>
+                            {formatMoney(storedTotal)}
                           </td>
                           <td style={cellStyle}>
                             <button type="button" style={{ ...compactActionButtonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => handleEdit(customer)}>
@@ -827,17 +825,12 @@ const Customers = () => {
                           </td>
                         </>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
-          )}
-          {!loading && customers.length >= customerLimit ? (
-            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMoreCustomers}>
-              Load 5 more
-            </button>
-          ) : null}
         </div>
       </div>
     </div>

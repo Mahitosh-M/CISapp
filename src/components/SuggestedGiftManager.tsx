@@ -81,7 +81,7 @@ const SuggestedGiftManager = () => {
     if (!searchTerm) return sortedSuggestedRows;
 
     return sortedSuggestedRows.filter((row) =>
-      [row.customer.name, row.customer.mobile, row.customer.area].some((value) => value.toLowerCase().includes(searchTerm))
+      [row.customer.name, row.customer.area].some((value) => value.toLowerCase().includes(searchTerm))
     );
   }, [customerSearchText, sortedSuggestedRows]);
 
@@ -329,7 +329,7 @@ const SuggestedGiftManager = () => {
               style={{ ...inputStyle, marginTop: 6 }}
               value={customerSearchText}
               onChange={(event) => setCustomerSearchText(event.target.value)}
-              placeholder="Name, mobile, or area"
+              placeholder="Name or area"
             />
           </label>
           <label style={{ fontWeight: 800 }}>

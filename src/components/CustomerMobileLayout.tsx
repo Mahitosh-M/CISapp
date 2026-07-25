@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useOutletContext } from 'react-router-dom';
-import { Bell, CalendarDays, Coins, FileText, Gift, Home, Sparkles, Tags, Wallet } from 'lucide-react';
+import { CalendarDays, Coins, FileText, Gift, Home, ShoppingCart, Sparkles, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ExternalImage from './ExternalImage';
@@ -20,6 +20,8 @@ const navItems = [
 
 const getPcBalanceStorageKey = (userId?: string, customerId?: string) =>
   `customerPcBalanceSeen_${userId || customerId || 'customerPortal'}`;
+
+const ORDER_APP_URL = 'https://orderapp-35200.web.app';
 
 const CustomerMobileLayout = () => {
   const portalData = useCustomerPortalData();
@@ -83,6 +85,14 @@ const CustomerMobileLayout = () => {
     navigate('/customer/offers');
   };
 
+  const openOrderApp = () => {
+    const orderUrl = new URL(ORDER_APP_URL);
+    orderUrl.searchParams.set('name', customerHeading);
+    orderUrl.searchParams.set('role', 'customer');
+    orderUrl.searchParams.set('returnUrl', window.location.href);
+    window.open(orderUrl.toString(), '_blank', 'noopener,noreferrer');
+  };
+
   const closeBonus = async () => {
     if (!latestUnreadBonus) return;
 
@@ -108,20 +118,20 @@ const CustomerMobileLayout = () => {
   return (
     <div style={{ minHeight: '100vh', background: '#EEF2F7', color: '#0B1F3A', maxWidth: 460, margin: '0 auto', position: 'relative' }}>
       <header style={{ background: '#0B1F3A', color: '#FFFFFF', padding: '18px 18px 24px', borderBottomLeftRadius: 26, borderBottomRightRadius: 26 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>{customerHeading}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 10 }}>
+            <button type="button" onClick={openOrderApp} style={{ border: 0, borderRadius: 12, background: '#D4AF37', color: '#0B1F3A', padding: '9px 12px', fontWeight: 900, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <ShoppingCart size={16} />
+              Order
+            </button>
+          <div style={{ textAlign: 'center', minWidth: 0 }}>
+            <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18, overflowWrap: 'anywhere' }}>{customerHeading}</div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 8, background: '#D4AF37', color: '#0B1F3A', borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 900, boxShadow: '0 8px 18px rgba(212,175,55,0.24)', letterSpacing: 0 }}>
               <span>{customerPartnerLevel}</span>
             </div>
           </div>
-          <button type="button" onClick={logout} style={{ border: 0, borderRadius: 12, background: '#D4AF37', color: '#0B1F3A', padding: '9px 12px', fontWeight: 900 }}>
-            Logout
-          </button>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 16, color: '#DDE6F2', fontSize: 13 }}>
-          <Bell size={16} color="#D4AF37" />
-          Your purchases, payments, and due invoices only.
+            <button type="button" onClick={logout} style={{ border: 0, borderRadius: 12, background: '#FFFFFF', color: '#0B1F3A', padding: '9px 12px', fontWeight: 900, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              Logout
+            </button>
         </div>
       </header>
 
