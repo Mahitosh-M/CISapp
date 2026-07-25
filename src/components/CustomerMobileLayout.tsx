@@ -89,6 +89,8 @@ const CustomerMobileLayout = () => {
     const orderUrl = new URL(ORDER_APP_URL);
     orderUrl.searchParams.set('name', customerHeading);
     orderUrl.searchParams.set('role', 'customer');
+    orderUrl.searchParams.set('customerId', portalData.customer?.id || customerHeading);
+    orderUrl.searchParams.set('area', portalData.customer?.area || '');
     orderUrl.searchParams.set('returnUrl', window.location.href);
     window.open(orderUrl.toString(), '_blank', 'noopener,noreferrer');
   };
