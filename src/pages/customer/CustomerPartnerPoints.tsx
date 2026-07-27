@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { UIEvent, useEffect, useRef, useState } from 'react';
 import { Award, Wallet } from 'lucide-react';
 import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
@@ -18,7 +18,7 @@ const customerPromoCardStyle = {
 const customerPromoImageStyle = {
   width: '100%',
   height: 'auto',
-  maxHeight: 260,
+  maxHeight: 88,
   objectFit: 'contain' as const,
   borderRadius: 14,
   display: 'block',
@@ -26,17 +26,53 @@ const customerPromoImageStyle = {
   background: '#F8F9FB'
 };
 
+const REWARD_CARD_HEIGHT = 228;
+const REWARD_WHEEL_VISIBLE_ITEMS = 3;
+
 const CustomerPartnerPoints = () => {
   const { customer, apcSummary, availableRewards, redemptionRequests, refreshData } = useCustomerPortalContext();
   const [redemptionMessage, setRedemptionMessage] = useState('');
   const [redemptionError, setRedemptionError] = useState('');
   const [requestingRewardId, setRequestingRewardId] = useState('');
+  const [activeRewardIndex, setActiveRewardIndex] = useState(0);
+  const rewardWheelRef = useRef<HTMLDivElement>(null);
+  const snapTimerRef = useRef<number | undefined>(undefined);
   const latestRequestByRewardId = sortNewestFirst(redemptionRequests, ['reviewedAt', 'requestedAt']).reduce((requestMap, request) => {
     if (!requestMap.has(request.rewardId)) {
       requestMap.set(request.rewardId, request);
     }
     return requestMap;
   }, new Map<string, (typeof redemptionRequests)[number]>());
+
+  const rewardWheelHeight = REWARD_CARD_HEIGHT * REWARD_WHEEL_VISIBLE_ITEMS;
+  const rewardWheelCenterPadding = ((REWARD_WHEEL_VISIBLE_ITEMS - 1) / 2) * REWARD_CARD_HEIGHT;
+
+  useEffect(() => {
+    setActiveRewardIndex(0);
+    rewardWheelRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [availableRewards.length]);
+
+  useEffect(() => {
+    return () => {
+      if (snapTimerRef.current) {
+        window.clearTimeout(snapTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleRewardWheelScroll = (event: UIEvent<HTMLDivElement>) => {
+    const nextIndex = Math.min(Math.max(Math.round(event.currentTarget.scrollTop / REWARD_CARD_HEIGHT), 0), availableRewards.length - 1);
+    setActiveRewardIndex(nextIndex);
+
+    if (snapTimerRef.current) {
+      window.clearTimeout(snapTimerRef.current);
+    }
+
+    snapTimerRef.current = window.setTimeout(() => {
+      const committedIndex = Math.min(Math.max(Math.round(event.currentTarget.scrollTop / REWARD_CARD_HEIGHT), 0), availableRewards.length - 1);
+      setActiveRewardIndex(committedIndex);
+    }, 90);
+  };
 
   const handleRewardRequest = async (rewardId: string) => {
     if (!customer) return;
@@ -76,54 +112,78 @@ const CustomerPartnerPoints = () => {
         {availableRewards.length === 0 ? (
           <div style={{ color: '#67738E', fontSize: 13 }}>No rewards are available for your current partner level yet.</div>
         ) : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {availableRewards.map((reward) => {
+          <div className="customer-reward-wheel" style={{ height: rewardWheelHeight }}>
+            <div className="customer-reward-wheel-guides" aria-hidden="true" />
+            <div
+              ref={rewardWheelRef}
+              className="customer-reward-wheel-scroll"
+              style={{
+                paddingTop: rewardWheelCenterPadding,
+                paddingBottom: rewardWheelCenterPadding,
+                scrollSnapType: 'y mandatory'
+              }}
+              onScroll={handleRewardWheelScroll}
+            >
+              {availableRewards.map((reward, index) => {
               const rewardRequest = latestRequestByRewardId.get(reward.id);
               const hasEnoughApc = (apcSummary?.apcBalance ?? 0) >= reward.requiredPoints;
               const isRequested = rewardRequest?.status === 'Pending' || rewardRequest?.status === 'Approved';
               const isGifted = rewardRequest?.status === 'Gifted';
               const buttonText = isGifted ? 'Gifted' : isRequested ? 'Requested' : requestingRewardId === reward.id ? 'Sending' : 'Request';
               const isButtonDisabled = !hasEnoughApc || isRequested || isGifted || requestingRewardId === reward.id;
+              const distance = Math.min(Math.abs(index - activeRewardIndex), 3);
 
               return (
-                <div key={reward.id} style={customerPromoCardStyle}>
-                  {reward.imageUrl ? (
-                    <ExternalImage
-                      src={reward.imageUrl}
-                      alt={reward.name}
-                      style={customerPromoImageStyle}
-                    />
-                  ) : null}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                    <div>
-                      <div style={{ color: '#FFFFFF', fontSize: 19, fontWeight: 900, lineHeight: 1.15 }}>{reward.name}</div>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '5px 9px', fontSize: 11, fontWeight: 900, marginTop: 7 }}>
-                        {formatApc(reward.requiredPoints)} PC | {reward.levelRequired}
+                <div
+                  key={reward.id}
+                  className="customer-reward-wheel-item"
+                  style={{
+                    height: REWARD_CARD_HEIGHT,
+                    scrollSnapAlign: 'center',
+                    opacity: Math.max(0.32, 1 - distance * 0.22),
+                    transform: `perspective(760px) rotateX(${index < activeRewardIndex ? 7 * distance : -7 * distance}deg) scale(${1 - distance * 0.04})`
+                  }}
+                >
+                  <div style={{ ...customerPromoCardStyle, height: REWARD_CARD_HEIGHT - 16 }}>
+                    {reward.imageUrl ? (
+                      <ExternalImage
+                        src={reward.imageUrl}
+                        alt={reward.name}
+                        style={customerPromoImageStyle}
+                      />
+                    ) : null}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 900, lineHeight: 1.16 }}>{reward.name}</div>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '5px 9px', fontSize: 11, fontWeight: 900, marginTop: 7 }}>
+                          {formatApc(reward.requiredPoints)} PC | {reward.levelRequired}
+                        </div>
+                        {reward.description ? <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 7, lineHeight: 1.45 }}>{reward.description}</div> : null}
                       </div>
-                      {reward.description ? <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 7, lineHeight: 1.45 }}>{reward.description}</div> : null}
+                      <button
+                        type="button"
+                        onClick={() => handleRewardRequest(reward.id)}
+                        disabled={isButtonDisabled}
+                        style={{
+                          border: 0,
+                          borderRadius: 999,
+                          background: isGifted ? '#EAF7EE' : isRequested || !hasEnoughApc ? '#E8EDF4' : 'linear-gradient(135deg, #FFF7D6 0%, #D4AF37 70%, #B88912 100%)',
+                          color: isGifted ? '#166534' : isRequested || !hasEnoughApc ? '#67738E' : '#0B1F3A',
+                          padding: '10px 12px',
+                          fontWeight: 900,
+                          boxShadow: isRequested || !hasEnoughApc ? 'none' : '0 8px 18px rgba(212,175,55,0.28)',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        <Award size={15} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                        {buttonText}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRewardRequest(reward.id)}
-                      disabled={isButtonDisabled}
-                      style={{
-                        border: 0,
-                        borderRadius: 999,
-                        background: isGifted ? '#EAF7EE' : isRequested || !hasEnoughApc ? '#E8EDF4' : 'linear-gradient(135deg, #FFF7D6 0%, #D4AF37 70%, #B88912 100%)',
-                        color: isGifted ? '#166534' : isRequested || !hasEnoughApc ? '#67738E' : '#0B1F3A',
-                        padding: '10px 12px',
-                        fontWeight: 900,
-                        boxShadow: isRequested || !hasEnoughApc ? 'none' : '0 8px 18px rgba(212,175,55,0.28)',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      <Award size={15} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-                      {buttonText}
-                    </button>
                   </div>
                 </div>
               );
-            })}
+              })}
+            </div>
           </div>
         )}
       </section>
