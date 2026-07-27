@@ -1,4 +1,5 @@
 import { UIEvent, useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Award, Wallet } from 'lucide-react';
 import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
@@ -26,8 +27,9 @@ const customerPromoImageStyle = {
   background: '#F8F9FB'
 };
 
-const REWARD_CARD_HEIGHT = 420;
-const REWARD_WHEEL_VISIBLE_ITEMS = 1.45;
+const DEFAULT_REWARD_SLOT_HEIGHT = 360;
+const REWARD_WHEEL_VERTICAL_GAP = 8;
+const REWARD_WHEEL_MIN_PEEK = 56;
 
 const CustomerPartnerPoints = () => {
   const { customer, apcSummary, availableRewards, redemptionRequests, refreshData } = useCustomerPortalContext();
@@ -35,7 +37,10 @@ const CustomerPartnerPoints = () => {
   const [redemptionError, setRedemptionError] = useState('');
   const [requestingRewardId, setRequestingRewardId] = useState('');
   const [activeRewardIndex, setActiveRewardIndex] = useState(0);
+  const [rewardSlotHeight, setRewardSlotHeight] = useState(DEFAULT_REWARD_SLOT_HEIGHT);
+  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === 'undefined' ? 720 : window.innerHeight));
   const rewardWheelRef = useRef<HTMLDivElement>(null);
+  const firstRewardCardRef = useRef<HTMLDivElement | null>(null);
   const snapTimerRef = useRef<number | undefined>(undefined);
   const latestRequestByRewardId = sortNewestFirst(redemptionRequests, ['reviewedAt', 'requestedAt']).reduce((requestMap, request) => {
     if (!requestMap.has(request.rewardId)) {
@@ -44,13 +49,42 @@ const CustomerPartnerPoints = () => {
     return requestMap;
   }, new Map<string, (typeof redemptionRequests)[number]>());
 
-  const rewardWheelHeight = REWARD_CARD_HEIGHT * REWARD_WHEEL_VISIBLE_ITEMS;
-  const rewardWheelCenterPadding = ((REWARD_WHEEL_VISIBLE_ITEMS - 1) / 2) * REWARD_CARD_HEIGHT;
+  const rewardItemHeight = rewardSlotHeight + REWARD_WHEEL_VERTICAL_GAP;
+  const rewardWheelHeight = Math.max(
+    rewardSlotHeight,
+    Math.min(rewardItemHeight + REWARD_WHEEL_MIN_PEEK * 2, viewportHeight - 190)
+  );
+  const rewardWheelCenterPadding = Math.max(0, (rewardWheelHeight - rewardItemHeight) / 2);
 
   useEffect(() => {
     setActiveRewardIndex(0);
     rewardWheelRef.current?.scrollTo({ top: 0, behavior: 'auto' });
   }, [availableRewards.length]);
+
+  useEffect(() => {
+    const handleResize = () => setViewportHeight(window.innerHeight);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const cardElement = firstRewardCardRef.current;
+    if (!cardElement) return;
+
+    const updateSlotHeight = () => {
+      setRewardSlotHeight(Math.ceil(cardElement.getBoundingClientRect().height));
+    };
+
+    updateSlotHeight();
+    const resizeObserver = new ResizeObserver(updateSlotHeight);
+    resizeObserver.observe(cardElement);
+    return () => resizeObserver.disconnect();
+  }, [availableRewards.length]);
+
+  useEffect(() => {
+    rewardWheelRef.current?.scrollTo({ top: activeRewardIndex * rewardItemHeight, behavior: 'auto' });
+  }, [rewardItemHeight, availableRewards.length]);
 
   useEffect(() => {
     return () => {
@@ -61,7 +95,7 @@ const CustomerPartnerPoints = () => {
   }, []);
 
   const handleRewardWheelScroll = (event: UIEvent<HTMLDivElement>) => {
-    const nextIndex = Math.min(Math.max(Math.round(event.currentTarget.scrollTop / REWARD_CARD_HEIGHT), 0), availableRewards.length - 1);
+    const nextIndex = Math.min(Math.max(Math.round(event.currentTarget.scrollTop / rewardItemHeight), 0), availableRewards.length - 1);
     setActiveRewardIndex(nextIndex);
 
     if (snapTimerRef.current) {
@@ -69,7 +103,7 @@ const CustomerPartnerPoints = () => {
     }
 
     snapTimerRef.current = window.setTimeout(() => {
-      const committedIndex = Math.min(Math.max(Math.round(event.currentTarget.scrollTop / REWARD_CARD_HEIGHT), 0), availableRewards.length - 1);
+      const committedIndex = Math.min(Math.max(Math.round(event.currentTarget.scrollTop / rewardItemHeight), 0), availableRewards.length - 1);
       setActiveRewardIndex(committedIndex);
     }, 90);
   };
@@ -112,7 +146,15 @@ const CustomerPartnerPoints = () => {
         {availableRewards.length === 0 ? (
           <div style={{ color: '#67738E', fontSize: 13 }}>No rewards are available for your current partner level yet.</div>
         ) : (
-          <div className="customer-reward-wheel" style={{ height: rewardWheelHeight }}>
+          <div
+            className="customer-reward-wheel"
+            style={
+              {
+                height: rewardWheelHeight,
+                '--reward-slot-height': `${rewardSlotHeight}px`
+              } as CSSProperties
+            }
+          >
             <div className="customer-reward-wheel-guides" aria-hidden="true" />
             <div
               ref={rewardWheelRef}
@@ -138,13 +180,13 @@ const CustomerPartnerPoints = () => {
                   key={reward.id}
                   className="customer-reward-wheel-item"
                   style={{
-                    height: REWARD_CARD_HEIGHT,
+                    height: rewardItemHeight,
                     scrollSnapAlign: 'center',
                     opacity: Math.max(0.32, 1 - distance * 0.22),
                     transform: `perspective(760px) rotateX(${index < activeRewardIndex ? 7 * distance : -7 * distance}deg) scale(${1 - distance * 0.04})`
                   }}
                 >
-                  <div style={customerPromoCardStyle}>
+                  <div ref={index === 0 ? firstRewardCardRef : undefined} style={customerPromoCardStyle}>
                     {reward.imageUrl ? (
                       <ExternalImage
                         src={reward.imageUrl}

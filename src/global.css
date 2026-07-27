@@ -335,8 +335,8 @@ select:disabled {
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(50% - 210px);
-  height: 420px;
+  top: calc(50% - (var(--reward-slot-height, 360px) / 2));
+  height: var(--reward-slot-height, 360px);
   z-index: 9;
   border-top: 1px solid rgba(212, 175, 55, 0.78);
   border-bottom: 1px solid rgba(212, 175, 55, 0.78);
