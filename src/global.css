@@ -335,8 +335,8 @@ select:disabled {
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(50% - 114px);
-  height: 228px;
+  top: calc(50% - 210px);
+  height: 420px;
   z-index: 9;
   border-top: 1px solid rgba(212, 175, 55, 0.78);
   border-bottom: 1px solid rgba(212, 175, 55, 0.78);
@@ -358,6 +358,7 @@ select:disabled {
 .customer-reward-wheel-item {
   display: flex;
   align-items: center;
+  justify-content: center;
   transform-origin: center;
   transition: opacity 140ms ease, transform 140ms ease;
   will-change: opacity, transform;

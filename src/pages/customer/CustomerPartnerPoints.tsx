@@ -18,7 +18,7 @@ const customerPromoCardStyle = {
 const customerPromoImageStyle = {
   width: '100%',
   height: 'auto',
-  maxHeight: 88,
+  maxHeight: 260,
   objectFit: 'contain' as const,
   borderRadius: 14,
   display: 'block',
@@ -26,8 +26,8 @@ const customerPromoImageStyle = {
   background: '#F8F9FB'
 };
 
-const REWARD_CARD_HEIGHT = 228;
-const REWARD_WHEEL_VISIBLE_ITEMS = 3;
+const REWARD_CARD_HEIGHT = 420;
+const REWARD_WHEEL_VISIBLE_ITEMS = 1.45;
 
 const CustomerPartnerPoints = () => {
   const { customer, apcSummary, availableRewards, redemptionRequests, refreshData } = useCustomerPortalContext();
@@ -144,7 +144,7 @@ const CustomerPartnerPoints = () => {
                     transform: `perspective(760px) rotateX(${index < activeRewardIndex ? 7 * distance : -7 * distance}deg) scale(${1 - distance * 0.04})`
                   }}
                 >
-                  <div style={{ ...customerPromoCardStyle, height: REWARD_CARD_HEIGHT - 16 }}>
+                  <div style={customerPromoCardStyle}>
                     {reward.imageUrl ? (
                       <ExternalImage
                         src={reward.imageUrl}
