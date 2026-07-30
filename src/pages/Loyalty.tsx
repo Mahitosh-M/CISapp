@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import ExternalImage from '../components/ExternalImage';
+import IOSWheelPicker from '../components/IOSWheelPicker';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -49,6 +50,11 @@ const emptyOfferForm: OfferFormData = {
   endDate: '',
   isActive: true
 };
+
+const partnerLevelPickerOptions = PARTNER_LEVELS.map((level) => ({
+  label: level,
+  value: level
+}));
 
 const Loyalty = () => {
   const { userProfile } = useAuth();
@@ -480,15 +486,17 @@ const Loyalty = () => {
                   Optional poster image URL shown in the customer offer popup and carousel.
                 </span>
               </label>
-              <label style={{ fontWeight: 800 }}>
-                Level Required
-                <select style={inputStyle} value={offerForm.levelRequired} onChange={(event) => handleOfferFieldChange('levelRequired', event.target.value)}>
-                  {PARTNER_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
-                </select>
+              <div style={{ fontWeight: 800 }}>
+                <IOSWheelPicker
+                  label="Level Required"
+                  options={partnerLevelPickerOptions}
+                  value={offerForm.levelRequired}
+                  onChange={(nextLevel) => handleOfferFieldChange('levelRequired', nextLevel)}
+                />
                 <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
                   This level and higher can see it.
                 </span>
-              </label>
+              </div>
               <label style={{ fontWeight: 800 }}>
                 Start Date
                 <input style={inputStyle} type="date" value={offerForm.startDate} onChange={(event) => handleOfferFieldChange('startDate', event.target.value)} />
@@ -602,11 +610,15 @@ const Loyalty = () => {
             <div style={gridStyle}>
               <label style={{ fontWeight: 800 }}>Reward Name<input style={inputStyle} value={rewardForm.name} onChange={(event) => setRewardForm((current) => ({ ...current, name: event.target.value }))} /></label>
               <label style={{ fontWeight: 800 }}>Required Points<input style={inputStyle} type="number" min="0" value={rewardForm.requiredPoints} onChange={(event) => setRewardForm((current) => ({ ...current, requiredPoints: Number(event.target.value) || 0 }))} /></label>
-              <label style={{ fontWeight: 800 }}>
-                Level Required
-                <select style={inputStyle} value={rewardForm.levelRequired} onChange={(event) => setRewardForm((current) => ({ ...current, levelRequired: event.target.value as PartnerLevel }))}>{PARTNER_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select>
+              <div style={{ fontWeight: 800 }}>
+                <IOSWheelPicker
+                  label="Level Required"
+                  options={partnerLevelPickerOptions}
+                  value={rewardForm.levelRequired}
+                  onChange={(nextLevel) => setRewardForm((current) => ({ ...current, levelRequired: nextLevel }))}
+                />
                 <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>This level and higher can see it.</span>
-              </label>
+              </div>
               <label style={{ fontWeight: 800 }}>Status<select style={inputStyle} value={rewardForm.isActive ? 'active' : 'inactive'} onChange={(event) => setRewardForm((current) => ({ ...current, isActive: event.target.value === 'active' }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
               <label style={{ fontWeight: 800 }}>
                 Image URL fallback

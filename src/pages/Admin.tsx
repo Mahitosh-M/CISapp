@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { KeyRound, Mail, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { createCustomerAuthAccount, createStaffAuthAccount, sendUserPasswordResetEmail } from '../services/authService';
@@ -52,6 +53,9 @@ const Admin = () => {
 
   const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
   const isAdmin = userProfile?.role === 'Admin';
+  const staffUserCount = useMemo(() => users.filter((user) => user.role === 'Staff').length, [users]);
+  const adminUserCount = useMemo(() => users.filter((user) => user.role === 'Admin').length, [users]);
+  const customerUserCount = useMemo(() => users.filter((user) => user.role === 'customer').length, [users]);
 
   const handleCreateStaff = async (event: FormEvent) => {
     event.preventDefault();
@@ -167,6 +171,22 @@ const Admin = () => {
     marginBottom: 20
   };
 
+  const metricGridStyle: CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gap: 12,
+    marginBottom: 20
+  };
+
+  const metricCardStyle: CSSProperties = {
+    ...cardStyle,
+    marginBottom: 0,
+    padding: 16,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12
+  };
+
   const gridStyle: CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -223,15 +243,30 @@ const Admin = () => {
   }
 
   return (
-    <div>
+    <div className="admin-page">
       <SectionHeader title="Admin" description="Manage staff and user access." />
 
-      {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
-      {adminError ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{adminError}</div> : null}
-      {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
+      {error ? <div className="admin-alert admin-alert-error">{error}</div> : null}
+      {adminError ? <div className="admin-alert admin-alert-error">{adminError}</div> : null}
+      {message ? <div className="admin-alert admin-alert-success">{message}</div> : null}
 
-      <form style={cardStyle} onSubmit={handleCreateStaff}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Manage Staff Users</div>
+      <div style={metricGridStyle}>
+        <div className="admin-card admin-metric" style={metricCardStyle}>
+          <div className="admin-icon-badge"><ShieldCheck size={20} /></div>
+          <div><div className="admin-metric-value">{adminUserCount}</div><div className="admin-metric-label">Admins</div></div>
+        </div>
+        <div className="admin-card admin-metric" style={metricCardStyle}>
+          <div className="admin-icon-badge"><Users size={20} /></div>
+          <div><div className="admin-metric-value">{staffUserCount}</div><div className="admin-metric-label">Staff</div></div>
+        </div>
+        <div className="admin-card admin-metric" style={metricCardStyle}>
+          <div className="admin-icon-badge"><UserPlus size={20} /></div>
+          <div><div className="admin-metric-value">{customerUserCount}</div><div className="admin-metric-label">Customers</div></div>
+        </div>
+      </div>
+
+      <form className="admin-card" style={cardStyle} onSubmit={handleCreateStaff}>
+        <div className="admin-card-title"><UserPlus size={18} />Manage Staff Users</div>
         <div style={gridStyle}>
           <label style={{ fontWeight: 800 }}>Name<input style={inputStyle} value={staffName} onChange={(event) => setStaffName(event.target.value)} /></label>
           <label style={{ fontWeight: 800 }}>Email<input style={inputStyle} type="email" value={staffEmail} onChange={(event) => setStaffEmail(event.target.value)} /></label>
@@ -251,11 +286,13 @@ const Admin = () => {
             </select>
           </label>
         </div>
-        <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginTop: 16 }}>Create User</button>
+        <button className="admin-button admin-button-primary" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginTop: 16 }}>
+          <UserPlus size={16} />Create User
+        </button>
       </form>
 
-      <form style={cardStyle} onSubmit={handleCreateCustomerLogin}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Create Customer Login</div>
+      <form className="admin-card" style={cardStyle} onSubmit={handleCreateCustomerLogin}>
+        <div className="admin-card-title"><KeyRound size={18} />Create Customer Login</div>
         <div style={{ color: '#67738E', marginBottom: 12 }}>Admin creates customer credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
         <div style={gridStyle}>
           <label style={{ fontWeight: 800 }}>
@@ -263,7 +300,7 @@ const Admin = () => {
             <select style={inputStyle} value={customerLoginId} onChange={(event) => setCustomerLoginId(event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer, true)}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
             </select>
           </label>
@@ -277,17 +314,19 @@ const Admin = () => {
             </span>
           </label>
         </div>
-        <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 16 }}>Create Customer Login</button>
+        <button className="admin-button admin-button-gold" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 16 }}>
+          <KeyRound size={16} />Create Customer Login
+        </button>
       </form>
 
-      <div style={cardStyle}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Existing Users</div>
+      <div className="admin-card" style={cardStyle}>
+        <div className="admin-card-title"><Users size={18} />Existing Users</div>
         <div style={{ color: '#67738E', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
         {renderTable(
           ['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'],
           <>
             {sortedUsers.map((user) => (
-              <tr key={user.id}>
+              <tr className="admin-table-row" key={user.id}>
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>
                 <td style={cellStyle}>
@@ -298,13 +337,13 @@ const Admin = () => {
                   </select>
                 </td>
                 <td style={cellStyle}>{user.customerName || '-'}</td>
-                <td style={cellStyle}>{user.active ? 'Yes' : 'No'}</td>
+                <td style={cellStyle}><span className={user.active ? 'admin-status active' : 'admin-status inactive'}>{user.active ? 'Yes' : 'No'}</span></td>
                 <td style={cellStyle}>
-                  <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleSendPasswordReset(user)}>
-                    Reset Password
+                  <button className="admin-button admin-button-soft" type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleSendPasswordReset(user)}>
+                    <Mail size={15} />Reset Password
                   </button>
-                  <button type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>
-                    Delete User
+                  <button className="admin-button admin-button-danger" type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>
+                    <Trash2 size={15} />Delete User
                   </button>
                 </td>
               </tr>

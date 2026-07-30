@@ -1,0 +1,307 @@
+select {
+  appearance: auto !important;
+  -webkit-appearance: menulist !important;
+  background-color: #ffffff;
+  cursor: pointer;
+  min-height: 42px;
+  padding-right: 36px !important;
+}
+
+select:disabled {
+  cursor: not-allowed;
+}
+
+@keyframes adminFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.admin-page {
+  animation: adminFadeUp 260ms ease-out both;
+}
+
+.admin-card {
+  position: relative;
+  overflow: hidden;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.admin-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(11, 31, 58, 0));
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.admin-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 42px rgba(11, 31, 58, 0.13) !important;
+}
+
+.admin-card:hover::before {
+  opacity: 1;
+}
+
+.admin-card-title {
+  color: #d4af37;
+  font-weight: 900;
+  margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-metric {
+  animation: adminFadeUp 320ms ease-out both;
+}
+
+.admin-icon-badge {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #0b1f3a;
+  background: #f6e6a8;
+  box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.45);
+}
+
+.admin-metric-value {
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 900;
+  color: #0b1f3a;
+}
+
+.admin-metric-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #67738e;
+  font-weight: 800;
+}
+
+.admin-page input,
+.admin-page select {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.admin-page input:focus,
+.admin-page select:focus {
+  outline: none;
+  border-color: #d4af37 !important;
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.18);
+}
+
+.admin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease, opacity 150ms ease;
+}
+
+.admin-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(11, 31, 58, 0.16);
+  filter: brightness(1.02);
+}
+
+.admin-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.admin-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.admin-table-row {
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.admin-table-row:hover {
+  background: #fbfcff;
+  transform: translateX(2px);
+}
+
+.admin-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-status.active {
+  color: #166534;
+  background: #e8f5ec;
+}
+
+.admin-status.inactive {
+  color: #b42318;
+  background: #fdecec;
+}
+
+.admin-alert {
+  margin-bottom: 16px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  font-weight: 800;
+  animation: adminFadeUp 220ms ease-out both;
+}
+
+.admin-alert-error {
+  color: #fdecec;
+  background: rgba(180, 35, 24, 0.22);
+}
+
+.admin-alert-success {
+  color: #0b1f3a;
+  background: #f6e6a8;
+}
+
+.customer-action-tile:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 42px rgba(11, 31, 58, 0.14) !important;
+  border-color: rgba(212, 175, 55, 0.65) !important;
+}
+
+.customer-action-tile:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.customer-action-tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+@media (max-width: 640px) {
+  .admin-button {
+    width: 100%;
+    margin-right: 0 !important;
+    margin-bottom: 8px;
+  }
+
+  .customer-action-tile {
+    min-height: 92px !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .customer-action-tile {
+    padding: 12px !important;
+  }
+}
+
+.ios-wheel-picker {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.ios-wheel-picker-label {
+  margin-bottom: 8px;
+  color: #0b1f3a;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.ios-wheel-picker-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #e8edf4;
+  border-radius: 12px;
+  background: #f8f9fb;
+  box-shadow: inset 0 14px 22px rgba(11, 31, 58, 0.07), inset 0 -14px 22px rgba(11, 31, 58, 0.07);
+}
+
+.ios-wheel-picker-frame::before,
+.ios-wheel-picker-frame::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  height: 38%;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.ios-wheel-picker-frame::before {
+  top: 0;
+  background: linear-gradient(180deg, #f8f9fb 0%, rgba(248, 249, 251, 0.82) 48%, rgba(248, 249, 251, 0) 100%);
+}
+
+.ios-wheel-picker-frame::after {
+  bottom: 0;
+  background: linear-gradient(0deg, #f8f9fb 0%, rgba(248, 249, 251, 0.82) 48%, rgba(248, 249, 251, 0) 100%);
+}
+
+.ios-wheel-picker-guides {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - 22px);
+  height: 44px;
+  z-index: 10;
+  border-top: 1px solid rgba(212, 175, 55, 0.78);
+  border-bottom: 1px solid rgba(212, 175, 55, 0.78);
+  background: rgba(255, 255, 255, 0.44);
+  pointer-events: none;
+}
+
+.ios-wheel-picker-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+
+.ios-wheel-picker-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.ios-wheel-picker-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: #0b1f3a;
+  cursor: pointer;
+  font-weight: 900;
+  text-align: center;
+  transform-origin: center;
+  transition: opacity 120ms ease, transform 120ms ease, color 120ms ease;
+}
+
+.ios-wheel-picker-item[aria-selected="true"] {
+  color: #0b1f3a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.ios-wheel-picker-item:disabled {
+  cursor: not-allowed;
+}
+
+.ios-wheel-picker-scroll:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 3px rgba(212, 175, 55, 0.18);
+}
+

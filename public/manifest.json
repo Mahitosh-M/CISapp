@@ -2,12 +2,16 @@
   "name": "COINS Partner App",
   "short_name": "COINS",
   "description": "Customer reward app for invoices, offers, outstanding and Partner Coin rewards.",
+  "id": "/",
   "start_url": "/customer",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#061B3A",
   "theme_color": "#061B3A",
   "orientation": "portrait",
+  "prefer_related_applications": false,
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
