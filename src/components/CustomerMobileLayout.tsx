@@ -7,7 +7,7 @@ import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { markBonusPcRequestSeen } from '../services/firestoreService';
 import { formatApc } from '../utils/loyalty';
-import { getTierDisplayName } from '../utils/tiers';
+import { getTierColors, getTierDisplayName } from '../utils/tiers';
 
 const navItems = [
   { to: '/customer', label: 'Home', icon: Home, end: true },
@@ -29,6 +29,7 @@ const CustomerMobileLayout = () => {
   const [pcBalancePopup, setPcBalancePopup] = useState<{ change: number; balance: number } | null>(null);
   const customerHeading = (portalData.customer?.name || portalData.userProfile?.customerName || portalData.userProfile?.email || 'Customer').toUpperCase();
   const customerPartnerLevel = getTierDisplayName(portalData.customer?.tier);
+  const customerTierColors = getTierColors(portalData.customer?.tier ?? 'Tier 4');
   const pcBalance = portalData.apcSummary?.apcBalance ?? 0;
   const pcBalanceStorageKey = getPcBalanceStorageKey(portalData.userProfile?.uid, portalData.customer?.id);
   const showOrderHome = portalData.settings.turnOnOrder;
@@ -109,7 +110,7 @@ const CustomerMobileLayout = () => {
           )}
           <div style={{ textAlign: 'center', minWidth: 0 }}>
             <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18, overflowWrap: 'anywhere' }}>{customerHeading}</div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 8, background: '#D4AF37', color: '#11185A', borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 900, boxShadow: '0 8px 18px rgba(212,175,55,0.24)', letterSpacing: 0 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 8, background: customerTierColors.background, color: customerTierColors.color, border: `1px solid ${customerTierColors.border}`, borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 900, boxShadow: '0 8px 18px rgba(0,0,0,0.24)', letterSpacing: 0 }}>
               <span>{customerPartnerLevel}</span>
             </div>
           </div>

@@ -163,10 +163,10 @@ const Admin = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 16,
     padding: 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -212,21 +212,21 @@ const Admin = () => {
 
   const headerCellStyle: CSSProperties = {
     padding: 12,
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4',
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)',
     textAlign: 'left',
     fontWeight: 900
   };
 
   const cellStyle: CSSProperties = {
     padding: 12,
-    borderBottom: '1px solid #E8EDF4',
+    borderBottom: '1px solid var(--role-card-border)',
     verticalAlign: 'top'
   };
 
   const renderTable = (headers: string[], body: JSX.Element) => (
     <>
-      <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+      <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
       <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
       <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
         <thead>
@@ -273,7 +273,7 @@ const Admin = () => {
           <label style={{ fontWeight: 800 }}>
             Password
             <input style={inputStyle} type={showStaffPassword ? 'text' : 'password'} value={staffPassword} onChange={(event) => setStaffPassword(event.target.value)} />
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#67738E', fontSize: 12, marginTop: 8 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#D7DEEA', fontSize: 12, marginTop: 8 }}>
               <input type="checkbox" checked={showStaffPassword} onChange={(event) => setShowStaffPassword(event.target.checked)} />
               Show password while creating
             </span>
@@ -293,7 +293,7 @@ const Admin = () => {
 
       <form className="admin-card" style={cardStyle} onSubmit={handleCreateCustomerLogin}>
         <div className="admin-card-title"><KeyRound size={18} />Create Customer Login</div>
-        <div style={{ color: '#67738E', marginBottom: 12 }}>Admin creates customer credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
+        <div style={{ color: '#D7DEEA', marginBottom: 12 }}>Admin creates customer credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
         <div style={gridStyle}>
           <label style={{ fontWeight: 800 }}>
             Link Customer
@@ -308,7 +308,7 @@ const Admin = () => {
           <label style={{ fontWeight: 800 }}>
             Password
             <input style={inputStyle} type={showCustomerLoginPassword ? 'text' : 'password'} value={customerLoginPassword} onChange={(event) => setCustomerLoginPassword(event.target.value)} />
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#67738E', fontSize: 12, marginTop: 8 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#D7DEEA', fontSize: 12, marginTop: 8 }}>
               <input type="checkbox" checked={showCustomerLoginPassword} onChange={(event) => setShowCustomerLoginPassword(event.target.checked)} />
               Show password while creating
             </span>
@@ -321,7 +321,7 @@ const Admin = () => {
 
       <div className="admin-card" style={cardStyle}>
         <div className="admin-card-title"><Users size={18} />Existing Users</div>
-        <div style={{ color: '#67738E', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
+        <div style={{ color: '#D7DEEA', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
         {renderTable(
           ['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'],
           <>

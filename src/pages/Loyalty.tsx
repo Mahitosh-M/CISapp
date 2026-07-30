@@ -353,10 +353,10 @@ const Loyalty = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 12,
     padding: 18,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -393,13 +393,13 @@ const Loyalty = () => {
   const thStyle: CSSProperties = {
     textAlign: 'left',
     padding: 12,
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4'
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)'
   };
 
   const tdStyle: CSSProperties = {
     padding: 12,
-    borderBottom: '1px solid #E8EDF4'
+    borderBottom: '1px solid var(--role-card-border)'
   };
 
   const removeApproval = async (request: RedemptionRequest) => {
@@ -463,7 +463,7 @@ const Loyalty = () => {
 
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>{editingOfferId ? 'Edit Offer' : 'Create Offer'}</div>
-        <div style={{ color: '#67738E', marginBottom: 12 }}>
+        <div style={{ color: '#D7DEEA', marginBottom: 12 }}>
           Active offers appear in the customer popup and Offers carousel. Inactive offers stay saved but are hidden from customers.
         </div>
         {isAdmin ? (
@@ -476,7 +476,7 @@ const Loyalty = () => {
               <label style={{ fontWeight: 800 }}>
                 Image URL fallback
                 <input style={inputStyle} value={offerForm.imageUrl} onChange={(event) => handleOfferFieldChange('imageUrl', event.target.value)} />
-                <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
+                <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 6 }}>
                   Optional poster image URL shown on the customer Offers page cards.
                 </span>
               </label>
@@ -491,7 +491,7 @@ const Loyalty = () => {
                     <option key={level} value={level}>{level}</option>
                   ))}
                 </select>
-                <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
+                <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 6 }}>
                   This level and higher can see it.
                 </span>
               </label>
@@ -513,7 +513,7 @@ const Loyalty = () => {
             </div>
             {offerImagePreviewSource ? (
               <div style={{ marginTop: 14, border: '1px solid #E8EDF4', borderRadius: 14, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
                   Image preview
                 </div>
                 <ExternalImage
@@ -574,7 +574,7 @@ const Loyalty = () => {
                     <td style={tdStyle}>{offer.levelRequired || 'Active Partner'}</td>
                     <td style={tdStyle}>{getOfferDateRangeLabel(offer)}</td>
                     <td style={{ ...tdStyle, color: offer.isActive ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{offer.isActive ? 'Active' : 'Inactive'}</td>
-                    <td style={{ ...tdStyle, color: visibleToCustomers ? '#1B7F3A' : '#67738E', fontWeight: 900 }}>
+                    <td style={{ ...tdStyle, color: visibleToCustomers ? '#1B7F3A' : '#D7DEEA', fontWeight: 900 }}>
                       {visibleToCustomers ? 'Visible' : 'Hidden'}
                     </td>
                     <td style={tdStyle}>{offer.imageUrl ? 'URL' : 'No'}</td>
@@ -619,7 +619,7 @@ const Loyalty = () => {
                     <option key={level} value={level}>{level}</option>
                   ))}
                 </select>
-                <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>This level and higher can see it.</span>
+                <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 6 }}>This level and higher can see it.</span>
               </label>
               <label style={{ fontWeight: 800 }}>Status<select style={inputStyle} value={rewardForm.isActive ? 'active' : 'inactive'} onChange={(event) => setRewardForm((current) => ({ ...current, isActive: event.target.value === 'active' }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
               <label style={{ fontWeight: 800 }}>
@@ -630,7 +630,7 @@ const Loyalty = () => {
             </div>
             {rewardImagePreviewSource ? (
               <div style={{ marginTop: 14, border: '1px solid #E8EDF4', borderRadius: 14, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800, marginBottom: 8 }}>
                   Image preview
                 </div>
                 <ExternalImage
@@ -730,7 +730,7 @@ const Loyalty = () => {
 
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Reward History</div>
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={{ ...tableStyle, minWidth: 980 }}>
             <thead>

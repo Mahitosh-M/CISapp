@@ -309,10 +309,10 @@ const OverduePcRequests = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 12,
     padding: 18,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -334,13 +334,13 @@ const OverduePcRequests = () => {
   const thStyle: CSSProperties = {
     textAlign: 'left',
     padding: 12,
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4'
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)'
   };
 
   const tdStyle: CSSProperties = {
     padding: 12,
-    borderBottom: '1px solid #E8EDF4',
+    borderBottom: '1px solid var(--role-card-border)',
     verticalAlign: 'top'
   };
 
@@ -359,7 +359,7 @@ const OverduePcRequests = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Customer PC Balance</div>
-            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>View available, incoming, and redeemed Partner Coins.</div>
+            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>View available, incoming, and redeemed Partner Coins.</div>
           </div>
           <button type="button" onClick={() => setShowPcViewer((current) => !current)} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }}>
             VIEW PC
@@ -382,17 +382,17 @@ const OverduePcRequests = () => {
               </select>
             </label>
 
-            {loadingPcView ? <div style={{ color: '#67738E', fontWeight: 800 }}>Loading PC details...</div> : null}
+            {loadingPcView ? <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Loading PC details...</div> : null}
 
             {customerPcView && !loadingPcView ? (
               <>
-                <div style={{ padding: 16, borderRadius: 14, background: '#FFF7D6', border: '1px solid #D4AF37' }}>
+                <div style={{ padding: 16, borderRadius: 14, background: '#FFF7D6', color: '#11185A', border: '1px solid #D4AF37' }}>
                   <div style={{ fontSize: 18, fontWeight: 900 }}>{customerPcView.customer.name}</div>
-                  <div style={{ color: '#67738E', marginTop: 3 }}>Area: {customerPcView.customer.area || '-'}</div>
+                  <div style={{ color: '#334155', marginTop: 3 }}>Area: {customerPcView.customer.area || '-'}</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginTop: 14 }}>
-                    <div><div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Available PC</div><div style={{ color: '#166534', fontSize: 24, fontWeight: 900 }}>{formatPc(customerPcView.availablePc)}</div></div>
-                    <div><div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Total Incoming</div><div style={{ fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.incomingPc)}</div></div>
-                    <div><div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Total Redeemed</div><div style={{ color: '#B42318', fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.redeemedPc)}</div></div>
+                    <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Available PC</div><div style={{ color: '#166534', fontSize: 24, fontWeight: 900 }}>{formatPc(customerPcView.availablePc)}</div></div>
+                    <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Total Incoming</div><div style={{ fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.incomingPc)}</div></div>
+                    <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Total Redeemed</div><div style={{ color: '#B42318', fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.redeemedPc)}</div></div>
                   </div>
                 </div>
 
@@ -414,9 +414,9 @@ const OverduePcRequests = () => {
                         ) : pcHistory.map((item) => (
                           <tr key={item.id}>
                             <td style={tdStyle}>{item.date ? formatDate(item.date) : '-'}</td>
-                            <td style={{ ...tdStyle, color: item.direction === 'Incoming' ? '#166534' : '#B42318', fontWeight: 900 }}>{item.direction}</td>
-                            <td style={tdStyle}><strong>{item.title}</strong><div style={{ color: '#67738E', fontSize: 12, marginTop: 3 }}>{item.detail}</div></td>
-                            <td style={{ ...tdStyle, color: item.direction === 'Incoming' ? '#166534' : '#B42318', fontWeight: 900 }}>{item.direction === 'Incoming' ? '+' : '-'}{formatPc(item.points)}</td>
+                            <td style={{ ...tdStyle, color: item.direction === 'Incoming' ? '#4ADE80' : '#FCA5A5', fontWeight: 900 }}>{item.direction}</td>
+                            <td style={tdStyle}><strong>{item.title}</strong><div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 3 }}>{item.detail}</div></td>
+                            <td style={{ ...tdStyle, color: item.direction === 'Incoming' ? '#4ADE80' : '#FCA5A5', fontWeight: 900 }}>{item.direction === 'Incoming' ? '+' : '-'}{formatPc(item.points)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -434,7 +434,7 @@ const OverduePcRequests = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Referral Bonus</div>
-            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
               Approve {formatPc(settings.loyaltySettings.referralBonus)} for a customer referral.
             </div>
           </div>
@@ -460,9 +460,9 @@ const OverduePcRequests = () => {
             </label>
 
             {selectedReferralCustomerId ? (
-              <div style={{ padding: 14, borderRadius: 12, background: '#FFF7D6', border: '1px solid #D4AF37', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ padding: 14, borderRadius: 12, background: '#FFF7D6', color: '#11185A', border: '1px solid #D4AF37', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Selected customer</div>
+                  <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Selected customer</div>
                   <div style={{ fontWeight: 900, marginTop: 3 }}>{customers.find((customer) => customer.id === selectedReferralCustomerId)?.name}</div>
                 </div>
                 <button type="button" disabled={Boolean(savingId)} onClick={handleReferralApproval} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
@@ -478,7 +478,7 @@ const OverduePcRequests = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Request Queue</div>
-            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
               The generator checks recent paid invoices and skips requests already created for an invoice.
             </div>
           </div>
@@ -504,7 +504,7 @@ const OverduePcRequests = () => {
                   <td style={tdStyle}>{request.customerName}</td>
                   <td style={tdStyle}>
                     <strong>{request.invoiceNumber}</strong>
-                    <div style={{ color: '#67738E', fontSize: 12 }}>{request.invoiceDate ? formatDate(request.invoiceDate) : '-'}</div>
+                    <div style={{ color: '#D7DEEA', fontSize: 12 }}>{request.invoiceDate ? formatDate(request.invoiceDate) : '-'}</div>
                   </td>
                   <td style={tdStyle}>{request.dueDate ? formatDate(request.dueDate) : '-'}</td>
                   <td style={tdStyle}>{request.fullPaymentDate ? formatDate(request.fullPaymentDate) : '-'}</td>
@@ -524,7 +524,7 @@ const OverduePcRequests = () => {
                   </td>
                   <td style={{ ...tdStyle, color: request.status === 'Approved' ? '#166534' : request.status === 'Rejected' ? '#B42318' : '#B7791F', fontWeight: 900 }}>
                     {request.status}
-                    {request.reviewedBy ? <div style={{ color: '#67738E', fontSize: 12 }}>{request.reviewedBy}</div> : null}
+                    {request.reviewedBy ? <div style={{ color: '#D7DEEA', fontSize: 12 }}>{request.reviewedBy}</div> : null}
                   </td>
                   <td style={tdStyle}>
                     {request.status === 'Pending' ? (
@@ -549,10 +549,10 @@ const OverduePcRequests = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Bonus Request Queue</div>
-            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
               Pending bonuses need approval before PC is added. Approved/rejected requests are hidden from this queue but kept in history.
             </div>
-            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
               Payment and target bonuses are generated once per customer per month. Referral bonuses are approved manually above.
             </div>
           </div>
@@ -569,7 +569,7 @@ const OverduePcRequests = () => {
           ))}
         </div>
 
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 12 }}>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 12 }}>
           Bonus PC is capped at 20% of the customer&apos;s base PC earned for the month when generated automatically.
         </div>
 
@@ -590,7 +590,7 @@ const OverduePcRequests = () => {
                   <td style={tdStyle}>{request.customerName}</td>
                   <td style={tdStyle}>
                     <strong>{request.bonusLabel}</strong>
-                    <div style={{ color: '#67738E', fontSize: 12 }}>{request.notes || '-'}</div>
+                    <div style={{ color: '#D7DEEA', fontSize: 12 }}>{request.notes || '-'}</div>
                   </td>
                   <td style={tdStyle}>{request.triggerType || '-'}</td>
                   <td style={tdStyle}>{formatPc(request.suggestedCoins)}</td>

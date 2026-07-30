@@ -235,10 +235,10 @@ const SuggestedGiftManager = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 16,
     padding: 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -276,7 +276,7 @@ const SuggestedGiftManager = () => {
           ? '#8A6D00'
           : status === 'Already Gifted' || status === 'Already Redeemed'
             ? '#B42318'
-            : '#67738E';
+            : '#475569';
 
     return {
       display: 'inline-flex',
@@ -309,17 +309,17 @@ const SuggestedGiftManager = () => {
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Customer Reward Suggestions</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-          <div style={{ fontWeight: 900, color: '#11185A', alignSelf: 'end' }}>
+          <div style={{ fontWeight: 900, color: '#FFFFFF', alignSelf: 'end' }}>
             Eligible: {eligibleCount} | Pending Approval: {blockedCount}
           </div>
-          <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>
+          <div style={{ color: '#D7DEEA', fontSize: 13, lineHeight: 1.5 }}>
             Available PC points are lifetime earned points plus bonuses, reduced only when rewards are redeemed.
           </div>
         </div>
       </div>
 
       <div style={cardStyle}>
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>
           Select a customer to view reward suggestions. Search filters the dropdown list.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 }}>
@@ -361,15 +361,15 @@ const SuggestedGiftManager = () => {
           </div>
         </div>
         {customerSearchText && searchedCustomerRows.length === 0 ? (
-          <div style={{ color: '#B42318', fontWeight: 800, marginBottom: 12 }}>No customer matches your search.</div>
+          <div style={{ color: '#FCA5A5', fontWeight: 800, marginBottom: 12 }}>No customer matches your search.</div>
         ) : null}
         <div style={{ ...latestFiveScrollStyle, maxHeight: 520, paddingRight: 6 }}>
           {!selectedCustomerId ? (
-            <div style={{ color: '#67738E', border: '1px solid #E8EDF4', borderRadius: 14, padding: 16 }}>
+            <div style={{ color: '#D7DEEA', border: '1px solid #E8EDF4', borderRadius: 14, padding: 16 }}>
               Choose a customer from the dropdown to show reward eligibility, available PC points, and approval actions.
             </div>
           ) : visibleSuggestedRows.length === 0 ? (
-            <div style={{ color: '#67738E' }}>No reward suggestion found for the selected customer.</div>
+            <div style={{ color: '#D7DEEA' }}>No reward suggestion found for the selected customer.</div>
           ) : (
             visibleSuggestedRows.map((row) => {
               const selectedGiftName = getSelectedGiftName(row);
@@ -377,7 +377,7 @@ const SuggestedGiftManager = () => {
               const displayStatus = getDisplayStatus(row);
 
               return (
-                <div key={row.customer.id} style={{ border: '1px solid #E8EDF4', borderRadius: 14, padding: 16, marginBottom: 14, background: '#FFFFFF', overflow: 'hidden' }}>
+                <div key={row.customer.id} style={{ border: '1px solid var(--role-card-border)', borderRadius: 14, padding: 16, marginBottom: 14, background: 'var(--role-card-background)', color: '#FFFFFF', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
                     <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                       <div style={{ fontSize: 18, fontWeight: 900 }}>{row.customer.name}</div>
@@ -394,7 +394,7 @@ const SuggestedGiftManager = () => {
                     <div><strong>Selected Reward Cost</strong><div>{selectedGiftName ? formatMoney(selectedRewardCost) : '-'}</div></div>
                   </div>
 
-                  <div style={{ color: '#67738E', marginBottom: 10 }}>{row.eligibilityReason}</div>
+                  <div style={{ color: '#D7DEEA', marginBottom: 10 }}>{row.eligibilityReason}</div>
 
                   {row.matchedGiftItems.length > 0 ? (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 14 }}>
@@ -424,16 +424,16 @@ const SuggestedGiftManager = () => {
                             ) : null}
                             <div style={{ fontWeight: 900 }}>{giftItem.giftItemName}</div>
                             <div style={{ marginTop: 5 }}>{formatMoney(giftItem.targetValue)} PC</div>
-                            <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>
+                            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
                               {difference === 0 ? 'Exact PC match' : `${formatMoney(difference)} PC below limit`}
                             </div>
-                            {giftItem.notes ? <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>{giftItem.notes}</div> : null}
+                            {giftItem.notes ? <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>{giftItem.notes}</div> : null}
                           </button>
                         );
                       })}
                     </div>
                   ) : (
-                    <div style={{ color: '#67738E', marginBottom: 14 }}>
+                    <div style={{ color: '#D7DEEA', marginBottom: 14 }}>
                       {row.pendingApproval ? `Approved reward: ${selectedGiftName || '-'}` : 'No selectable reward option for these available PC points.'}
                     </div>
                   )}
@@ -450,13 +450,13 @@ const SuggestedGiftManager = () => {
                       />
                     </label>
                     {!canApproveGifts ? (
-                      <span style={{ color: '#67738E', fontWeight: 800 }}>View only</span>
+                      <span style={{ color: '#D7DEEA', fontWeight: 800 }}>View only</span>
                     ) : row.pendingApproval ? (
                       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <button
                           type="button"
                           disabled={!hasChangedApprovedGift(row)}
-                          style={{ ...buttonStyle, background: hasChangedApprovedGift(row) ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#E8EDF4', color: hasChangedApprovedGift(row) ? '#FFFFFF' : '#67738E' }}
+                          style={{ ...buttonStyle, background: hasChangedApprovedGift(row) ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#E8EDF4', color: hasChangedApprovedGift(row) ? '#FFFFFF' : '#D7DEEA' }}
                           onClick={() => handleUpdateApprovedGift(row)}
                         >
                           Update Approved Reward
@@ -484,7 +484,7 @@ const SuggestedGiftManager = () => {
             })
           )}
         </div>
-        <div style={{ color: '#67738E', fontSize: 12, marginTop: 12 }}>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 12 }}>
           Available PC points do not expire. Redeemed rewards are deducted from the customer balance.
         </div>
       </div>

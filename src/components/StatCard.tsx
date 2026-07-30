@@ -9,11 +9,11 @@ interface StatCardProps {
 
 const StatCard = ({ title, value, subtitle, color = '#D4AF37' }: StatCardProps) => {
   const cardStyle = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 12,
     padding: 'clamp(14px, 4vw, 20px)',
     minWidth: 0,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -23,7 +23,7 @@ const StatCard = ({ title, value, subtitle, color = '#D4AF37' }: StatCardProps) 
     fontWeight: 700,
     letterSpacing: 0.8,
     marginBottom: 8,
-    color: '#5C6A84'
+    color: '#D7DEEA'
   };
 
   const valueStyle = {
@@ -34,7 +34,7 @@ const StatCard = ({ title, value, subtitle, color = '#D4AF37' }: StatCardProps) 
 
   const subtitleStyle = {
     marginTop: 8,
-    color: '#67738E',
+    color: '#D7DEEA',
     fontSize: 13
   };
 

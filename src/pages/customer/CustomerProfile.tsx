@@ -1,9 +1,10 @@
 import { User } from 'lucide-react';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
-import { getTierDisplayName } from '../../utils/tiers';
+import { getTierColors, getTierDisplayName } from '../../utils/tiers';
 
 const CustomerProfile = () => {
   const { customer, userProfile, settings } = useCustomerPortalContext();
+  const tierColors = getTierColors(customer?.tier ?? 'Tier 4');
 
   return (
     <div>
@@ -16,7 +17,7 @@ const CustomerProfile = () => {
         <div style={{ color: '#67738E', marginTop: 4 }}>{userProfile?.email}</div>
 
         {settings.showCustomerTierToCustomer && customer ? (
-          <div style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#D4AF37', borderRadius: 16, padding: 12, fontWeight: 900, marginTop: 16 }}>
+          <div style={{ background: tierColors.background, color: tierColors.color, border: `1px solid ${tierColors.border}`, borderRadius: 16, padding: 12, fontWeight: 900, marginTop: 16 }}>
             Customer Category: {getTierDisplayName(customer.tier)}
           </div>
         ) : null}

@@ -71,10 +71,10 @@ const Intelligence = () => {
   };
 
   const whiteCardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 16,
     padding: 18,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -211,7 +211,7 @@ const Intelligence = () => {
             <CustomerScoreCard customer={selectedCustomerScore} />
           </div>
         ) : (
-          <div style={{ color: '#67738E', marginTop: 12 }}>Select a customer to view score breakdown.</div>
+          <div style={{ color: '#D7DEEA', marginTop: 12 }}>Select a customer to view score breakdown.</div>
         )}
       </div>
 
@@ -230,7 +230,7 @@ const Intelligence = () => {
               ))}
             </select>
             {!selectedRankingMonth ? (
-              <div style={{ color: '#67738E', marginTop: 12 }}>Select a month to load rankings.</div>
+              <div style={{ color: '#D7DEEA', marginTop: 12 }}>Select a month to load rankings.</div>
             ) : null}
           </div>
           {selectedMonthlyRanking ? (

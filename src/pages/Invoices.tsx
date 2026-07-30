@@ -483,10 +483,10 @@ const Invoices = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 12,
     padding: isMobile ? 14 : 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -529,18 +529,18 @@ const Invoices = () => {
 
   const headerCellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4',
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)',
     textAlign: 'left',
-    color: '#11185A',
+    color: '#FFFFFF',
     fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
 
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
-    borderBottom: '1px solid #E8EDF4',
-    color: '#11185A',
+    borderBottom: '1px solid var(--role-card-border)',
+    color: '#FFFFFF',
     verticalAlign: 'top'
   };
 
@@ -555,7 +555,7 @@ const Invoices = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingInvoiceId ? 'Edit Invoice' : 'Create Invoice'}</div>
-            <div style={{ color: '#67738E', marginTop: 4 }}>Next invoice number: {editingInvoiceId ? 'Existing number retained' : nextInvoiceNumber}</div>
+            <div style={{ color: '#D7DEEA', marginTop: 4 }}>Next invoice number: {editingInvoiceId ? 'Existing number retained' : nextInvoiceNumber}</div>
           </div>
           <div style={{ color: formData.totalProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 800 }}>
             Estimated Profit: {formatMoney(formData.totalProfit)}
@@ -627,7 +627,7 @@ const Invoices = () => {
 
         </div>
 
-        {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
+        {error ? <div style={{ color: '#FCA5A5', marginTop: 12 }}>{error}</div> : null}
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
@@ -669,7 +669,7 @@ const Invoices = () => {
           </label>
         </div>
 
-        <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
         <div style={{ ...latestFiveScrollStyle, maxHeight: 520, overflowX: 'auto', overflowY: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
           <table style={tableStyle}>
             <thead>

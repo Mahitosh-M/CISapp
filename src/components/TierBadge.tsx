@@ -1,25 +1,9 @@
 import type { CustomerTier } from '../types';
-import { getTierDisplayName } from '../utils/tiers';
+import { getTierColors, getTierDisplayName } from '../utils/tiers';
 
 interface TierBadgeProps {
   tier: CustomerTier;
 }
-
-const getTierColors = (tier: CustomerTier) => {
-  if (tier === 'Tier 1') {
-    return { background: '#D4AF37', color: '#11185A', border: '#D4AF37' };
-  }
-
-  if (tier === 'Tier 2') {
-    return { background: '#FFF7D6', color: '#7A5A00', border: '#D4AF37' };
-  }
-
-  if (tier === 'Tier 3') {
-    return { background: '#E8EDF5', color: '#11185A', border: '#BFC8D9' };
-  }
-
-  return { background: '#EAF8EE', color: '#166534', border: '#ABEFC6' };
-};
 
 const TierBadge = ({ tier }: TierBadgeProps) => {
   const colors = getTierColors(tier);

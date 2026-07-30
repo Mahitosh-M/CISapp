@@ -537,10 +537,10 @@ const Payments = () => {
   const canLoadMorePayments = !loading && payments.length >= paymentLimit;
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 12,
     padding: isMobile ? 14 : 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -583,18 +583,18 @@ const Payments = () => {
 
   const headerCellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4',
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)',
     textAlign: 'left',
-    color: '#11185A',
+    color: '#FFFFFF',
     fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
 
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
-    borderBottom: '1px solid #E8EDF4',
-    color: '#11185A',
+    borderBottom: '1px solid var(--role-card-border)',
+    color: '#FFFFFF',
     verticalAlign: 'top'
   };
 
@@ -609,17 +609,17 @@ const Payments = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingPaymentId ? 'Edit Payment' : 'Add Payment'}</div>
-            <div style={{ color: '#67738E', marginTop: 4 }}>Enter the received amount; it will clear all pending invoices in oldest-first order.</div>
+            <div style={{ color: '#D7DEEA', marginTop: 4 }}>Enter the received amount; it will clear all pending invoices in oldest-first order.</div>
           </div>
-          <div style={{ color: '#11185A', fontWeight: 800 }}>
+          <div style={{ color: '#FFFFFF', fontWeight: 800 }}>
             <div style={{ color: selectedPendingTotal > 0 ? '#B42318' : '#1B7F3A' }}>
               Selected Pending: {selectedInvoiceIds.length > 0 ? formatMoney(selectedPendingTotal) : 'No pending invoice'}
             </div>
             {selectedCustomer ? (
-              <div style={{ color: '#166534', fontSize: 12, marginTop: 4 }}>Available advance: {formatMoney(selectedCustomer.advanceBalance)}</div>
+              <div style={{ color: '#4ADE80', fontSize: 12, marginTop: 4 }}>Available advance: {formatMoney(selectedCustomer.advanceBalance)}</div>
             ) : null}
             {selectedInvoiceIds.length > 0 ? (
-              <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>This payment applies: {formatMoney(appliedTotalPreview)}</div>
+              <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>This payment applies: {formatMoney(appliedTotalPreview)}</div>
             ) : null}
           </div>
         </div>
@@ -636,16 +636,16 @@ const Payments = () => {
           </label>
 
           {formData.customerId && loadingCustomerPayments ? (
-            <div style={{ gridColumn: '1 / -1', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, background: '#F8FAFC', color: '#67738E', fontWeight: 800 }}>
+            <div style={{ gridColumn: '1 / -1', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12, background: 'var(--role-card-subtle)', color: '#D7DEEA', fontWeight: 800 }}>
               Loading customer payment history...
             </div>
           ) : null}
 
           {formData.customerId && !loadingCustomerPayments && invoiceOptions.length > 0 ? (
-            <div style={{ gridColumn: '1 / -1', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, background: '#F8FAFC' }}>
+            <div style={{ gridColumn: '1 / -1', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12, background: 'var(--role-card-subtle)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                <div style={{ fontWeight: 900, color: '#11185A' }}>{editingPaymentId ? 'Apply to invoice' : 'Apply to invoices'}</div>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>
+                <div style={{ fontWeight: 900, color: '#FFFFFF' }}>{editingPaymentId ? 'Apply to invoice' : 'Apply to invoices'}</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>
                   Selected pending: {formatMoney(selectedPendingTotal)}
                 </div>
               </div>
@@ -668,15 +668,15 @@ const Payments = () => {
                     >
                       <input type={editingPaymentId ? 'radio' : 'checkbox'} checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
                       <span style={{ minWidth: 0 }}>
-                        <span style={{ display: 'block', color: '#11185A', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
-                        <span style={{ display: 'block', color: '#B42318', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
+                        <span style={{ display: 'block', color: '#FFFFFF', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
+                        <span style={{ display: 'block', color: '#FCA5A5', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
                       </span>
                     </label>
                   );
                 })}
               </div>
               {allocationPreview.length > 0 ? (
-                <div style={{ marginTop: 10, color: '#11185A', fontSize: 12, fontWeight: 800 }}>
+                <div style={{ marginTop: 10, color: '#FFFFFF', fontSize: 12, fontWeight: 800 }}>
                   {allocationPreview.map((allocation) => (
                     <span key={allocation.invoice.id} style={{ display: 'inline-block', marginRight: 12, marginTop: 4 }}>
                       {getInvoiceDisplayNumber(allocation.invoice)}: {formatMoney(allocation.appliedTotal)}
@@ -708,7 +708,7 @@ const Payments = () => {
           </label>
         </div>
 
-        {error ? <div style={{ color: '#B42318', marginTop: 12 }}>{error}</div> : null}
+        {error ? <div style={{ color: '#FCA5A5', marginTop: 12 }}>{error}</div> : null}
         {overpaymentAmount > 0 ? (
           <div style={{ color: '#B7791F', marginTop: 12, fontWeight: 800 }}>
             Extra amount of {formatMoney(overpaymentAmount)} will be stored as customer advance.
@@ -747,7 +747,7 @@ const Payments = () => {
 
         </div>
 
-        <div style={{ color: '#67738E', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 16 }}>{latestEntriesNotice}</div>
         <div style={{ ...latestFiveScrollStyle, maxHeight: 520, overflowX: 'auto', overflowY: 'auto', borderRadius: 14, border: '1px solid #E8EDF4', marginTop: 8 }}>
           <table style={tableStyle}>
             <thead>
@@ -783,27 +783,27 @@ const Payments = () => {
                         ? `${formatMoney(payment.advanceAppliedAmount)} advance adjusted`
                         : formatMoney(payment.amount)}
                       {payment.advanceCreatedAmount > 0 ? (
-                        <div style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>
+                        <div style={{ color: '#4ADE80', fontSize: 12, fontWeight: 800 }}>
                           Advance stored: {formatMoney(payment.advanceCreatedAmount)}
                         </div>
                       ) : null}
                       {(payment.notes || '').includes('Split payment') ? (
-                        <div style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>
+                        <div style={{ color: '#4ADE80', fontSize: 12, fontWeight: 800 }}>
                           Split paid: {formatMoney(splitPaymentTotal ?? payment.amount)}
                         </div>
                       ) : null}
                       {payment.cashDiscount > 0 ? (
-                        <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
+                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
                           Applied with discount: {formatMoney(getInvoicePaymentEffect(payment))}
                         </div>
                       ) : null}
                       {payment.amountUsedForOldBalance > 0 ? (
-                        <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
+                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
                           Old balance: {formatMoney(payment.amountUsedForOldBalance)}
                         </div>
                       ) : null}
                       {payment.amountUsedForOldBalance > 0 ? (
-                        <div style={{ color: '#67738E', fontSize: 12, fontWeight: 700 }}>
+                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
                           Invoice: {formatMoney(getAmountAppliedToInvoice(payment))}
                         </div>
                       ) : null}

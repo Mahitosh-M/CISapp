@@ -184,10 +184,10 @@ const Settings = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 16,
     padding: 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -330,7 +330,7 @@ const Settings = () => {
         </div>
 
         {settingsValidation.errors.length > 0 ? (
-          <div style={{ marginTop: 10, color: '#B42318', fontWeight: 700 }}>
+          <div style={{ marginTop: 10, color: '#FCA5A5', fontWeight: 700 }}>
             {settingsValidation.errors.map((validationError) => (
               <div key={validationError}>{validationError}</div>
             ))}
@@ -500,13 +500,13 @@ const Settings = () => {
 
       <div style={cardStyle}>
         <div style={sectionTitleStyle}>Existing Users</div>
-        <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+        <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 {['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'].map((header) => (
-                  <th key={header} style={{ textAlign: 'left', padding: 12, background: '#F8F9FB', borderBottom: '1px solid #E8EDF4' }}>{header}</th>
+                  <th key={header} style={{ textAlign: 'left', padding: 12, background: 'var(--role-card-subtle)', borderBottom: '1px solid var(--role-card-border)' }}>{header}</th>
                 ))}
               </tr>
             </thead>

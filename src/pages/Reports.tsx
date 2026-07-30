@@ -387,10 +387,10 @@ const Reports = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 16,
     padding: 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -433,18 +433,18 @@ const Reports = () => {
 
   const headerCellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4',
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)',
     textAlign: 'left',
-    color: '#11185A',
+    color: '#FFFFFF',
     fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
 
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
-    borderBottom: '1px solid #E8EDF4',
-    color: '#11185A'
+    borderBottom: '1px solid var(--role-card-border)',
+    color: '#FFFFFF'
   };
 
   if (loading) {

@@ -1,5 +1,10 @@
 :root {
   --app-page-background: linear-gradient(145deg, #020308 0%, #050b16 38%, #071a35 72%, #0b2a55 100%);
+  --role-card-background: linear-gradient(135deg, #4a155f 0%, #281247 46%, #081f4b 100%);
+  --role-card-text: #ffffff;
+  --role-card-muted: #d7deea;
+  --role-card-subtle: rgba(255, 255, 255, 0.09);
+  --role-card-border: rgba(255, 255, 255, 0.18);
 }
 
 html,
@@ -12,6 +17,18 @@ body,
 body {
   background: var(--app-page-background);
   background-attachment: fixed;
+}
+
+.login-input::placeholder {
+  color: #334155;
+  opacity: 1;
+}
+
+.login-input:-webkit-autofill,
+.login-input:-webkit-autofill:hover,
+.login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #020617;
+  box-shadow: 0 0 0 1000px #ffffff inset;
 }
 
 select {
@@ -96,13 +113,13 @@ select:disabled {
   font-size: 24px;
   line-height: 1;
   font-weight: 900;
-  color: #11185a;
+  color: #ffffff;
 }
 
 .admin-metric-label {
   margin-top: 4px;
   font-size: 12px;
-  color: #67738e;
+  color: #d7deea;
   font-weight: 800;
 }
 
@@ -146,7 +163,7 @@ select:disabled {
 }
 
 .admin-table-row:hover {
-  background: #fbfcff;
+  background: rgba(255, 255, 255, 0.08);
   transform: translateX(2px);
 }
 

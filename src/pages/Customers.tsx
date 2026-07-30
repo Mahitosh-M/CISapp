@@ -381,10 +381,10 @@ const Customers = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 16,
     padding: 20,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -422,10 +422,10 @@ const Customers = () => {
 
   const headerCellStyle: CSSProperties = {
     padding: '8px 7px',
-    background: '#F8F9FB',
-    borderBottom: '1px solid #E8EDF4',
+    background: 'var(--role-card-subtle)',
+    borderBottom: '1px solid var(--role-card-border)',
     textAlign: 'left',
-    color: '#11185A',
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: 800,
     lineHeight: 1.2,
@@ -434,8 +434,8 @@ const Customers = () => {
 
   const cellStyle: CSSProperties = {
     padding: '9px 7px',
-    borderBottom: '1px solid #E8EDF4',
-    color: '#11185A',
+    borderBottom: '1px solid var(--role-card-border)',
+    color: '#FFFFFF',
     verticalAlign: 'top',
     fontSize: 11,
     lineHeight: 1.25,
@@ -459,11 +459,11 @@ const Customers = () => {
   };
 
   const staffTileStyle: CSSProperties = {
-    border: '1px solid #E8EDF4',
+    border: '1px solid var(--role-card-border)',
     borderRadius: 16,
     padding: 14,
-    background: '#FFFFFF',
-    color: '#11185A',
+    background: 'var(--role-card-background)',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     cursor: 'pointer',
     textAlign: 'center',
@@ -504,7 +504,7 @@ const Customers = () => {
             <span style={staffTileIconStyle}><ShoppingCart size={20} /></span>
             <span>
               <span style={{ display: 'block', fontWeight: 900 }}>Order</span>
-              <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 4 }}>Open staff order entry</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Open staff order entry</span>
             </span>
           </button>
           <button
@@ -516,7 +516,7 @@ const Customers = () => {
             <span style={staffTileIconStyle}><UserPlus size={20} /></span>
             <span>
               <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId ? 'Hide Form' : 'Add Customer'}</span>
-              <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 4 }}>Create customer record</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Create customer record</span>
             </span>
           </button>
           <button
@@ -533,7 +533,7 @@ const Customers = () => {
             <span style={staffTileIconStyle}><BellRing size={20} /></span>
             <span>
               <span style={{ display: 'block', fontWeight: 900 }}>{showInactiveCustomers ? 'Hide Follow-up' : 'Follow-up'}</span>
-              <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 4 }}>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
                 {loadingInactiveCustomers ? 'Loading customers' : 'Not ordered in 15+ days'}
               </span>
             </span>
@@ -607,7 +607,7 @@ const Customers = () => {
                 />
               </label>
 
-              <div style={{ color: '#67738E', fontSize: 12, lineHeight: 1.5, marginTop: -6, marginBottom: 12 }}>
+              <div style={{ color: '#D7DEEA', fontSize: 12, lineHeight: 1.5, marginTop: -6, marginBottom: 12 }}>
                 Old opening balance before this ERP. It creates one opening-balance invoice and is paid before newer invoices.
               </div>
 
@@ -632,7 +632,7 @@ const Customers = () => {
             />
           </label>
 
-          {error ? <div style={{ color: '#B42318', marginBottom: 10 }}>{error}</div> : null}
+          {error ? <div style={{ color: '#FCA5A5', marginBottom: 10 }}>{error}</div> : null}
           {message ? <div style={{ color: '#1B7F3A', marginBottom: 10 }}>{message}</div> : null}
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -676,10 +676,10 @@ const Customers = () => {
                 </label>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-                  <div style={{ color: '#67738E', fontSize: 12 }}>
+                  <div style={{ color: '#D7DEEA', fontSize: 12 }}>
                     Follow-up list based on normal business invoices only.
                   </div>
-                  <div style={{ color: '#11185A', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
+                  <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
                 </div>
 
                 <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
@@ -704,8 +704,8 @@ const Customers = () => {
                               <strong>{customer.name}</strong>
                               {customer.area ? (
                                 <div style={{ marginTop: 4 }}>
-                                  <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
-                                  <div style={{ color: '#11185A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                                  <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
+                                  <div style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                                 </div>
                               ) : null}
                             </td>
@@ -771,7 +771,7 @@ const Customers = () => {
             ) : null}
           </div>
 
-          <div style={{ color: '#67738E', fontSize: 12, marginBottom: 8 }}>
+          <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>
             {selectedSearchCustomerId ? 'Selected customer only.' : searchText.trim() ? 'Matching customers.' : 'Search to show matching customers.'}
           </div>
           <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
@@ -804,11 +804,11 @@ const Customers = () => {
                             <strong>{customer.name}</strong>
                             {customer.area ? (
                               <div style={{ marginTop: 4 }}>
-                                <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
-                                <div style={{ color: '#11185A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                                <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
+                                <div style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                               </div>
                             ) : null}
-                            {customer.status ? <div style={{ color: '#67738E', fontSize: 11 }}>Status: {customer.status}</div> : null}
+                            {customer.status ? <div style={{ color: '#D7DEEA', fontSize: 11 }}>Status: {customer.status}</div> : null}
                           </td>
                           <td style={{ ...cellStyle, color: totalColor, fontWeight: 800 }}>
                             {formatMoney(storedTotal)}

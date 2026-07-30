@@ -384,10 +384,10 @@ const Analytics = () => {
   };
 
   const cardStyle: CSSProperties = {
-    background: '#FFFFFF',
+    background: 'var(--role-card-background)',
     borderRadius: 12,
     padding: 18,
-    color: '#11185A',
+    color: '#FFFFFF',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -421,7 +421,8 @@ const Analytics = () => {
 
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '12px 14px',
-    borderBottom: '1px solid #E8EDF4'
+    borderBottom: '1px solid var(--role-card-border)',
+    color: '#FFFFFF'
   };
 
   const contributionButtonLabels: Record<ContributionGroup, string> = {
@@ -433,9 +434,9 @@ const Analytics = () => {
   const renderContributionPie = (title: string, rows: { name: string; value: number; percent: number }[]) => (
     <div style={cardStyle}>
       <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>{title}</div>
-      <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>Top 5 customers + Others for the selected period.</div>
+      <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>Top 5 customers + Others for the selected period.</div>
       {rows.length === 0 ? (
-        <div style={{ height: isMobile ? 220 : 260, display: 'grid', placeItems: 'center', color: '#67738E', fontWeight: 800 }}>No contribution data</div>
+        <div style={{ height: isMobile ? 220 : 260, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No contribution data</div>
       ) : (
         <ResponsiveContainer width="100%" height={isMobile ? 240 : 280}>
           <PieChart>
@@ -490,24 +491,24 @@ const Analytics = () => {
 
       <div style={gridStyle}>
             <div style={cardStyle}>
-              <div style={{ color: '#67738E', fontWeight: 800 }}>Sales</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Sales</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.sales)}</div>
-              <div style={{ color: '#67738E', marginTop: 6 }}>{analysis.invoiceCount} invoice(s)</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>{analysis.invoiceCount} invoice(s)</div>
             </div>
             <div style={cardStyle}>
-              <div style={{ color: '#67738E', fontWeight: 800 }}>Profit</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Profit</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.profit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(analysis.profit)}</div>
-              <div style={{ color: '#67738E', marginTop: 6 }}>{formatPercent(analysis.margin)} margin</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>{formatPercent(analysis.margin)} margin</div>
             </div>
             <div style={cardStyle}>
-              <div style={{ color: '#67738E', fontWeight: 800 }}>Collected</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Collected</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.collected)}</div>
-              <div style={{ color: '#67738E', marginTop: 6 }}>{formatPercent(analysis.collectionRate)} of sales</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>{formatPercent(analysis.collectionRate)} of sales</div>
             </div>
             <div style={cardStyle}>
-              <div style={{ color: '#67738E', fontWeight: 800 }}>Outstanding</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Outstanding</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
-              <div style={{ color: '#67738E', marginTop: 6 }}>Selected range balance</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Selected range balance</div>
             </div>
           </div>
 
@@ -515,7 +516,7 @@ const Analytics = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Breakeven Analysis</div>
-                <div style={{ color: '#67738E', marginTop: 4 }}>
+                <div style={{ color: '#D7DEEA', marginTop: 4 }}>
                   Fixed cost is allocated from the monthly cost saved in Admin Settings.
                 </div>
               </div>
@@ -525,20 +526,20 @@ const Analytics = () => {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Gross Profit</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Gross Profit</div>
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.profit)}</div>
               </div>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Allocated Fixed Cost</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Allocated Fixed Cost</div>
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.fixedCost)}</div>
               </div>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Net After Fixed Cost</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Net After Fixed Cost</div>
                 <div style={{ fontWeight: 900, marginTop: 4, color: analysis.netProfit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(analysis.netProfit)}</div>
               </div>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Sales Needed</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Sales Needed</div>
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{analysis.fixedCost > 0 ? formatMoney(analysis.breakEvenSalesGap) : '-'}</div>
               </div>
             </div>
@@ -557,8 +558,8 @@ const Analytics = () => {
             <ResponsiveContainer width="100%" height={isMobile ? 240 : 300}>
               <BarChart data={monthlyBreakevenRows}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" />
-                <XAxis dataKey="monthLabel" axisLine={false} tickLine={false} tick={{ fill: '#67738E', fontSize: 11 }} />
-                <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} axisLine={false} tickLine={false} tick={{ fill: '#67738E', fontSize: 11 }} />
+                <XAxis dataKey="monthLabel" axisLine={false} tickLine={false} tick={{ fill: '#D7DEEA', fontSize: 11 }} />
+                <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} axisLine={false} tickLine={false} tick={{ fill: '#D7DEEA', fontSize: 11 }} />
                 <Tooltip formatter={(value) => formatMoney(Number(value))} />
                 <Bar dataKey="netProfit" name="Net After Fixed Cost" radius={[8, 8, 0, 0]}>
                   {monthlyBreakevenRows.map((row) => (
@@ -573,7 +574,7 @@ const Analytics = () => {
                 <thead>
                   <tr>
                     {['Month', 'Sales', 'Gross Profit', 'Fixed Cost', 'Net', 'Status'].map((header) => (
-                      <th key={header} style={{ ...cellStyle, background: '#F8F9FB', textAlign: 'left' }}>{header}</th>
+                      <th key={header} style={{ ...cellStyle, background: 'var(--role-card-subtle)', textAlign: 'left' }}>{header}</th>
                     ))}
                   </tr>
                 </thead>
@@ -601,9 +602,9 @@ const Analytics = () => {
           <div style={gridStyle}>
             {insightCards.map((insight) => (
               <div key={insight.title} style={{ ...cardStyle, borderTop: `4px solid ${getSignalColor(insight.tone)}` }}>
-                <div style={{ color: '#67738E', fontWeight: 800 }}>{insight.title}</div>
+                <div style={{ color: '#D7DEEA', fontWeight: 800 }}>{insight.title}</div>
                 <div style={{ color: getSignalColor(insight.tone), fontSize: 28, fontWeight: 900, marginTop: 8 }}>{insight.value}</div>
-                <div style={{ color: '#11185A', marginTop: 8, lineHeight: 1.45 }}>{insight.detail}</div>
+                <div style={{ color: '#FFFFFF', marginTop: 8, lineHeight: 1.45 }}>{insight.detail}</div>
               </div>
             ))}
           </div>
@@ -612,7 +613,7 @@ const Analytics = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Contribution Explorer</div>
-                <div style={{ color: '#67738E', marginTop: 4 }}>Sales and profit contribution by customer group.</div>
+                <div style={{ color: '#D7DEEA', marginTop: 4 }}>Sales and profit contribution by customer group.</div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {(['top5', 'next10', 'remaining'] as ContributionGroup[]).map((group) => (
@@ -629,20 +630,20 @@ const Analytics = () => {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Group Sales</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Group Sales</div>
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(contributionGroupSummary.sales)}</div>
               </div>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Sales %</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Sales %</div>
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatPercent(contributionGroupSummary.salesPercent)}</div>
               </div>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Group Profit</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Group Profit</div>
                 <div style={{ fontWeight: 900, marginTop: 4, color: contributionGroupSummary.profit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(contributionGroupSummary.profit)}</div>
               </div>
-              <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>Profit %</div>
+              <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Profit %</div>
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatPercent(contributionGroupSummary.profitPercent)}</div>
               </div>
             </div>
@@ -652,7 +653,7 @@ const Analytics = () => {
                 <thead>
                   <tr>
                     {['Customer', 'Invoices', 'Sales', 'Sales %', 'Profit', 'Profit %'].map((header) => (
-                      <th key={header} style={{ ...cellStyle, background: '#F8F9FB', textAlign: 'left' }}>{header}</th>
+                      <th key={header} style={{ ...cellStyle, background: 'var(--role-card-subtle)', textAlign: 'left' }}>{header}</th>
                     ))}
                   </tr>
                 </thead>
@@ -682,15 +683,15 @@ const Analytics = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Business Analyst Briefing</div>
-                <div style={{ color: '#67738E', marginTop: 4 }}>
+                <div style={{ color: '#D7DEEA', marginTop: 4 }}>
                   Dynamic read of sales, profit, collection, customer concentration, and trend movement.
                 </div>
               </div>
-              <div style={{ color: '#67738E', fontWeight: 900 }}>{businessBriefing.length} signal(s)</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 900 }}>{businessBriefing.length} signal(s)</div>
             </div>
             <div style={{ ...latestFiveScrollStyle, maxHeight: 520, display: 'grid', gap: 10, paddingRight: 4 }}>
               {businessBriefing.map((item, index) => (
-                <div key={`${index}-${item}`} style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, fontWeight: 700, lineHeight: 1.45 }}>
+                <div key={`${index}-${item}`} style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12, fontWeight: 700, lineHeight: 1.45 }}>
                   <span style={{ color: '#D4AF37', fontWeight: 900, marginRight: 8 }}>{index + 1}.</span>
                   {item}
                 </div>
