@@ -32,8 +32,8 @@ const CustomerOffers = () => {
 
   return (
     <div>
-      <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Offers</div>
-      <div style={{ color: '#67738E', fontSize: 13, marginBottom: 14 }}>Latest active schemes from the business.</div>
+      <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Offers</div>
+      <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>Latest active schemes from the business.</div>
 
       {activeOffers.length === 0 ? (
         <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#67738E' }}>

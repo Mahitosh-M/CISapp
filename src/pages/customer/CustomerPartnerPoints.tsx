@@ -62,8 +62,8 @@ const CustomerPartnerPoints = () => {
       <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <div>
-            <div style={{ fontSize: 24, fontWeight: 900 }}>Available Rewards</div>
-            <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 3 }}>
+            <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900 }}>Available Rewards</div>
+            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 800, marginTop: 3 }}>
               {apcSummary?.rewardAvailable ? 'Some rewards are ready to request' : `You can view level rewards now; need ${formatApc(apcSummary?.pointsNeededForNextReward ?? 0)} more PC for the next request`}
             </div>
           </div>

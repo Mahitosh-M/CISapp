@@ -33,7 +33,7 @@ const CustomerLanding = () => {
         margin: '-6px -2px 0',
         borderRadius: 28,
         padding: 22,
-        background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
+        background: 'var(--app-page-background)',
         display: 'grid',
         alignContent: 'center',
         gap: 18

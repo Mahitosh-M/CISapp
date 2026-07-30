@@ -24,10 +24,10 @@ const CustomerInvoices = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 24, fontWeight: 900 }}>My Invoices</div>
-          <div style={{ color: '#67738E', fontSize: 13 }}>{showPaidInvoices ? 'Latest 3 paid invoices.' : 'Overdue first, then closest due date.'}</div>
+          <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900 }}>My Invoices</div>
+          <div style={{ color: '#BFC8D9', fontSize: 13 }}>{showPaidInvoices ? 'Latest 3 paid invoices.' : 'Overdue first, then closest due date.'}</div>
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 900, color: '#11185A', fontSize: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 900, color: '#FFFFFF', fontSize: 12 }}>
           <input type="checkbox" checked={showPaidInvoices} onChange={(event) => setShowPaidInvoices(event.target.checked)} />
           Show Paid
         </label>

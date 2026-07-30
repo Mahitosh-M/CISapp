@@ -93,11 +93,11 @@ const CustomerMobileLayout = () => {
   };
 
   if (portalData.loading) {
-    return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#D4AF37', fontWeight: 900 }}>Loading your account...</div>;
+    return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--app-page-background)', color: '#D4AF37', fontWeight: 900 }}>Loading your account...</div>;
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#EEF2F7', color: '#11185A', maxWidth: 460, margin: '0 auto', position: 'relative' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--app-page-background)', color: '#11185A', maxWidth: 460, margin: '0 auto', position: 'relative', boxShadow: '0 0 48px rgba(0,0,0,0.38)' }}>
       <header style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', padding: '18px 18px 24px', borderBottomLeftRadius: 26, borderBottomRightRadius: 26 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr auto', alignItems: 'center', gap: 10 }}>
           {showHeaderOrder ? (

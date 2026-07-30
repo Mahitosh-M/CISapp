@@ -1,6 +1,6 @@
 const SplashScreen = () => {
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 38%, rgba(212,175,55,0.18), transparent 30%), linear-gradient(160deg, #0F172A 0%, #11185A 48%, #4C1D95 100%)', color: '#FFFFFF', padding: 24 }}>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--app-page-background)', color: '#FFFFFF', padding: 24 }}>
       <style>
         {`
           @keyframes medicoinsGlow {

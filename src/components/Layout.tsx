@@ -77,12 +77,12 @@ const Layout = () => {
     display: 'flex',
     flexDirection: isMobile ? 'column' as const : 'row' as const,
     minHeight: '100vh',
-    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)'
+    background: 'var(--app-page-background)'
   };
 
   const contentStyle = {
     flexGrow: 1,
-    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
+    background: 'var(--app-page-background)',
     padding: isMobile ? '14px 12px 92px' : 24,
     minWidth: 0
   };

@@ -121,7 +121,7 @@ const CustomerDashboard = () => {
         `}
       </style>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ color: '#67738E', fontSize: 13, fontWeight: 800 }}>Welcome back</div>
+        <div style={{ color: '#BFC8D9', fontSize: 13, fontWeight: 800 }}>Welcome back</div>
       </div>
 
       <div
