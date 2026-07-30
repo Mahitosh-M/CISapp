@@ -134,7 +134,7 @@ const Settings = () => {
     await loadSettings();
   };
 
-  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer', value: string | boolean) => {
+  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder', value: string | boolean) => {
     setSettings((current) => ({
       ...current,
       [field]: field === 'highOutstandingThreshold' ? Number(value) || 0 : value
@@ -187,7 +187,7 @@ const Settings = () => {
     background: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -381,7 +381,7 @@ const Settings = () => {
         </div>
         <button
           type="button"
-          style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }}
+          style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginTop: 12 }}
           onClick={handleResetTargetSettings}
         >
           Reset Targets to Defaults
@@ -443,6 +443,22 @@ const Settings = () => {
             />
             Show customer category in customer portal
           </label>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+            <input
+              type="checkbox"
+              checked={settings.turnOnOrder}
+              onChange={(event) => handleTopLevelSettingChange('turnOnOrder', event.target.checked)}
+            />
+            Turn on order
+          </label>
+          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+            <input
+              type="checkbox"
+              checked={settings.headerOrder}
+              onChange={(event) => handleTopLevelSettingChange('headerOrder', event.target.checked)}
+            />
+            Header Order
+          </label>
         </div>
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Staff Permissions</div>
@@ -457,7 +473,7 @@ const Settings = () => {
           </label>
         </div>
 
-        <button type="submit" disabled={saving || !settingsValidation.isValid} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 18 }}>
+        <button type="submit" disabled={saving || !settingsValidation.isValid} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 18 }}>
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
       </form>
@@ -477,7 +493,7 @@ const Settings = () => {
           </label>
         </div>
 
-        <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginTop: 18 }}>
+        <button type="submit" disabled={saving} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginTop: 18 }}>
           Create User
         </button>
       </form>
@@ -509,7 +525,7 @@ const Settings = () => {
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.customerName || '-'}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.active ? 'Yes' : 'No'}</td>
                   <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>
-                    <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleToggleActive(user)}>
+                    <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8 }} onClick={() => handleToggleActive(user)}>
                       {user.active ? 'Disable' : 'Enable'}
                     </button>
                     <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDeleteUserProfile(user)}>

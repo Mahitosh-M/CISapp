@@ -21,7 +21,7 @@ const baseButtonStyle: CSSProperties = {
   borderRadius: 10,
   padding: '9px 12px',
   background: '#F8F9FB',
-  color: '#0B1F3A',
+  color: '#11185A',
   fontWeight: 800,
   cursor: 'pointer',
   transition: 'background 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease'
@@ -44,9 +44,9 @@ const DateRangeShortcuts = ({ onSelect, selectedRange }: DateRangeShortcutsProps
             type="button"
             style={{
               ...baseButtonStyle,
-              background: isSelected ? '#0B1F3A' : '#F8F9FB',
-              borderColor: isSelected ? '#0B1F3A' : '#D8DEE9',
-              color: isSelected ? '#FFFFFF' : '#0B1F3A',
+              background: isSelected ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#F8F9FB',
+              borderColor: isSelected ? '#11185A' : '#D8DEE9',
+              color: isSelected ? '#FFFFFF' : '#11185A',
               transform: isSelected ? 'translateY(-1px)' : 'translateY(0)'
             }}
             onClick={() => {

@@ -85,10 +85,10 @@ const buildReportTableHtml = (title: string, headers: string[], rows: ReportRow[
       <head>
         <title>${escapeHtml(title)}</title>
         <style>
-          body { font-family: Arial, sans-serif; color: #0B1F3A; padding: 24px; }
-          h1 { color: #0B1F3A; }
+          body { font-family: Arial, sans-serif; color: #11185A; padding: 24px; }
+          h1 { color: #11185A; }
           table { width: 100%; border-collapse: collapse; }
-          th { background: #0B1F3A; color: #FFFFFF; }
+          th { background: linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%); color: #FFFFFF; }
           th, td { border: 1px solid #D8DEE9; padding: 10px; text-align: left; }
         </style>
       </head>
@@ -390,7 +390,7 @@ const Reports = () => {
     background: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -408,7 +408,7 @@ const Reports = () => {
     borderRadius: 10,
     border: '1px solid #D8DEE9',
     marginTop: 6,
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   const labelStyle: CSSProperties = {
@@ -436,7 +436,7 @@ const Reports = () => {
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
-    color: '#0B1F3A',
+    color: '#11185A',
     fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
@@ -444,7 +444,7 @@ const Reports = () => {
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
     borderBottom: '1px solid #E8EDF4',
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   if (loading) {
@@ -543,17 +543,17 @@ const Reports = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-          <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={handleApplyFilters}>
+          <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} onClick={handleApplyFilters}>
             Apply Filter
           </button>
           <DateRangeShortcuts selectedRange={{ fromDate: activeFilters.fromDate, toDate: activeFilters.toDate }} onSelect={applyDateRange} />
-          <button type="button" style={{ ...buttonStyle, background: showReportTable ? '#E8EDF4' : '#0B1F3A', color: showReportTable ? '#0B1F3A' : '#FFFFFF' }} onClick={() => setShowReportTable((current) => !current)}>
+          <button type="button" style={{ ...buttonStyle, background: showReportTable ? '#E8EDF4' : 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: showReportTable ? '#11185A' : '#FFFFFF' }} onClick={() => setShowReportTable((current) => !current)}>
             {showReportTable ? 'Hide View' : 'View'}
           </button>
-          <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={handleExportPdf}>
+          <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }} onClick={handleExportPdf}>
             Export PDF
           </button>
-          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={handleExportExcel}>
+          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={handleExportExcel}>
             Export Excel
           </button>
         </div>

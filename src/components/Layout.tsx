@@ -47,7 +47,7 @@ const Layout = () => {
   const sidebarStyle = {
     width: 260,
     minHeight: '100vh',
-    background: '#0B1F3A',
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
     color: '#FFFFFF',
     padding: '24px 18px',
     boxSizing: 'border-box' as const
@@ -63,7 +63,7 @@ const Layout = () => {
   };
 
   const activeLinkStyle = {
-    background: '#162B4D',
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
     color: '#FFFFFF'
   };
 
@@ -77,12 +77,12 @@ const Layout = () => {
     display: 'flex',
     flexDirection: isMobile ? 'column' as const : 'row' as const,
     minHeight: '100vh',
-    background: '#0B1F3A'
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)'
   };
 
   const contentStyle = {
     flexGrow: 1,
-    background: '#0B1F3A',
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
     padding: isMobile ? '14px 12px 92px' : 24,
     minWidth: 0
   };
@@ -121,7 +121,7 @@ const Layout = () => {
     flex: '0 0 auto',
     padding: '9px 11px',
     borderRadius: 10,
-    color: '#0B1F3A',
+    color: '#11185A',
     background: '#F8F9FB',
     textDecoration: 'none',
     fontSize: 12,
@@ -130,7 +130,7 @@ const Layout = () => {
   };
 
   const activeMobileLinkStyle = {
-    background: '#0B1F3A',
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
     color: '#FFFFFF'
   };
 
@@ -165,7 +165,7 @@ const Layout = () => {
             <button
               type="button"
               onClick={logout}
-              style={{ border: 0, borderRadius: 10, padding: isMobile ? '8px 10px' : '9px 12px', background: '#D4AF37', color: '#0B1F3A', fontWeight: 800, cursor: 'pointer' }}
+              style={{ border: 0, borderRadius: 10, padding: isMobile ? '8px 10px' : '9px 12px', background: '#D4AF37', color: '#11185A', fontWeight: 800, cursor: 'pointer' }}
             >
               Logout
             </button>

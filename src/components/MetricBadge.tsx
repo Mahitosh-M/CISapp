@@ -10,8 +10,8 @@ const MetricBadge = ({ label, value, highlight }: MetricBadgeProps) => {
   const badgeStyle = {
     borderRadius: 12,
     padding: '10px 14px',
-    background: highlight ? '#D4AF37' : '#142B4C',
-    color: highlight ? '#0B1F3A' : '#FFFFFF',
+    background: highlight ? '#D4AF37' : '#312E81',
+    color: highlight ? '#11185A' : '#FFFFFF',
     display: 'inline-flex',
     alignItems: 'center',
     marginRight: 10,

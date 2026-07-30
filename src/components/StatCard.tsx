@@ -13,7 +13,7 @@ const StatCard = ({ title, value, subtitle, color = '#D4AF37' }: StatCardProps) 
     borderRadius: 12,
     padding: 'clamp(14px, 4vw, 20px)',
     minWidth: 0,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 

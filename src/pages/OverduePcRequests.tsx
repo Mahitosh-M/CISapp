@@ -312,7 +312,7 @@ const OverduePcRequests = () => {
     background: '#FFFFFF',
     borderRadius: 12,
     padding: 18,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -361,7 +361,7 @@ const OverduePcRequests = () => {
             <div style={{ color: '#D4AF37', fontWeight: 900 }}>Customer PC Balance</div>
             <div style={{ color: '#67738E', fontSize: 12, marginTop: 4 }}>View available, incoming, and redeemed Partner Coins.</div>
           </div>
-          <button type="button" onClick={() => setShowPcViewer((current) => !current)} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF' }}>
+          <button type="button" onClick={() => setShowPcViewer((current) => !current)} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }}>
             VIEW PC
           </button>
         </div>
@@ -373,7 +373,7 @@ const OverduePcRequests = () => {
               <select
                 value={selectedPcCustomerId}
                 onChange={(event) => handlePcCustomerChange(event.target.value)}
-                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#0B1F3A' }}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#11185A' }}
               >
                 <option value="">Select customer</option>
                 {customers.map((customer) => (
@@ -397,7 +397,7 @@ const OverduePcRequests = () => {
                 </div>
 
                 <div>
-                  <button type="button" onClick={handleViewPcHistory} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginBottom: pcHistory ? 10 : 0 }}>
+                  <button type="button" onClick={handleViewPcHistory} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginBottom: pcHistory ? 10 : 0 }}>
                     {pcHistory ? 'Hide History' : 'View History'}
                   </button>
                   {pcHistory ? (
@@ -438,7 +438,7 @@ const OverduePcRequests = () => {
               Approve {formatPc(settings.loyaltySettings.referralBonus)} for a customer referral.
             </div>
           </div>
-          <button type="button" onClick={() => setShowReferral((current) => !current)} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
+          <button type="button" onClick={() => setShowReferral((current) => !current)} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
             Referral
           </button>
         </div>
@@ -450,7 +450,7 @@ const OverduePcRequests = () => {
               <select
                 value={selectedReferralCustomerId}
                 onChange={(event) => setSelectedReferralCustomerId(event.target.value)}
-                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#0B1F3A' }}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#11185A' }}
               >
                 <option value="">Select customer</option>
                 {customers.map((customer) => (
@@ -482,7 +482,7 @@ const OverduePcRequests = () => {
               The generator checks recent paid invoices and skips requests already created for an invoice.
             </div>
           </div>
-          <button type="button" disabled={generating} onClick={handleGenerate} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
+          <button type="button" disabled={generating} onClick={handleGenerate} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
             {generating ? 'Generating...' : 'Generate Requests'}
           </button>
         </div>
@@ -556,14 +556,14 @@ const OverduePcRequests = () => {
               Payment and target bonuses are generated once per customer per month. Referral bonuses are approved manually above.
             </div>
           </div>
-          <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
+          <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
             {generatingBonus ? 'Generating...' : 'Generate Bonus Requests'}
           </button>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           {(['new_customer', 'payment', 'purchase_target', 'referral'] as const).map((key) => (
-            <span key={key} style={{ background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
+            <span key={key} style={{ background: '#FFF7D6', color: '#11185A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
               {BONUS_PC_LABELS[key]}
             </span>
           ))}

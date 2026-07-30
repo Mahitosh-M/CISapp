@@ -71,7 +71,7 @@ select:disabled {
   border-radius: 12px;
   display: grid;
   place-items: center;
-  color: #0b1f3a;
+  color: #11185a;
   background: #f6e6a8;
   box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.45);
 }
@@ -80,7 +80,7 @@ select:disabled {
   font-size: 24px;
   line-height: 1;
   font-weight: 900;
-  color: #0b1f3a;
+  color: #11185a;
 }
 
 .admin-metric-label {
@@ -168,7 +168,7 @@ select:disabled {
 }
 
 .admin-alert-success {
-  color: #0b1f3a;
+  color: #11185a;
   background: #f6e6a8;
 }
 
@@ -205,166 +205,3 @@ select:disabled {
   }
 }
 
-.ios-wheel-picker {
-  position: relative;
-  isolation: isolate;
-  width: 100%;
-  overflow: hidden;
-  border-radius: 12px;
-  background: #ffffff;
-}
-
-.ios-wheel-picker-label {
-  margin-bottom: 8px;
-  color: #0b1f3a;
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.ios-wheel-picker-frame {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid #e8edf4;
-  border-radius: 12px;
-  background: #f8f9fb;
-  box-shadow: inset 0 14px 22px rgba(11, 31, 58, 0.07), inset 0 -14px 22px rgba(11, 31, 58, 0.07);
-}
-
-.ios-wheel-picker-frame::before,
-.ios-wheel-picker-frame::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  height: 38%;
-  z-index: 8;
-  pointer-events: none;
-}
-
-.ios-wheel-picker-frame::before {
-  top: 0;
-  background: linear-gradient(180deg, #f8f9fb 0%, rgba(248, 249, 251, 0.82) 48%, rgba(248, 249, 251, 0) 100%);
-}
-
-.ios-wheel-picker-frame::after {
-  bottom: 0;
-  background: linear-gradient(0deg, #f8f9fb 0%, rgba(248, 249, 251, 0.82) 48%, rgba(248, 249, 251, 0) 100%);
-}
-
-.ios-wheel-picker-guides {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(50% - 22px);
-  height: 44px;
-  z-index: 10;
-  border-top: 1px solid rgba(212, 175, 55, 0.78);
-  border-bottom: 1px solid rgba(212, 175, 55, 0.78);
-  background: rgba(255, 255, 255, 0.44);
-  pointer-events: none;
-}
-
-.ios-wheel-picker-scroll {
-  height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
-  scrollbar-width: none;
-}
-
-.ios-wheel-picker-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.ios-wheel-picker-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16px;
-  border: 0;
-  background: transparent;
-  color: #0b1f3a;
-  cursor: pointer;
-  font-weight: 900;
-  text-align: center;
-  transform-origin: center;
-  transition: opacity 120ms ease, transform 120ms ease, color 120ms ease;
-}
-
-.ios-wheel-picker-item[aria-selected="true"] {
-  color: #0b1f3a;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-.ios-wheel-picker-item:disabled {
-  cursor: not-allowed;
-}
-
-.ios-wheel-picker-scroll:focus {
-  outline: none;
-  box-shadow: inset 0 0 0 3px rgba(212, 175, 55, 0.18);
-}
-
-.customer-reward-wheel {
-  position: relative;
-  overflow: hidden;
-  border-radius: 18px;
-}
-
-.customer-reward-wheel::before,
-.customer-reward-wheel::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  height: 28%;
-  z-index: 8;
-  pointer-events: none;
-}
-
-.customer-reward-wheel::before {
-  top: 0;
-  background: linear-gradient(180deg, #f4f7fb 0%, rgba(244, 247, 251, 0.84) 48%, rgba(244, 247, 251, 0) 100%);
-}
-
-.customer-reward-wheel::after {
-  bottom: 0;
-  background: linear-gradient(0deg, #f4f7fb 0%, rgba(244, 247, 251, 0.84) 48%, rgba(244, 247, 251, 0) 100%);
-}
-
-.customer-reward-wheel-guides {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(50% - 114px);
-  height: 228px;
-  z-index: 9;
-  border-top: 1px solid rgba(212, 175, 55, 0.78);
-  border-bottom: 1px solid rgba(212, 175, 55, 0.78);
-  pointer-events: none;
-}
-
-.customer-reward-wheel-scroll {
-  height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
-  scrollbar-width: none;
-}
-
-.customer-reward-wheel-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.customer-reward-wheel-item {
-  display: flex;
-  align-items: center;
-  transform-origin: center;
-  transition: opacity 140ms ease, transform 140ms ease;
-  will-change: opacity, transform;
-}
-
-@media (max-width: 420px) {
-  .customer-reward-wheel {
-    margin-inline: -2px;
-  }
-}

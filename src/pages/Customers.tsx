@@ -384,7 +384,7 @@ const Customers = () => {
     background: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -395,7 +395,7 @@ const Customers = () => {
     borderRadius: 10,
     border: '1px solid #D8DEE9',
     marginTop: 6,
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   const labelStyle: CSSProperties = {
@@ -425,7 +425,7 @@ const Customers = () => {
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
-    color: '#0B1F3A',
+    color: '#11185A',
     fontSize: 10,
     fontWeight: 800,
     lineHeight: 1.2,
@@ -435,7 +435,7 @@ const Customers = () => {
   const cellStyle: CSSProperties = {
     padding: '9px 7px',
     borderBottom: '1px solid #E8EDF4',
-    color: '#0B1F3A',
+    color: '#11185A',
     verticalAlign: 'top',
     fontSize: 11,
     lineHeight: 1.25,
@@ -463,7 +463,7 @@ const Customers = () => {
     borderRadius: 16,
     padding: 14,
     background: '#FFFFFF',
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     cursor: 'pointer',
     textAlign: 'center',
@@ -483,7 +483,7 @@ const Customers = () => {
     display: 'grid',
     placeItems: 'center',
     background: '#FFF4BF',
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   return (
@@ -524,7 +524,7 @@ const Customers = () => {
             className="customer-action-tile"
             style={{
               ...staffTileStyle,
-              borderColor: showInactiveCustomers ? '#0B1F3A' : '#E8EDF4',
+              borderColor: showInactiveCustomers ? '#11185A' : '#E8EDF4',
               background: showInactiveCustomers ? '#F8FAFF' : '#FFFFFF'
             }}
             onClick={handleToggleInactiveCustomers}
@@ -547,7 +547,7 @@ const Customers = () => {
             {!isStaff ? (
             <button
               type="button"
-              style={{ ...buttonStyle, width: '100%', background: '#D4AF37', color: '#0B1F3A', marginBottom: showCustomerForm ? 16 : 0 }}
+              style={{ ...buttonStyle, width: '100%', background: '#D4AF37', color: '#11185A', marginBottom: showCustomerForm ? 16 : 0 }}
               onClick={handleToggleCustomerForm}
             >
               {showCustomerForm && !editingCustomerId ? 'Hide Customer Form' : 'Add New Customer'}
@@ -636,11 +636,11 @@ const Customers = () => {
           {message ? <div style={{ color: '#1B7F3A', marginBottom: 10 }}>{message}</div> : null}
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} disabled={saving}>
+            <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>
               {saving ? 'Saving...' : editingCustomerId ? 'Update Customer' : 'Add Customer'}
             </button>
             {editingCustomerId ? (
-              <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={resetForm}>
+              <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetForm}>
                 Cancel
               </button>
             ) : null}
@@ -655,7 +655,7 @@ const Customers = () => {
             {!isStaff ? (
               <button
                 type="button"
-                style={{ ...buttonStyle, width: '100%', background: showInactiveCustomers ? '#0B1F3A' : '#E8EDF4', color: showInactiveCustomers ? '#FFFFFF' : '#0B1F3A' }}
+                style={{ ...buttonStyle, width: '100%', background: showInactiveCustomers ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#E8EDF4', color: showInactiveCustomers ? '#FFFFFF' : '#11185A' }}
                 onClick={handleToggleInactiveCustomers}
                 disabled={loadingInactiveCustomers}
               >
@@ -679,7 +679,7 @@ const Customers = () => {
                   <div style={{ color: '#67738E', fontSize: 12 }}>
                     Follow-up list based on normal business invoices only.
                   </div>
-                  <div style={{ color: '#0B1F3A', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
+                  <div style={{ color: '#11185A', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
                 </div>
 
                 <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
@@ -705,7 +705,7 @@ const Customers = () => {
                               {customer.area ? (
                                 <div style={{ marginTop: 4 }}>
                                   <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
-                                  <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                                  <div style={{ color: '#11185A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                                 </div>
                               ) : null}
                             </td>
@@ -805,7 +805,7 @@ const Customers = () => {
                             {customer.area ? (
                               <div style={{ marginTop: 4 }}>
                                 <div style={{ color: '#67738E', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
-                                <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
+                                <div style={{ color: '#11185A', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                               </div>
                             ) : null}
                             {customer.status ? <div style={{ color: '#67738E', fontSize: 11 }}>Status: {customer.status}</div> : null}
@@ -814,7 +814,7 @@ const Customers = () => {
                             {formatMoney(storedTotal)}
                           </td>
                           <td style={cellStyle}>
-                            <button type="button" style={{ ...compactActionButtonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => handleEdit(customer)}>
+                            <button type="button" style={{ ...compactActionButtonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }} onClick={() => handleEdit(customer)}>
                               Edit
                             </button>
                             {canDeleteRecords ? (

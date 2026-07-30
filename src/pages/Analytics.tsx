@@ -387,7 +387,7 @@ const Analytics = () => {
     background: '#FFFFFF',
     borderRadius: 12,
     padding: 18,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -402,7 +402,7 @@ const Analytics = () => {
     padding: '10px 12px',
     borderRadius: 10,
     border: '1px solid #D8DEE9',
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   const buttonStyle: CSSProperties = {
@@ -480,7 +480,7 @@ const Analytics = () => {
               setActiveFromDate(fromDate);
               setActiveToDate(toDate);
             }}
-            style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}
+            style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}
           >
             Apply Filter
           </button>
@@ -603,7 +603,7 @@ const Analytics = () => {
               <div key={insight.title} style={{ ...cardStyle, borderTop: `4px solid ${getSignalColor(insight.tone)}` }}>
                 <div style={{ color: '#67738E', fontWeight: 800 }}>{insight.title}</div>
                 <div style={{ color: getSignalColor(insight.tone), fontSize: 28, fontWeight: 900, marginTop: 8 }}>{insight.value}</div>
-                <div style={{ color: '#0B1F3A', marginTop: 8, lineHeight: 1.45 }}>{insight.detail}</div>
+                <div style={{ color: '#11185A', marginTop: 8, lineHeight: 1.45 }}>{insight.detail}</div>
               </div>
             ))}
           </div>
@@ -619,7 +619,7 @@ const Analytics = () => {
                   <button
                     key={group}
                     type="button"
-                    style={{ ...buttonStyle, background: contributionGroup === group ? '#0B1F3A' : '#E8EDF4', color: contributionGroup === group ? '#FFFFFF' : '#0B1F3A' }}
+                    style={{ ...buttonStyle, background: contributionGroup === group ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#E8EDF4', color: contributionGroup === group ? '#FFFFFF' : '#11185A' }}
                     onClick={() => setContributionGroup(group)}
                   >
                     {contributionButtonLabels[group]}

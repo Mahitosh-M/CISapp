@@ -238,7 +238,7 @@ const SuggestedGiftManager = () => {
     background: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -247,7 +247,7 @@ const SuggestedGiftManager = () => {
     padding: '10px 12px',
     borderRadius: 10,
     border: '1px solid #D8DEE9',
-    color: '#0B1F3A',
+    color: '#11185A',
     width: '100%',
     boxSizing: 'border-box'
   };
@@ -309,7 +309,7 @@ const SuggestedGiftManager = () => {
       <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Customer Reward Suggestions</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-          <div style={{ fontWeight: 900, color: '#0B1F3A', alignSelf: 'end' }}>
+          <div style={{ fontWeight: 900, color: '#11185A', alignSelf: 'end' }}>
             Eligible: {eligibleCount} | Pending Approval: {blockedCount}
           </div>
           <div style={{ color: '#67738E', fontSize: 13, lineHeight: 1.5 }}>
@@ -350,7 +350,7 @@ const SuggestedGiftManager = () => {
           <div style={{ alignSelf: 'end', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
-              style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }}
+              style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }}
               onClick={() => {
                 setSelectedCustomerId('');
                 setCustomerSearchText('');
@@ -411,7 +411,7 @@ const SuggestedGiftManager = () => {
                               textAlign: 'left',
                               background: isSelected ? '#FFF7D6' : '#F8F9FB',
                               border: isSelected ? '2px solid #D4AF37' : '1px solid #E8EDF4',
-                              color: '#0B1F3A'
+                              color: '#11185A'
                             }}
                             onClick={() => handleSelectGift(row.customer.id, giftItem.giftItemName)}
                           >
@@ -456,7 +456,7 @@ const SuggestedGiftManager = () => {
                         <button
                           type="button"
                           disabled={!hasChangedApprovedGift(row)}
-                          style={{ ...buttonStyle, background: hasChangedApprovedGift(row) ? '#0B1F3A' : '#E8EDF4', color: hasChangedApprovedGift(row) ? '#FFFFFF' : '#67738E' }}
+                          style={{ ...buttonStyle, background: hasChangedApprovedGift(row) ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#E8EDF4', color: hasChangedApprovedGift(row) ? '#FFFFFF' : '#67738E' }}
                           onClick={() => handleUpdateApprovedGift(row)}
                         >
                           Update Approved Reward
@@ -464,7 +464,7 @@ const SuggestedGiftManager = () => {
                         <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleRemoveApproval(row)}>
                           Remove Approval
                         </button>
-                        <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={() => handleMarkGiven(row)}>
+                        <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} onClick={() => handleMarkGiven(row)}>
                           Mark as Redeemed
                         </button>
                       </div>
@@ -472,7 +472,7 @@ const SuggestedGiftManager = () => {
                       <button
                         type="button"
                         disabled={row.status !== 'Eligible' || !selectedGiftName}
-                        style={{ ...buttonStyle, background: row.status === 'Eligible' && selectedGiftName ? '#D4AF37' : '#E8EDF4', color: '#0B1F3A' }}
+                        style={{ ...buttonStyle, background: row.status === 'Eligible' && selectedGiftName ? '#D4AF37' : '#E8EDF4', color: '#11185A' }}
                         onClick={() => handleApproveGift(row)}
                       >
                         Approve Reward

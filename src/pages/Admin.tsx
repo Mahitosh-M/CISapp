@@ -166,7 +166,7 @@ const Admin = () => {
     background: '#FFFFFF',
     borderRadius: 16,
     padding: 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -286,7 +286,7 @@ const Admin = () => {
             </select>
           </label>
         </div>
-        <button className="admin-button admin-button-primary" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginTop: 16 }}>
+        <button className="admin-button admin-button-primary" type="submit" disabled={saving} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginTop: 16 }}>
           <UserPlus size={16} />Create User
         </button>
       </form>
@@ -314,7 +314,7 @@ const Admin = () => {
             </span>
           </label>
         </div>
-        <button className="admin-button admin-button-gold" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 16 }}>
+        <button className="admin-button admin-button-gold" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 16 }}>
           <KeyRound size={16} />Create Customer Login
         </button>
       </form>
@@ -339,7 +339,7 @@ const Admin = () => {
                 <td style={cellStyle}>{user.customerName || '-'}</td>
                 <td style={cellStyle}><span className={user.active ? 'admin-status active' : 'admin-status inactive'}>{user.active ? 'Yes' : 'No'}</span></td>
                 <td style={cellStyle}>
-                  <button className="admin-button admin-button-soft" type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8 }} onClick={() => handleSendPasswordReset(user)}>
+                  <button className="admin-button admin-button-soft" type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8 }} onClick={() => handleSendPasswordReset(user)}>
                     <Mail size={15} />Reset Password
                   </button>
                   <button className="admin-button admin-button-danger" type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>

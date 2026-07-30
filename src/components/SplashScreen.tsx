@@ -1,11 +1,11 @@
 const SplashScreen = () => {
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 38%, rgba(246,195,67,0.18), transparent 30%), linear-gradient(160deg, #061B3A 0%, #0B1F3A 52%, #102A4C 100%)', color: '#FFFFFF', padding: 24 }}>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 38%, rgba(212,175,55,0.18), transparent 30%), linear-gradient(160deg, #0F172A 0%, #11185A 48%, #4C1D95 100%)', color: '#FFFFFF', padding: 24 }}>
       <style>
         {`
           @keyframes medicoinsGlow {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(246,195,67,0.22), 0 18px 42px rgba(0,0,0,0.25); }
-            50% { transform: scale(1.035); box-shadow: 0 0 44px rgba(246,195,67,0.42), 0 22px 48px rgba(0,0,0,0.30); }
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(212,175,55,0.22), 0 18px 42px rgba(0,0,0,0.25); }
+            50% { transform: scale(1.035); box-shadow: 0 0 44px rgba(212,175,55,0.42), 0 22px 48px rgba(0,0,0,0.30); }
           }
           @keyframes medicoinsDots {
             0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }

@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import ExternalImage from '../components/ExternalImage';
-import IOSWheelPicker from '../components/IOSWheelPicker';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -50,11 +49,6 @@ const emptyOfferForm: OfferFormData = {
   endDate: '',
   isActive: true
 };
-
-const partnerLevelPickerOptions = PARTNER_LEVELS.map((level) => ({
-  label: level,
-  value: level
-}));
 
 const Loyalty = () => {
   const { userProfile } = useAuth();
@@ -362,7 +356,7 @@ const Loyalty = () => {
     background: '#FFFFFF',
     borderRadius: 12,
     padding: 18,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -461,7 +455,7 @@ const Loyalty = () => {
             <label style={{ fontWeight: 800 }}>Purchase target bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.purchaseTargetBonus} onChange={(event) => updateLoyaltyNumber('purchaseTargetBonus', event.target.value)} /></label>
             <label style={{ fontWeight: 800 }}>Referral bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.referralBonus} onChange={(event) => updateLoyaltyNumber('referralBonus', event.target.value)} /></label>
           </div>
-          <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginTop: 16 }}>
+          <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 16 }}>
             {saving ? 'Saving...' : 'Save Loyalty Settings'}
           </button>
         </form>
@@ -483,20 +477,24 @@ const Loyalty = () => {
                 Image URL fallback
                 <input style={inputStyle} value={offerForm.imageUrl} onChange={(event) => handleOfferFieldChange('imageUrl', event.target.value)} />
                 <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
-                  Optional poster image URL shown in the customer offer popup and carousel.
+                  Optional poster image URL shown on the customer Offers page cards.
                 </span>
               </label>
-              <div style={{ fontWeight: 800 }}>
-                <IOSWheelPicker
-                  label="Level Required"
-                  options={partnerLevelPickerOptions}
+              <label style={{ fontWeight: 800 }}>
+                Level Required
+                <select
+                  style={inputStyle}
                   value={offerForm.levelRequired}
-                  onChange={(nextLevel) => handleOfferFieldChange('levelRequired', nextLevel)}
-                />
+                  onChange={(event) => handleOfferFieldChange('levelRequired', event.target.value as PartnerLevel)}
+                >
+                  {PARTNER_LEVELS.map((level) => (
+                    <option key={level} value={level}>{level}</option>
+                  ))}
+                </select>
                 <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>
                   This level and higher can see it.
                 </span>
-              </div>
+              </label>
               <label style={{ fontWeight: 800 }}>
                 Start Date
                 <input style={inputStyle} type="date" value={offerForm.startDate} onChange={(event) => handleOfferFieldChange('startDate', event.target.value)} />
@@ -534,11 +532,11 @@ const Loyalty = () => {
               />
             </label>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
-              <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }}>
+              <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
                 {saving ? 'Saving...' : editingOfferId ? 'Update Offer' : 'Add Offer'}
               </button>
               {editingOfferId ? (
-                <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={resetOfferForm}>
+                <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetOfferForm}>
                   Cancel
                 </button>
               ) : null}
@@ -583,10 +581,10 @@ const Loyalty = () => {
                     <td style={tdStyle}>
                       {isAdmin ? (
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => editOffer(offer)}>
+                          <button type="button" disabled={saving} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }} onClick={() => editOffer(offer)}>
                             Edit
                           </button>
-                          <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={() => toggleOffer(offer)}>
+                          <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={() => toggleOffer(offer)}>
                             {offer.isActive ? 'Deactivate' : 'Activate'}
                           </button>
                           <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => deleteOffer(offer)}>
@@ -610,15 +608,19 @@ const Loyalty = () => {
             <div style={gridStyle}>
               <label style={{ fontWeight: 800 }}>Reward Name<input style={inputStyle} value={rewardForm.name} onChange={(event) => setRewardForm((current) => ({ ...current, name: event.target.value }))} /></label>
               <label style={{ fontWeight: 800 }}>Required Points<input style={inputStyle} type="number" min="0" value={rewardForm.requiredPoints} onChange={(event) => setRewardForm((current) => ({ ...current, requiredPoints: Number(event.target.value) || 0 }))} /></label>
-              <div style={{ fontWeight: 800 }}>
-                <IOSWheelPicker
-                  label="Level Required"
-                  options={partnerLevelPickerOptions}
+              <label style={{ fontWeight: 800 }}>
+                Level Required
+                <select
+                  style={inputStyle}
                   value={rewardForm.levelRequired}
-                  onChange={(nextLevel) => setRewardForm((current) => ({ ...current, levelRequired: nextLevel }))}
-                />
+                  onChange={(event) => setRewardForm((current) => ({ ...current, levelRequired: event.target.value as PartnerLevel }))}
+                >
+                  {PARTNER_LEVELS.map((level) => (
+                    <option key={level} value={level}>{level}</option>
+                  ))}
+                </select>
                 <span style={{ display: 'block', color: '#67738E', fontSize: 12, marginTop: 6 }}>This level and higher can see it.</span>
-              </div>
+              </label>
               <label style={{ fontWeight: 800 }}>Status<select style={inputStyle} value={rewardForm.isActive ? 'active' : 'inactive'} onChange={(event) => setRewardForm((current) => ({ ...current, isActive: event.target.value === 'active' }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
               <label style={{ fontWeight: 800 }}>
                 Image URL fallback
@@ -639,8 +641,8 @@ const Loyalty = () => {
               </div>
             ) : null}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14, marginBottom: 16 }}>
-              <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} onClick={saveReward}>{editingRewardId ? 'Update Reward' : 'Add Reward'}</button>
-              {editingRewardId ? <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={resetRewardForm}>Cancel</button> : null}
+              <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} onClick={saveReward}>{editingRewardId ? 'Update Reward' : 'Add Reward'}</button>
+              {editingRewardId ? <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetRewardForm}>Cancel</button> : null}
               {editingRewardId ? (
                 <button
                   type="button"
@@ -668,7 +670,7 @@ const Loyalty = () => {
                   <td style={tdStyle}>
                     {isAdmin ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF' }} onClick={() => editReward(reward)}>Edit</button>
+                        <button type="button" disabled={saving} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }} onClick={() => editReward(reward)}>Edit</button>
                         <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => deleteReward(reward)}>Delete</button>
                       </div>
                     ) : 'View only'}
@@ -714,7 +716,7 @@ const Loyalty = () => {
                       </>
                     ) : isAdmin && request.status === 'Approved' ? (
                       <>
-                        <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }} onClick={() => removeApproval(request)}>Remove Approval</button>
+                        <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8, marginBottom: 8 }} onClick={() => removeApproval(request)}>Remove Approval</button>
                         <button type="button" disabled={saving} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }} onClick={() => markRequestGifted(request)}>Gifted</button>
                       </>
                     ) : 'No action'}

@@ -156,6 +156,8 @@ export interface AppSettings {
   targetSettings: Record<TargetTierKey, TierTargetSetting>;
   loyaltySettings: LoyaltySettings;
   showCustomerTierToCustomer: boolean;
+  turnOnOrder: boolean;
+  headerOrder: boolean;
   updatedAt?: string;
 }
 

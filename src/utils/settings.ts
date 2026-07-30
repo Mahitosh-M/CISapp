@@ -79,7 +79,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     }
   },
   // Customer portal privacy flag. Default false hides tier/category until Admin explicitly allows it.
-  showCustomerTierToCustomer: false
+  showCustomerTierToCustomer: false,
+  turnOnOrder: false,
+  headerOrder: true
 };
 
 const roundToTwoDecimals = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -138,6 +140,8 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
     }
   },
   showCustomerTierToCustomer: settings?.showCustomerTierToCustomer ?? DEFAULT_SETTINGS.showCustomerTierToCustomer,
+  turnOnOrder: settings?.turnOnOrder ?? DEFAULT_SETTINGS.turnOnOrder,
+  headerOrder: settings?.headerOrder ?? DEFAULT_SETTINGS.headerOrder,
   targetSettings: {
     tier1: mergeTierTargetSettings(settings?.targetSettings?.tier1, DEFAULT_SETTINGS.targetSettings.tier1),
     tier2: mergeTierTargetSettings(settings?.targetSettings?.tier2, DEFAULT_SETTINGS.targetSettings.tier2),

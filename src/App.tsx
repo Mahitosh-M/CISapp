@@ -20,6 +20,7 @@ const Admin = lazy(() => import('./pages/Admin'));
 const Loyalty = lazy(() => import('./pages/Loyalty'));
 const OverduePcRequests = lazy(() => import('./pages/OverduePcRequests'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const CustomerLanding = lazy(() => import('./pages/customer/CustomerLanding'));
 const CustomerDashboard = lazy(() => import('./pages/customer/CustomerDashboard'));
 const CustomerInvoices = lazy(() => import('./pages/customer/CustomerInvoices'));
 const CustomerOffers = lazy(() => import('./pages/customer/CustomerOffers'));
@@ -64,7 +65,8 @@ const App = () => {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/customer" element={<ProtectedRoute allowedRoles={['customer']}><CustomerMobileLayout /></ProtectedRoute>}>
-          <Route index element={<CustomerDashboard />} />
+          <Route index element={<CustomerLanding />} />
+          <Route path="dashboard" element={<CustomerDashboard />} />
           <Route path="invoices" element={<CustomerInvoices />} />
           <Route path="payments" element={<Navigate to="/customer" replace />} />
           <Route path="offers" element={<CustomerOffers />} />

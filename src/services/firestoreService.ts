@@ -353,6 +353,8 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     loyaltySettings: data.loyaltySettings as AppSettings['loyaltySettings'],
     targetSettings: data.targetSettings as AppSettings['targetSettings'],
     showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,
+    turnOnOrder: data.turnOnOrder === true,
+    headerOrder: data.headerOrder === undefined ? DEFAULT_SETTINGS.headerOrder : data.headerOrder === true,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
   });
 };

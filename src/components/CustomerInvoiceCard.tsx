@@ -8,7 +8,7 @@ interface CustomerInvoiceCardProps {
 }
 
 const cardStyle = {
-  background: '#0B1F3A',
+  background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
   borderRadius: 18,
   padding: 14,
   boxShadow: '0 12px 28px rgba(11,31,58,0.22)',
@@ -22,7 +22,7 @@ const coinOuterStyle = {
   display: 'grid',
   placeItems: 'center',
   background: 'radial-gradient(circle at 34% 27%, #FFFBE8 0 10%, #FDE68A 28%, #D4AF37 62%, #8A5A00 100%)',
-  border: '5px solid #F8E7A3',
+  border: '5px solid #F6E6A8',
   boxShadow: 'inset 0 0 0 3px rgba(138,90,0,0.42), 0 10px 20px rgba(212,175,55,0.35)'
 };
 
@@ -73,9 +73,9 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
             </div>
             <div style={{ color: '#BFC8D9', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Date</div>
             <div style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 900, marginTop: 3 }}>{formatDate(invoiceView.invoice.date)}</div>
-            <div style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #F4D875 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: 10, marginTop: 12, boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
-              <div style={{ color: '#0B1F3A', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Amount</div>
-              <div style={{ color: '#0B1F3A', fontSize: 20, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.invoiceAmount)}</div>
+            <div style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #FDE68A 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: 10, marginTop: 12, boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
+              <div style={{ color: '#11185A', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Amount</div>
+              <div style={{ color: '#11185A', fontSize: 20, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.invoiceAmount)}</div>
             </div>
           </div>
 
@@ -125,9 +125,9 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 10, textAlign: 'center' }}>
-          <div style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #F4D875 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: '9px 6px', color: '#0B1F3A', boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
-            <div style={{ color: '#0B1F3A', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Amount</div>
-            <div style={{ color: '#0B1F3A', fontSize: 15, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.invoiceAmount)}</div>
+          <div style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #FDE68A 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: '9px 6px', color: '#11185A', boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
+            <div style={{ color: '#11185A', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Amount</div>
+            <div style={{ color: '#11185A', fontSize: 15, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.invoiceAmount)}</div>
           </div>
           <div style={{ background: '#ECFDF3', border: '1px solid #BBE7C8', borderRadius: 10, padding: '9px 6px' }}>
             <div style={{ color: '#166534', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Paid</div>

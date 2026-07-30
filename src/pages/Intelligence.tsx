@@ -74,7 +74,7 @@ const Intelligence = () => {
     background: '#FFFFFF',
     borderRadius: 16,
     padding: 18,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)'
   };
 
@@ -99,7 +99,7 @@ const Intelligence = () => {
     padding: '11px 12px',
     borderRadius: 10,
     border: '1px solid #D8DEE9',
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   const renderCustomerRow = (

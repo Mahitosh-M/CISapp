@@ -540,7 +540,7 @@ const Payments = () => {
     background: '#FFFFFF',
     borderRadius: 12,
     padding: isMobile ? 14 : 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -558,7 +558,7 @@ const Payments = () => {
     borderRadius: 10,
     border: '1px solid #D8DEE9',
     marginTop: 6,
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   const labelStyle: CSSProperties = {
@@ -586,7 +586,7 @@ const Payments = () => {
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
-    color: '#0B1F3A',
+    color: '#11185A',
     fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
@@ -594,7 +594,7 @@ const Payments = () => {
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
     borderBottom: '1px solid #E8EDF4',
-    color: '#0B1F3A',
+    color: '#11185A',
     verticalAlign: 'top'
   };
 
@@ -611,7 +611,7 @@ const Payments = () => {
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingPaymentId ? 'Edit Payment' : 'Add Payment'}</div>
             <div style={{ color: '#67738E', marginTop: 4 }}>Enter the received amount; it will clear all pending invoices in oldest-first order.</div>
           </div>
-          <div style={{ color: '#0B1F3A', fontWeight: 800 }}>
+          <div style={{ color: '#11185A', fontWeight: 800 }}>
             <div style={{ color: selectedPendingTotal > 0 ? '#B42318' : '#1B7F3A' }}>
               Selected Pending: {selectedInvoiceIds.length > 0 ? formatMoney(selectedPendingTotal) : 'No pending invoice'}
             </div>
@@ -644,7 +644,7 @@ const Payments = () => {
           {formData.customerId && !loadingCustomerPayments && invoiceOptions.length > 0 ? (
             <div style={{ gridColumn: '1 / -1', border: '1px solid #E8EDF4', borderRadius: 10, padding: 12, background: '#F8FAFC' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                <div style={{ fontWeight: 900, color: '#0B1F3A' }}>{editingPaymentId ? 'Apply to invoice' : 'Apply to invoices'}</div>
+                <div style={{ fontWeight: 900, color: '#11185A' }}>{editingPaymentId ? 'Apply to invoice' : 'Apply to invoices'}</div>
                 <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800 }}>
                   Selected pending: {formatMoney(selectedPendingTotal)}
                 </div>
@@ -668,7 +668,7 @@ const Payments = () => {
                     >
                       <input type={editingPaymentId ? 'radio' : 'checkbox'} checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
                       <span style={{ minWidth: 0 }}>
-                        <span style={{ display: 'block', color: '#0B1F3A', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
+                        <span style={{ display: 'block', color: '#11185A', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
                         <span style={{ display: 'block', color: '#B42318', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
                       </span>
                     </label>
@@ -676,7 +676,7 @@ const Payments = () => {
                 })}
               </div>
               {allocationPreview.length > 0 ? (
-                <div style={{ marginTop: 10, color: '#0B1F3A', fontSize: 12, fontWeight: 800 }}>
+                <div style={{ marginTop: 10, color: '#11185A', fontSize: 12, fontWeight: 800 }}>
                   {allocationPreview.map((allocation) => (
                     <span key={allocation.invoice.id} style={{ display: 'inline-block', marginRight: 12, marginTop: 4 }}>
                       {getInvoiceDisplayNumber(allocation.invoice)}: {formatMoney(allocation.appliedTotal)}
@@ -717,11 +717,11 @@ const Payments = () => {
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-          <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} disabled={saving}>
+          <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>
             {saving ? 'Saving...' : editingPaymentId ? 'Update Payment' : 'Add Payment'}
           </button>
           {editingPaymentId ? (
-            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={resetForm}>
+            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetForm}>
               Cancel
             </button>
           ) : null}
@@ -813,7 +813,7 @@ const Payments = () => {
                     <td style={cellStyle}>{payment.notes || '-'}</td>
                     <td style={cellStyle}>
                       {canEditPayment(payment) ? (
-                        <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(payment)}>
+                        <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(payment)}>
                           Edit
                         </button>
                       ) : null}
@@ -831,7 +831,7 @@ const Payments = () => {
           </table>
         </div>
         {canLoadMorePayments ? (
-          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
+          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginTop: 12 }} onClick={handleLoadMore}>
             Load 5 more
           </button>
         ) : null}

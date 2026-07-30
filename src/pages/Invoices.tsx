@@ -415,12 +415,12 @@ const Invoices = () => {
         <head>
           <title>${escapeHtml(invoice.invoiceNumber)}</title>
           <style>
-            body { font-family: Arial, sans-serif; color: #0B1F3A; padding: 32px; }
+            body { font-family: Arial, sans-serif; color: #11185A; padding: 32px; }
             .header { display: flex; justify-content: space-between; border-bottom: 3px solid #D4AF37; padding-bottom: 18px; margin-bottom: 24px; }
             .brand { font-size: 26px; font-weight: 800; }
             table { width: 100%; border-collapse: collapse; margin-top: 24px; }
             th, td { padding: 12px; border: 1px solid #D8DEE9; text-align: left; }
-            th { background: #0B1F3A; color: white; }
+            th { background: linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%); color: white; }
             .total { font-size: 18px; font-weight: 800; color: #D4AF37; }
           </style>
         </head>
@@ -486,7 +486,7 @@ const Invoices = () => {
     background: '#FFFFFF',
     borderRadius: 12,
     padding: isMobile ? 14 : 20,
-    color: '#0B1F3A',
+    color: '#11185A',
     boxShadow: '0 14px 35px rgba(11, 31, 58, 0.08)',
     marginBottom: 20
   };
@@ -504,7 +504,7 @@ const Invoices = () => {
     borderRadius: 10,
     border: '1px solid #D8DEE9',
     marginTop: 6,
-    color: '#0B1F3A'
+    color: '#11185A'
   };
 
   const labelStyle: CSSProperties = {
@@ -532,7 +532,7 @@ const Invoices = () => {
     background: '#F8F9FB',
     borderBottom: '1px solid #E8EDF4',
     textAlign: 'left',
-    color: '#0B1F3A',
+    color: '#11185A',
     fontSize: isMobile ? 11 : 13,
     fontWeight: 800
   };
@@ -540,7 +540,7 @@ const Invoices = () => {
   const cellStyle: CSSProperties = {
     padding: isMobile ? '9px 10px' : '14px 16px',
     borderBottom: '1px solid #E8EDF4',
-    color: '#0B1F3A',
+    color: '#11185A',
     verticalAlign: 'top'
   };
 
@@ -631,11 +631,11 @@ const Invoices = () => {
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-          <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A' }} disabled={saving}>
+          <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>
             {saving ? 'Saving...' : editingInvoiceId ? 'Update Invoice' : 'Create Invoice'}
           </button>
           {editingInvoiceId ? (
-            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A' }} onClick={resetForm}>
+            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetForm}>
               Cancel
             </button>
           ) : null}
@@ -705,23 +705,23 @@ const Invoices = () => {
                     <td style={cellStyle}>{formatMoney(invoice.transportAmount)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.totalProfit)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.paidAmount)}</td>
-                    <td style={{ ...cellStyle, color: invoice.outstanding > 0 ? '#B42318' : '#0B1F3A', fontWeight: 800 }}>
+                    <td style={{ ...cellStyle, color: invoice.outstanding > 0 ? '#B42318' : '#11185A', fontWeight: 800 }}>
                       {formatMoney(invoice.outstanding)}
                     </td>
                     <td style={{ ...cellStyle, color: invoice.status.color, fontWeight: 800 }}>{invoice.status.label}</td>
                     <td style={cellStyle}>
                       {canEditInvoice(invoice) ? (
-                        <button type="button" style={{ ...buttonStyle, background: '#0B1F3A', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
+                        <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
                           Edit
                         </button>
                       ) : null}
-                      <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }} onClick={() => handlePrint(invoice)}>
+                      <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginRight: 8, marginBottom: 8 }} onClick={() => handlePrint(invoice)}>
                         Print
                       </button>
                       {invoice.outstanding > 0 ? (
                         <button
                           type="button"
-                          style={{ ...buttonStyle, background: '#25D366', color: '#0B1F3A', marginRight: 8, marginBottom: 8 }}
+                          style={{ ...buttonStyle, background: '#25D366', color: '#11185A', marginRight: 8, marginBottom: 8 }}
                           onClick={() => handleWhatsAppReminder(invoice)}
                         >
                           Send WhatsApp Reminder
@@ -740,7 +740,7 @@ const Invoices = () => {
           </table>
         </div>
         {!loading && invoices.length >= invoiceLimit ? (
-          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#0B1F3A', marginTop: 12 }} onClick={handleLoadMore}>
+          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginTop: 12 }} onClick={handleLoadMore}>
             Load 5 more
           </button>
         ) : null}

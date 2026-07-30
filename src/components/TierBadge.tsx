@@ -7,7 +7,7 @@ interface TierBadgeProps {
 
 const getTierColors = (tier: CustomerTier) => {
   if (tier === 'Tier 1') {
-    return { background: '#D4AF37', color: '#0B1F3A', border: '#D4AF37' };
+    return { background: '#D4AF37', color: '#11185A', border: '#D4AF37' };
   }
 
   if (tier === 'Tier 2') {
@@ -15,7 +15,7 @@ const getTierColors = (tier: CustomerTier) => {
   }
 
   if (tier === 'Tier 3') {
-    return { background: '#E8EDF5', color: '#0B1F3A', border: '#BFC8D9' };
+    return { background: '#E8EDF5', color: '#11185A', border: '#BFC8D9' };
   }
 
   return { background: '#EAF8EE', color: '#166534', border: '#ABEFC6' };

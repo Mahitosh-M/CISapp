@@ -5,7 +5,7 @@ import { useCustomerPortalContext } from '../../components/CustomerMobileLayout'
 import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../../utils/offers';
 
 const customerPromoCardStyle = {
-  background: 'linear-gradient(145deg, #0B1F3A 0%, #12345A 100%)',
+  background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
   border: '1px solid rgba(212,175,55,0.32)',
   borderRadius: 18,
   padding: 14,
@@ -37,7 +37,7 @@ const CustomerOffers = () => {
 
       {activeOffers.length === 0 ? (
         <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#67738E' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 900, color: '#0B1F3A' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 900, color: '#11185A' }}>
             <Tags size={18} color="#D4AF37" />
             No active offers
           </div>
@@ -52,18 +52,18 @@ const CustomerOffers = () => {
               {offer.imageUrl ? (
                 <ExternalImage src={offer.imageUrl} alt={offer.title} style={customerPromoImageStyle} />
               ) : (
-                <div style={{ background: '#FFF7D6', borderRadius: 14, minHeight: 170, display: 'grid', placeItems: 'center', color: '#0B1F3A', fontWeight: 900 }}>
+                <div style={{ background: '#FFF7D6', borderRadius: 14, minHeight: 170, display: 'grid', placeItems: 'center', color: '#11185A', fontWeight: 900 }}>
                   Offer poster will appear here
                 </div>
               )}
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#FFF7D6', color: '#0B1F3A', borderRadius: 999, padding: '5px 10px', fontSize: 11, fontWeight: 900, marginTop: 12 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#FFF7D6', color: '#11185A', borderRadius: 999, padding: '5px 10px', fontSize: 11, fontWeight: 900, marginTop: 12 }}>
                 <Tags size={14} color="#D4AF37" />
                 Active Offer
               </div>
               <div style={{ color: '#FFFFFF', fontWeight: 900, fontSize: 20, marginTop: 10 }}>{offer.title}</div>
               {offer.description ? <div style={{ color: '#D7DEEA', marginTop: 8, lineHeight: 1.5 }}>{offer.description}</div> : null}
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'linear-gradient(135deg, #FFF7D6, #D4AF37)', color: '#0B1F3A', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 900, marginTop: 12, boxShadow: '0 8px 18px rgba(212,175,55,0.22)' }}>
-                <CalendarDays size={14} color="#0B1F3A" />
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'linear-gradient(135deg, #FFF7D6, #D4AF37)', color: '#11185A', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 900, marginTop: 12, boxShadow: '0 8px 18px rgba(212,175,55,0.22)' }}>
+                <CalendarDays size={14} color="#11185A" />
                 Valid: {getOfferDateRangeLabel(offer)}
               </div>
             </div>

@@ -18,7 +18,7 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
   const formatWholeOrders = (value: number) => String(Math.round(value));
 
   const cardStyle = {
-    background: '#0F2748',
+    background: '#1E2961',
     borderRadius: 16,
     padding: 18,
     color: '#FFFFFF',
@@ -61,7 +61,7 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
   };
 
   const targetBoxStyle = {
-    background: '#102F57',
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
     borderRadius: 12,
     padding: 10
   };
@@ -115,7 +115,7 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
 
       <div style={movementStyle}>{customer.movement}: {customer.movementReason}</div>
       {customer.isOnboarding || customer.tierCapReason ? (
-        <div style={{ ...metaStyle, color: '#F2C94C' }}>
+        <div style={{ ...metaStyle, color: '#FDE68A' }}>
           {[customer.isOnboarding ? `${customer.onboardingStage} onboarding | ${Math.round(customer.confidenceFactor * 100)}% confidence` : '', customer.tierCapReason || '']
             .filter(Boolean)
             .join(' | ')}

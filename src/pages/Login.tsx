@@ -37,8 +37,8 @@ const Login = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0B1F3A', padding: 20 }}>
-      <form onSubmit={handleSubmit} style={{ background: '#FFFFFF', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#0B1F3A' }}>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', padding: 20 }}>
+      <form onSubmit={handleSubmit} style={{ background: '#FFFFFF', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#11185A' }}>
         <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 24, marginBottom: 6 }}>Customer Intelligence M  </div>
         <div style={{ color: '#67738E', marginBottom: 22 }}>Login with your Email</div>
 
@@ -54,7 +54,7 @@ const Login = () => {
 
         {error ? <div style={{ color: '#B42318', marginBottom: 12 }}>{error}</div> : null}
 
-        <button type="submit" disabled={saving} style={{ width: '100%', border: 0, borderRadius: 10, padding: 12, background: '#D4AF37', color: '#0B1F3A', fontWeight: 900, cursor: 'pointer' }}>
+        <button type="submit" disabled={saving} style={{ width: '100%', border: 0, borderRadius: 10, padding: 12, background: '#D4AF37', color: '#11185A', fontWeight: 900, cursor: 'pointer' }}>
           {saving ? 'Logging in...' : 'Login'}
         </button>
       </form>
