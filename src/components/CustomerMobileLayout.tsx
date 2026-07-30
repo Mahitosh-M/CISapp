@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
-import { Coins, FileText, Gift, Home, ShoppingCart, Sparkles, Tags, Wallet } from 'lucide-react';
+import { Coins, FileText, Gift, Home, Sparkles, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import InstallAppPrompt from './InstallAppPrompt';
@@ -102,7 +102,6 @@ const CustomerMobileLayout = () => {
         <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr auto', alignItems: 'center', gap: 10 }}>
           {showHeaderOrder ? (
             <button type="button" onClick={openOrderApp} style={{ border: 0, borderRadius: 12, background: '#D4AF37', color: '#11185A', padding: '9px 12px', fontWeight: 900, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <ShoppingCart size={22} strokeWidth={2.4} />
               Order
             </button>
           ) : (
@@ -144,7 +143,7 @@ const CustomerMobileLayout = () => {
                 fontWeight: 900
               })}
             >
-              <Icon size={20} style={{ display: 'block', margin: '0 auto 3px' }} />
+              <Icon size={24} style={{ display: 'block', margin: '0 auto 3px' }} />
               {item.label}
             </NavLink>
           );

@@ -32,16 +32,15 @@ const Login = () => {
     boxSizing: 'border-box' as const,
     padding: '12px 14px',
     borderRadius: 10,
-    border: '1px solid #D8DEE9',
+    border: '1px solid rgba(255,255,255,0.24)',
+    background: 'rgba(255,255,255,0.96)',
+    color: '#0B1F3A',
     marginTop: 6
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', padding: 20 }}>
-      <form onSubmit={handleSubmit} style={{ background: '#FFFFFF', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#11185A' }}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 24, marginBottom: 6 }}>Customer Intelligence M  </div>
-        <div style={{ color: '#67738E', marginBottom: 22 }}>Login with your Email</div>
-
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 0% 0%, #102F63 0%, rgba(16,47,99,0) 43%), radial-gradient(circle at 100% 100%, #172F62 0%, rgba(23,47,98,0) 46%), #050505', padding: 20 }}>
+      <form onSubmit={handleSubmit} style={{ background: 'linear-gradient(135deg, #4A155F 0%, #2A1049 45%, #091D42 100%)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#FFFFFF', boxShadow: '0 24px 54px rgba(0,0,0,0.42)' }}>
         <label style={{ display: 'block', fontWeight: 800, marginBottom: 14 }}>
           Email
           <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} style={inputStyle} />
@@ -54,7 +53,7 @@ const Login = () => {
 
         {error ? <div style={{ color: '#B42318', marginBottom: 12 }}>{error}</div> : null}
 
-        <button type="submit" disabled={saving} style={{ width: '100%', border: 0, borderRadius: 10, padding: 12, background: '#D4AF37', color: '#11185A', fontWeight: 900, cursor: 'pointer' }}>
+        <button type="submit" disabled={saving} style={{ width: '100%', border: 0, borderRadius: 10, padding: 12, background: '#D4AF37', color: '#0B1F3A', fontWeight: 900, cursor: 'pointer' }}>
           {saving ? 'Logging in...' : 'Login'}
         </button>
       </form>

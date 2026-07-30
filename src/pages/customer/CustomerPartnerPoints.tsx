@@ -76,7 +76,7 @@ const CustomerPartnerPoints = () => {
         {availableRewards.length === 0 ? (
           <div style={{ color: '#67738E', fontSize: 13 }}>No rewards are available for your current partner level yet.</div>
         ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ display: 'grid', gap: 8 }}>
             {availableRewards.map((reward) => {
               const rewardRequest = latestRequestByRewardId.get(reward.id);
               const hasEnoughApc = (apcSummary?.apcBalance ?? 0) >= reward.requiredPoints;
@@ -87,7 +87,13 @@ const CustomerPartnerPoints = () => {
 
               return (
                 <div key={reward.id} style={customerPromoCardStyle}>
-                  {reward.imageUrl ? <ExternalImage src={reward.imageUrl} alt={reward.name} style={customerPromoImageStyle} /> : null}
+                  {reward.imageUrl ? (
+                    <ExternalImage
+                      src={reward.imageUrl}
+                      alt={reward.name}
+                      style={customerPromoImageStyle}
+                    />
+                  ) : null}
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                     <div>
                       <div style={{ color: '#FFFFFF', fontSize: 19, fontWeight: 900, lineHeight: 1.15 }}>{reward.name}</div>

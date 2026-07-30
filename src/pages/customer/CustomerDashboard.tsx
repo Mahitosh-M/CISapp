@@ -347,6 +347,23 @@ const CustomerDashboard = () => {
         </div>
       ) : null}
 
+      <button
+        type="button"
+        onClick={() => navigate('/customer/invoices')}
+        style={{
+          width: '100%',
+          minHeight: 52,
+          border: 0,
+          borderRadius: 16,
+          background: '#D4AF37',
+          color: '#11185A',
+          fontSize: 13,
+          fontWeight: 900,
+          cursor: 'pointer'
+        }}
+      >
+        View All Invoices
+      </button>
     </div>
   );
 };

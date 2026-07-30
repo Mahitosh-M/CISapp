@@ -1,6 +1,6 @@
 {
-  "name": "MediCoins Partner App",
-  "short_name": "MediCoins",
+  "name": "COINS Partner App",
+  "short_name": "COINS",
   "description": "Customer reward app for invoices, offers, outstanding and Partner Coin rewards.",
   "id": "/",
   "start_url": "/customer",
