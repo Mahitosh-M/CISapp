@@ -149,7 +149,7 @@ const CustomerMobileLayout = () => {
                 fontWeight: 900
               })}
             >
-              <Icon size={20} style={{ display: 'block', margin: '0 auto 3px' }} />
+              <Icon size={24} style={{ display: 'block', margin: '0 auto 3px' }} />
               {item.label}
             </NavLink>
           );

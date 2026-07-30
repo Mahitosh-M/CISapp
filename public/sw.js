@@ -1,4 +1,4 @@
-const CACHE_NAME = 'medicoins-static-v2';
+const CACHE_NAME = 'coins-static-v3';
 const STATIC_ASSETS = [
   '/manifest.json',
   '/icons/icon-192.png',

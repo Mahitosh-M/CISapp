@@ -83,7 +83,7 @@ const InstallAppPrompt = ({ disabled = false }: { disabled?: boolean }) => {
           <img src="/icons/icon-192.png" alt="" style={{ width: 46, height: 46, borderRadius: 13, boxShadow: '0 8px 18px rgba(246,195,67,0.22)' }} />
           <div>
             <div style={{ color: '#F6C343', fontSize: 12, fontWeight: 900 }}>{isIosPrompt ? 'iPhone Home Screen' : 'Quick Access'}</div>
-            <div style={{ fontWeight: 900, fontSize: 17 }}>{isIosPrompt ? 'Install MediCoins on iPhone' : 'Install MediCoins App'}</div>
+            <div style={{ fontWeight: 900, fontSize: 17 }}>{isIosPrompt ? 'Install COINS on iPhone' : 'Install COINS App'}</div>
           </div>
         </div>
         <div style={{ padding: 15 }}>
