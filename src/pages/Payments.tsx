@@ -774,7 +774,7 @@ const Payments = () => {
                   const splitPaymentTotal = splitPaymentTotalById.get(payment.id);
 
                   return (
-                  <tr key={payment.id}>
+                  <tr className="role-record-row" key={payment.id}>
                     <td style={cellStyle}>{formatDate(payment.date)}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
                     <td style={cellStyle}>{invoiceLabel}</td>

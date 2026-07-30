@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, Coins, Gift, ReceiptText, Sparkles, Trophy, 
 import { useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatDate, formatMoney } from '../../utils/formatters';
+import { getTodayDateString } from '../../utils/dateUtils';
 import { calculateCustomerTotalOutstanding, calculateInvoiceApcInfo, getInvoiceFullPaymentDate, isCurrentMonth } from '../../utils/customerPortal';
 import { formatApc } from '../../utils/loyalty';
 import { getBusinessInvoices, getInvoiceDisplayNumber } from '../../utils/openingBalance';
@@ -22,14 +23,20 @@ const CustomerDashboard = () => {
   const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests } = useCustomerPortalContext();
   const navigate = useNavigate();
   const previousPcBalanceRef = useRef<number | null>(null);
+  const bonusNoticeKeyRef = useRef('');
+  const bonusNoticeVisibleRef = useRef(false);
   const [showPcHistory, setShowPcHistory] = useState(false);
   const [pcHistoryFilter, setPcHistoryFilter] = useState<PcHistoryFilter>('all');
   const [pcBalanceChange, setPcBalanceChange] = useState<number | null>(null);
+  const [showCurrentMonthBonusCredit, setShowCurrentMonthBonusCredit] = useState(false);
   const totalOutstanding = customer?.totalOutstandingAmount ?? calculateCustomerTotalOutstanding(customer, invoiceViews);
   const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
   const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
   const currentMonthBonusRequests = bonusPcRequests.filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)));
   const currentMonthBonusPc = currentMonthBonusRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
+  const currentMonthBonusNoticeKey = customer?.id
+    ? `customerMonthlyBonusSeen:${customer.id}:${getTodayDateString().slice(0, 7)}`
+    : '';
   const currentMonthBonusLabels = useMemo(
     () => Array.from(new Set(currentMonthBonusRequests.map((request) => request.bonusLabel).filter(Boolean))),
     [currentMonthBonusRequests]
@@ -99,6 +106,38 @@ const CustomerDashboard = () => {
     const timeout = window.setTimeout(() => setPcBalanceChange(null), 1500);
     return () => window.clearTimeout(timeout);
   }, [pcBalance]);
+
+  useEffect(() => {
+    if (!currentMonthBonusNoticeKey || currentMonthBonusPc <= 0) {
+      bonusNoticeVisibleRef.current = false;
+      setShowCurrentMonthBonusCredit(false);
+      return undefined;
+    }
+
+    if (bonusNoticeKeyRef.current !== currentMonthBonusNoticeKey) {
+      bonusNoticeKeyRef.current = currentMonthBonusNoticeKey;
+
+      try {
+        bonusNoticeVisibleRef.current = window.localStorage.getItem(currentMonthBonusNoticeKey) === null;
+        if (bonusNoticeVisibleRef.current) {
+          window.localStorage.setItem(currentMonthBonusNoticeKey, new Date().toISOString());
+        }
+      } catch {
+        bonusNoticeVisibleRef.current = true;
+      }
+
+      setShowCurrentMonthBonusCredit(bonusNoticeVisibleRef.current);
+    }
+
+    if (!bonusNoticeVisibleRef.current) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      bonusNoticeVisibleRef.current = false;
+      setShowCurrentMonthBonusCredit(false);
+    }, 60_000);
+
+    return () => window.clearTimeout(timeout);
+  }, [currentMonthBonusNoticeKey, currentMonthBonusPc]);
 
   return (
     <div>
@@ -330,7 +369,7 @@ const CustomerDashboard = () => {
         </div>
       ) : null}
 
-      {currentMonthBonusPc > 0 ? (
+      {currentMonthBonusPc > 0 && showCurrentMonthBonusCredit ? (
         <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12, border: '1px solid #F4DE91' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <div style={{ width: 46, height: 46, borderRadius: 16, background: '#FFF7D6', display: 'grid', placeItems: 'center', color: '#11185A' }}>

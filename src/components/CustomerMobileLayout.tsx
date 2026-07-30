@@ -10,11 +10,11 @@ import { formatApc } from '../utils/loyalty';
 import { getTierColors, getTierDisplayName } from '../utils/tiers';
 
 const navItems = [
-  { to: '/customer', label: 'Home', icon: Home, end: true },
-  { to: '/customer/dashboard', label: 'Dashboard', icon: Wallet },
-  { to: '/customer/invoices', label: 'Invoices', icon: FileText },
-  { to: '/customer/partner-points', label: 'Rewards', icon: Gift },
-  { to: '/customer/offers', label: 'Offers', icon: Tags }
+  { to: '/customer', label: 'Home', icon: Home, color: '#FDE68A', end: true },
+  { to: '/customer/dashboard', label: 'Dashboard', icon: Wallet, color: '#7DD3FC' },
+  { to: '/customer/invoices', label: 'Invoices', icon: FileText, color: '#86EFAC' },
+  { to: '/customer/partner-points', label: 'Rewards', icon: Gift, color: '#F9A8D4' },
+  { to: '/customer/offers', label: 'Offers', icon: Tags, color: '#FDBA74' }
 ];
 
 const getPcBalanceStorageKey = (userId?: string, customerId?: string) =>
@@ -125,7 +125,7 @@ const CustomerMobileLayout = () => {
         <Outlet context={{ ...portalData, openOrderApp }} />
       </main>
 
-      <nav style={{ position: 'fixed', left: '50%', bottom: 0, transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: '#FFFFFF', borderTop: '1px solid #D8DEE9', display: 'grid', gridTemplateColumns: `repeat(${visibleNavItems.length}, 1fr)`, padding: '8px 6px 10px', boxShadow: '0 -12px 24px rgba(11,31,58,0.12)' }}>
+      <nav style={{ position: 'fixed', left: '50%', bottom: 0, transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', borderTop: '1px solid rgba(212,175,55,0.45)', display: 'grid', gridTemplateColumns: `repeat(${visibleNavItems.length}, minmax(0, 1fr))`, gap: 5, padding: '7px 6px 9px', boxShadow: '0 -12px 28px rgba(0,0,0,0.30)', zIndex: 20 }}>
         {visibleNavItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -135,16 +135,19 @@ const CustomerMobileLayout = () => {
               end={item.end}
               style={({ isActive }) => ({
                 textDecoration: 'none',
-                color: isActive ? '#11185A' : '#67738E',
-                background: isActive ? '#FFF7D6' : 'transparent',
-                borderRadius: 14,
-                padding: '8px 4px',
+                color: item.color,
+                background: isActive ? 'rgba(212,175,55,0.22)' : 'rgba(255,255,255,0.08)',
+                border: isActive ? '1px solid rgba(253,230,138,0.72)' : '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 10,
+                padding: '7px 2px 6px',
                 textAlign: 'center',
-                fontSize: 11,
-                fontWeight: 900
+                fontSize: 10,
+                fontWeight: 900,
+                minWidth: 0,
+                boxShadow: isActive ? '0 5px 14px rgba(0,0,0,0.22)' : 'none'
               })}
             >
-              <Icon size={24} style={{ display: 'block', margin: '0 auto 3px' }} />
+              <Icon size={22} strokeWidth={2.5} style={{ display: 'block', margin: '0 auto 3px' }} />
               {item.label}
             </NavLink>
           );

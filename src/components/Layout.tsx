@@ -1,4 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { BarChart3, BrainCircuit, Coins, CreditCard, FileText, Gift, Settings, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppSettings } from '../hooks/useAppSettings';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -7,27 +10,29 @@ interface NavItem {
   to: string;
   mobileTo?: string;
   label: string;
+  icon: LucideIcon;
   adminOnly?: boolean;
   staffPermission?: 'canViewReports';
 }
 
 const navItems: NavItem[] = [
-  { to: '/customers', label: 'Customers' },
-  { to: '/invoices', label: 'Invoices' },
-  { to: '/payments', label: 'Payments' },
-  { to: '/intelligence', label: 'Intelligence', adminOnly: true },
-  { to: '/analytics', label: 'Analytics', adminOnly: true },
-  { to: '/loyalty', label: 'Loyalty', adminOnly: true },
-  { to: '/overdue-pc-requests', label: 'PC', adminOnly: true },
-  { to: '/reports', label: 'Reports', staffPermission: 'canViewReports' },
-  { to: '/admin', label: 'Admin', adminOnly: true },
-  { to: '/settings', label: 'Settings', adminOnly: true }
+  { to: '/customers', label: 'Customers', icon: Users },
+  { to: '/invoices', label: 'Invoices', icon: FileText },
+  { to: '/payments', label: 'Payments', icon: CreditCard },
+  { to: '/intelligence', label: 'Intelligence', icon: BrainCircuit, adminOnly: true },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
+  { to: '/loyalty', label: 'Loyalty', icon: Gift, adminOnly: true },
+  { to: '/overdue-pc-requests', label: 'PC', icon: Coins, adminOnly: true },
+  { to: '/reports', label: 'Reports', icon: SlidersHorizontal, staffPermission: 'canViewReports' },
+  { to: '/admin', label: 'Admin', icon: ShieldCheck, adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true }
 ];
 
 const Layout = () => {
   const { userProfile, logout } = useAuth();
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const visibleNavItems = navItems.filter((item) => {
     if (item.adminOnly) return userProfile?.role === 'Admin';
     if (item.staffPermission === 'canViewReports') {
@@ -45,32 +50,48 @@ const Layout = () => {
   const getNavPath = (item: NavItem) => (isMobile && item.mobileTo ? item.mobileTo : item.to);
 
   const sidebarStyle = {
-    width: 260,
+    position: 'fixed' as const,
+    inset: '0 auto 0 0',
+    zIndex: 20,
+    width: isSidebarExpanded ? 252 : 72,
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
     color: '#FFFFFF',
-    padding: '24px 18px',
-    boxSizing: 'border-box' as const
+    padding: '20px 10px',
+    boxSizing: 'border-box' as const,
+    overflow: 'hidden',
+    boxShadow: isSidebarExpanded ? '18px 0 40px rgba(0,0,0,0.34)' : '8px 0 24px rgba(0,0,0,0.22)',
+    transition: 'width 180ms ease, box-shadow 180ms ease'
   };
 
   const linkStyle = {
-    display: 'block',
-    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    minHeight: 44,
+    padding: '8px 14px',
     borderRadius: 12,
     color: '#D4AF37',
     textDecoration: 'none',
-    marginBottom: 10
+    marginBottom: 8,
+    whiteSpace: 'nowrap' as const
   };
 
   const activeLinkStyle = {
-    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
-    color: '#FFFFFF'
+    background: 'rgba(255,255,255,0.13)',
+    color: '#FFFFFF',
+    boxShadow: 'inset 3px 0 0 #D4AF37'
   };
 
   const headerStyle = {
-    fontSize: 24,
-    marginBottom: 32,
-    fontWeight: 700
+    minHeight: 46,
+    marginBottom: 24,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    padding: '0 12px',
+    color: '#D4AF37',
+    whiteSpace: 'nowrap' as const
   };
 
   const layoutStyle = {
@@ -137,22 +158,37 @@ const Layout = () => {
   return (
     <div style={layoutStyle}>
       {!isMobile ? (
-        <aside style={sidebarStyle}>
-          <div style={headerStyle}>Pharma ERP</div>
-          {mobileNavItems.map((item) => (
-            <NavLink
-              key={getNavPath(item)}
-              to={getNavPath(item)}
-              end={item.to === '/'}
-              style={({ isActive }) => ({
-                ...linkStyle,
-                ...(isActive ? activeLinkStyle : {})
-              })}
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </aside>
+        <div style={{ width: 72, flex: '0 0 72px' }}>
+          <aside
+            style={sidebarStyle}
+            onMouseEnter={() => setIsSidebarExpanded(true)}
+            onMouseLeave={() => setIsSidebarExpanded(false)}
+          >
+            <div style={headerStyle} title="Pharma ERP">
+              <ShieldCheck size={24} style={{ flex: '0 0 auto' }} />
+              <span style={{ opacity: isSidebarExpanded ? 1 : 0, transition: 'opacity 120ms ease', fontSize: 20, fontWeight: 900 }}>Pharma ERP</span>
+            </div>
+            {mobileNavItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={getNavPath(item)}
+                  to={getNavPath(item)}
+                  end={item.to === '/'}
+                  title={!isSidebarExpanded ? item.label : undefined}
+                  onClick={() => setIsSidebarExpanded(false)}
+                  style={({ isActive }) => ({
+                    ...linkStyle,
+                    ...(isActive ? activeLinkStyle : {})
+                  })}
+                >
+                  <Icon size={21} style={{ flex: '0 0 auto' }} />
+                  <span style={{ opacity: isSidebarExpanded ? 1 : 0, transition: 'opacity 120ms ease' }}>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </aside>
+        </div>
       ) : null}
       <main style={contentStyle}>
         <div style={topBarStyle}>

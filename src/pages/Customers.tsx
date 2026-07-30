@@ -699,7 +699,7 @@ const Customers = () => {
                         <tr><td style={cellStyle} colSpan={4}>No customers found for this follow-up list.</td></tr>
                       ) : (
                         inactiveCustomerRows.map(({ customer, daysSinceLastOrder, outstanding }) => (
-                          <tr key={customer.id}>
+                          <tr className="role-record-row" key={customer.id}>
                             <td style={cellStyle}>
                               <strong>{customer.name}</strong>
                               {customer.area ? (
@@ -794,7 +794,7 @@ const Customers = () => {
                     const totalColor = storedTotal <= 0 ? '#1B7F3A' : '#B7791F';
 
                     return (
-                    <tr key={customer.id}>
+                    <tr className="role-record-row" key={customer.id}>
                       {/*
                         Customer total mirrors the stored customer value shown in the customer portal.
                         Future edit point: add credit-limit logic beside these indicators.
