@@ -63,9 +63,11 @@ const CustomerPartnerPoints = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <div>
             <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900 }}>Available Rewards</div>
-            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 800, marginTop: 3 }}>
-              {apcSummary?.rewardAvailable ? 'Some rewards are ready to request' : `You can view level rewards now; need ${formatApc(apcSummary?.pointsNeededForNextReward ?? 0)} more PC for the next request`}
-            </div>
+            {!apcSummary?.rewardAvailable ? (
+              <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 800, marginTop: 3 }}>
+                You can view level rewards now; need {formatApc(apcSummary?.pointsNeededForNextReward ?? 0)} more PC for the next request
+              </div>
+            ) : null}
           </div>
           <div style={{ width: 42, height: 42, borderRadius: 14, background: '#FFF7D6', color: '#11185A', display: 'grid', placeItems: 'center' }}>
             <Wallet size={21} />
