@@ -28,3 +28,5 @@ Thumbs.db
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+firestore-credit-analysis.local.md
+firestore-credit-rules-audit.local.json

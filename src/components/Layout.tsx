@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BarChart3, BrainCircuit, Coins, CreditCard, FileText, Gift, Settings, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { BarChart3, BrainCircuit, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,27 +11,30 @@ interface NavItem {
   mobileTo?: string;
   label: string;
   icon: LucideIcon;
+  mobileColor: string;
   adminOnly?: boolean;
   staffPermission?: 'canViewReports';
 }
 
 const navItems: NavItem[] = [
-  { to: '/customers', label: 'Customers', icon: Users },
-  { to: '/invoices', label: 'Invoices', icon: FileText },
-  { to: '/payments', label: 'Payments', icon: CreditCard },
-  { to: '/intelligence', label: 'Intelligence', icon: BrainCircuit, adminOnly: true },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3, adminOnly: true },
-  { to: '/loyalty', label: 'Loyalty', icon: Gift, adminOnly: true },
-  { to: '/overdue-pc-requests', label: 'PC', icon: Coins, adminOnly: true },
-  { to: '/reports', label: 'Reports', icon: SlidersHorizontal, staffPermission: 'canViewReports' },
-  { to: '/admin', label: 'Admin', icon: ShieldCheck, adminOnly: true },
-  { to: '/settings', label: 'Settings', icon: Settings, adminOnly: true }
+  { to: '/customers', label: 'Customers', icon: Users, mobileColor: '#67E8F9' },
+  { to: '/invoices', label: 'Invoices', icon: FileText, mobileColor: '#86EFAC' },
+  { to: '/payments', label: 'Payments', icon: CreditCard, mobileColor: '#FDE047' },
+  { to: '/intelligence', label: 'Intelligence', icon: BrainCircuit, mobileColor: '#C4B5FD', adminOnly: true },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3, mobileColor: '#93C5FD', adminOnly: true },
+  { to: '/loyalty', label: 'Loyalty', icon: Gift, mobileColor: '#FDA4AF', adminOnly: true },
+  { to: '/overdue-pc-requests', label: 'PC', icon: Coins, mobileColor: '#FCD34D', adminOnly: true },
+  { to: '/credit', label: 'Credit', icon: Landmark, mobileColor: '#5EEAD4', adminOnly: true },
+  { to: '/reports', label: 'Reports', icon: SlidersHorizontal, mobileColor: '#F9A8D4', staffPermission: 'canViewReports' },
+  { to: '/admin', label: 'Admin', icon: ShieldCheck, mobileColor: '#FDBA74', adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings, mobileColor: '#CBD5E1', adminOnly: true }
 ];
 
 const Layout = () => {
   const { userProfile, logout } = useAuth();
   const { settings } = useAppSettings();
   const isMobile = useIsMobile();
+  const isStaffMobile = isMobile && userProfile?.role === 'Staff';
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const visibleNavItems = navItems.filter((item) => {
     if (item.adminOnly) return userProfile?.role === 'Admin';
@@ -130,29 +133,48 @@ const Layout = () => {
     bottom: 0,
     zIndex: 10,
     display: 'flex',
-    gap: 8,
+    gap: isStaffMobile ? 6 : 8,
     overflowX: 'auto' as const,
-    padding: '9px 10px 12px',
-    background: '#FFFFFF',
-    borderTop: '1px solid #D8DEE9',
-    boxShadow: '0 -12px 24px rgba(11,31,58,0.14)'
+    padding: isStaffMobile ? '8px 8px 10px' : '9px 10px 12px',
+    background: isStaffMobile
+      ? 'linear-gradient(135deg, #071A33 0%, #020B18 58%, #000000 100%)'
+      : '#FFFFFF',
+    borderTop: isStaffMobile ? '1px solid #163A63' : '1px solid #D8DEE9',
+    boxShadow: isStaffMobile
+      ? '0 -12px 28px rgba(0,0,0,0.48)'
+      : '0 -12px 24px rgba(11,31,58,0.14)'
   };
 
   const mobileLinkStyle = {
-    flex: '0 0 auto',
-    padding: '9px 11px',
-    borderRadius: 10,
-    color: '#11185A',
-    background: '#F8F9FB',
+    flex: isStaffMobile ? '1 1 0' : '0 0 auto',
+    minWidth: isStaffMobile ? 68 : undefined,
+    minHeight: isStaffMobile ? 54 : undefined,
+    padding: isStaffMobile ? '7px 5px' : '9px 11px',
+    borderRadius: isStaffMobile ? 8 : 10,
+    border: isStaffMobile ? '1px solid #153555' : 'none',
+    color: isStaffMobile ? '#FFFFFF' : '#11185A',
+    background: isStaffMobile
+      ? 'linear-gradient(145deg, #02060D 0%, #071A33 100%)'
+      : '#F8F9FB',
     textDecoration: 'none',
-    fontSize: 12,
+    fontSize: isStaffMobile ? 10 : 12,
     fontWeight: 900,
-    whiteSpace: 'nowrap' as const
+    whiteSpace: 'nowrap' as const,
+    display: isStaffMobile ? 'flex' : undefined,
+    flexDirection: isStaffMobile ? 'column' as const : undefined,
+    alignItems: isStaffMobile ? 'center' : undefined,
+    justifyContent: isStaffMobile ? 'center' : undefined,
+    gap: isStaffMobile ? 3 : undefined,
+    boxSizing: 'border-box' as const
   };
 
   const activeMobileLinkStyle = {
-    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
-    color: '#FFFFFF'
+    background: isStaffMobile
+      ? 'linear-gradient(145deg, #050A12 0%, #0B2B50 100%)'
+      : 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
+    color: '#FFFFFF',
+    borderColor: isStaffMobile ? '#3B82F6' : undefined,
+    boxShadow: isStaffMobile ? 'inset 0 0 0 1px rgba(96,165,250,0.28)' : undefined
   };
 
   return (
@@ -211,19 +233,27 @@ const Layout = () => {
       </main>
       {isMobile ? (
         <nav style={mobileNavStyle}>
-          {mobileNavItems.map((item) => (
-            <NavLink
-              key={getNavPath(item)}
-              to={getNavPath(item)}
-              end={getNavPath(item) === '/'}
-              style={({ isActive }) => ({
-                ...mobileLinkStyle,
-                ...(isActive ? activeMobileLinkStyle : {})
-              })}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={getNavPath(item)}
+                to={getNavPath(item)}
+                end={getNavPath(item) === '/'}
+                style={({ isActive }) => ({
+                  ...mobileLinkStyle,
+                  ...(isActive ? activeMobileLinkStyle : {})
+                })}
+              >
+                {isStaffMobile ? (
+                  <>
+                    <Icon size={22} color={item.mobileColor} strokeWidth={2.4} />
+                    <span style={{ color: item.mobileColor }}>{item.label}</span>
+                  </>
+                ) : item.label}
+              </NavLink>
+            );
+          })}
         </nav>
       ) : null}
     </div>

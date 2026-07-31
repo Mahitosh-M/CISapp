@@ -9,12 +9,17 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - run: npm ci && npm run build
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - uses: actions/setup-node@v4
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CISAPP_236AB }}
-          channelId: live
-          projectId: cisapp-236ab
+          node-version: 20
+          cache: npm
+      - run: npm ci && npm run build
+      - run: npm --prefix functions ci && npm --prefix functions test
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CISAPP_236AB }}
+      - run: npx --yes firebase-tools@latest deploy --only hosting,functions,firestore:rules,firestore:indexes --project cisapp-236ab --non-interactive

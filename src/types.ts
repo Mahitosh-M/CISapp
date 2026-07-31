@@ -10,6 +10,10 @@ export type PaymentMode = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Card' |
 
 export type UserRole = 'Admin' | 'Staff' | 'customer';
 
+export type CreditStatus = 'starter' | 'active' | 'hold' | 'disabled';
+
+export type CreditLimitApprovalStatus = 'pending_starter' | 'pending_calculated' | 'approved' | 'rejected';
+
 export type GiftPeriod = '1_month' | '3_months' | '6_months' | '1_year' | 'custom';
 
 export type GiftStatus = 'Pending Approval' | 'Approved' | 'Given';
@@ -66,6 +70,67 @@ export interface Customer {
   status?: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface CreditOverride {
+  amount: number;
+  reason: string;
+  expiresAt: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface CustomerCreditProfile {
+  id: string;
+  customerId: string;
+  customerName: string;
+  tier: CustomerTier;
+  creditDays: number;
+  currentOutstanding: number;
+  confirmedUninvoicedCreditOrders: number;
+  totalCreditInvoiceAmountLast90Days: number;
+  averageMonthlyCreditSales: number;
+  baseCreditLimit: number;
+  calculatedCreditLimit: number;
+  approvedCreditLimit: number;
+  availableCredit: number;
+  paymentFactor: number;
+  historyFactor: number;
+  onTimePaymentPercentage: number;
+  completedCreditInvoices: number;
+  overdueAmount: number;
+  hasOverdueBeyondGrace: boolean;
+  creditStatus: CreditStatus;
+  creditLimitApprovalStatus: CreditLimitApprovalStatus;
+  nextInvoiceDueDate?: string;
+  nextInvoiceDueAmount?: number;
+  lastCreditReviewAt: string;
+  lastCreditReviewReason?: string;
+  creditOverride?: CreditOverride;
+}
+
+export interface CustomerCreditSummary {
+  id: string;
+  customerId: string;
+  availableCredit: number;
+  usedCredit: number;
+  creditDays: number;
+  nextInvoiceDueDate?: string;
+  nextInvoiceDueAmount?: number;
+  creditStatus: CreditStatus;
+  updatedAt: string;
+}
+
+export interface CreditAuditLog {
+  id: string;
+  customerId: string;
+  customerName: string;
+  action: string;
+  adminUid: string;
+  timestamp: string;
+  oldValue: unknown;
+  newValue: unknown;
+  reason: string;
 }
 
 export interface Invoice {
@@ -152,6 +217,10 @@ export interface AppSettings {
   staffPermissions: {
     canViewReports: boolean;
     canViewDashboard: boolean;
+  };
+  creditPolicy: {
+    starterLimitCap: number;
+    overdueGraceDays: number;
   };
   targetSettings: Record<TargetTierKey, TierTargetSetting>;
   loyaltySettings: LoyaltySettings;

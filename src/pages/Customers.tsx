@@ -522,11 +522,7 @@ const Customers = () => {
           <button
             type="button"
             className="customer-action-tile"
-            style={{
-              ...staffTileStyle,
-              borderColor: showInactiveCustomers ? '#11185A' : '#E8EDF4',
-              background: showInactiveCustomers ? '#F8FAFF' : '#FFFFFF'
-            }}
+            style={staffTileStyle}
             onClick={handleToggleInactiveCustomers}
             disabled={loadingInactiveCustomers}
           >

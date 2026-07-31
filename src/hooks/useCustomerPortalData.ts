@@ -12,7 +12,8 @@ import {
   getPaymentsForCustomerViewer,
   getRedemptionRequestsForCustomer
 } from '../services/firestoreService';
-import type { AppSettings, BonusPcRequest, Customer, CustomerApcSummary, Invoice, Offer, OverduePcRequest, Payment, RedemptionRequest, RewardItem } from '../types';
+import { getCustomerCreditSummary } from '../services/creditService';
+import type { AppSettings, BonusPcRequest, Customer, CustomerApcSummary, CustomerCreditSummary, Invoice, Offer, OverduePcRequest, Payment, RedemptionRequest, RewardItem } from '../types';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { calculateDueStatus, calculateInvoiceApcInfo, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
 import { canViewRewardAtLevel, getNextPartnerLevel, getPartnerLevelForTier, getPcThresholdProgress } from '../utils/loyalty';
@@ -48,6 +49,7 @@ export const useCustomerPortalData = () => {
   const [redemptionRequests, setRedemptionRequests] = useState<RedemptionRequest[]>([]);
   const [bonusPcRequests, setBonusPcRequests] = useState<BonusPcRequest[]>([]);
   const [overduePcRequests, setOverduePcRequests] = useState<OverduePcRequest[]>([]);
+  const [creditSummary, setCreditSummary] = useState<CustomerCreditSummary>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -70,7 +72,7 @@ export const useCustomerPortalData = () => {
       // Customer portal free-tier/privacy rule: these helpers query only the linked customer
       // (customerId first, customerName only as a legacy fallback), never full company collections.
       const customerId = linkedCustomer?.id ?? userProfile.customerId;
-      const [customerInvoices, customerPayments, appSettings, activeOffers, activeRewards, redemptions, approvedOverduePcRequests, approvedBonusPcRequests] = await Promise.all([
+      const [customerInvoices, customerPayments, appSettings, activeOffers, activeRewards, redemptions, approvedOverduePcRequests, approvedBonusPcRequests, customerCreditSummary] = await Promise.all([
         getInvoicesForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
         getPaymentsForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
         getAppSettings(),
@@ -78,7 +80,8 @@ export const useCustomerPortalData = () => {
         optionalCustomerRead(() => getActiveRewardItems(), []),
         customerId ? optionalCustomerRead(() => getRedemptionRequestsForCustomer(customerId), []) : Promise.resolve([]),
         customerId ? optionalCustomerRead(() => getApprovedOverduePcRequestsForCustomer(customerId), []) : Promise.resolve([]),
-        customerId ? optionalCustomerRead(() => getApprovedBonusPcRequestsForCustomer(customerId), []) : Promise.resolve([])
+        customerId ? optionalCustomerRead(() => getApprovedBonusPcRequestsForCustomer(customerId), []) : Promise.resolve([]),
+        customerId ? optionalCustomerRead(() => getCustomerCreditSummary(customerId), undefined) : Promise.resolve(undefined)
       ]);
 
       const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
@@ -124,6 +127,7 @@ export const useCustomerPortalData = () => {
       setRedemptionRequests(redemptions);
       setBonusPcRequests(approvedBonusPcRequests);
       setOverduePcRequests(approvedOverduePcRequests);
+      setCreditSummary(customerCreditSummary);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load customer portal data.');
     } finally {
@@ -153,6 +157,7 @@ export const useCustomerPortalData = () => {
     redemptionRequests,
     bonusPcRequests,
     overduePcRequests,
+    creditSummary,
     loading,
     error,
     refreshData

@@ -350,6 +350,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     defaultReportPeriod: data.defaultReportPeriod as AppSettings['defaultReportPeriod'],
     giftPeriodOptions: data.giftPeriodOptions as AppSettings['giftPeriodOptions'],
     staffPermissions: data.staffPermissions as AppSettings['staffPermissions'],
+    creditPolicy: data.creditPolicy as AppSettings['creditPolicy'],
     loyaltySettings: data.loyaltySettings as AppSettings['loyaltySettings'],
     targetSettings: data.targetSettings as AppSettings['targetSettings'],
     showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,

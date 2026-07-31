@@ -1,5 +1,6 @@
-import { CalendarDays, Tags } from 'lucide-react';
+import { CalendarDays, Landmark, Tags } from 'lucide-react';
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../../utils/offers';
@@ -70,6 +71,31 @@ const CustomerOffers = () => {
           ))}
         </div>
       )}
+
+      <Link
+        to="/customer/credit"
+        style={{
+          width: '100%',
+          minHeight: 52,
+          marginTop: 14,
+          padding: '12px 16px',
+          boxSizing: 'border-box',
+          borderRadius: 8,
+          border: '1px solid rgba(103,232,249,0.5)',
+          background: 'linear-gradient(135deg, #02060D 0%, #071A33 100%)',
+          color: '#67E8F9',
+          textDecoration: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+          fontWeight: 900,
+          boxShadow: '0 10px 24px rgba(0,0,0,0.26)'
+        }}
+      >
+        <Landmark size={22} strokeWidth={2.4} />
+        Credit
+      </Link>
     </div>
   );
 };

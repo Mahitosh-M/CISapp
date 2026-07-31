@@ -19,6 +19,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Admin = lazy(() => import('./pages/Admin'));
 const Loyalty = lazy(() => import('./pages/Loyalty'));
 const OverduePcRequests = lazy(() => import('./pages/OverduePcRequests'));
+const Credit = lazy(() => import('./pages/Credit'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const CustomerLanding = lazy(() => import('./pages/customer/CustomerLanding'));
 const CustomerDashboard = lazy(() => import('./pages/customer/CustomerDashboard'));
@@ -26,6 +27,7 @@ const CustomerInvoices = lazy(() => import('./pages/customer/CustomerInvoices'))
 const CustomerOffers = lazy(() => import('./pages/customer/CustomerOffers'));
 const CustomerProfile = lazy(() => import('./pages/customer/CustomerProfile'));
 const CustomerPartnerPoints = lazy(() => import('./pages/customer/CustomerPartnerPoints'));
+const CustomerCredit = lazy(() => import('./pages/customer/CustomerCredit'));
 
 const AdminStaffLanding = () => {
   return <Navigate to="/invoices" replace />;
@@ -71,6 +73,7 @@ const App = () => {
           <Route path="payments" element={<Navigate to="/customer" replace />} />
           <Route path="offers" element={<CustomerOffers />} />
           <Route path="partner-points" element={<CustomerPartnerPoints />} />
+          <Route path="credit" element={<CustomerCredit />} />
           <Route path="profile" element={<CustomerProfile />} />
         </Route>
         <Route path="/" element={<RootRouteShell />}>
@@ -83,6 +86,7 @@ const App = () => {
           <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin']}><Analytics /></ProtectedRoute>} />
           <Route path="loyalty" element={<ProtectedRoute allowedRoles={['Admin']}><Loyalty /></ProtectedRoute>} />
           <Route path="overdue-pc-requests" element={<ProtectedRoute allowedRoles={['Admin']}><OverduePcRequests /></ProtectedRoute>} />
+          <Route path="credit" element={<ProtectedRoute allowedRoles={['Admin']}><Credit /></ProtectedRoute>} />
           <Route path="reports" element={<ProtectedRoute allowedRoles={['Admin', 'Staff']}><Reports /></ProtectedRoute>} />
           <Route path="admin" element={<ProtectedRoute allowedRoles={['Admin']}><Admin /></ProtectedRoute>} />
           <Route path="settings" element={<ProtectedRoute allowedRoles={['Admin']}><Settings /></ProtectedRoute>} />

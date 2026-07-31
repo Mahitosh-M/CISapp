@@ -491,6 +491,13 @@ const Invoices = () => {
     marginBottom: 20
   };
 
+  const recordCardStyle: CSSProperties = {
+    ...cardStyle,
+    background: 'linear-gradient(135deg, #071A33 0%, #020B18 52%, #000000 100%)',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
+    boxShadow: '0 18px 38px rgba(0, 0, 0, 0.34)'
+  };
+
   const formGridStyle: CSSProperties = {
     display: 'grid',
     gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(190px, 1fr))',
@@ -642,7 +649,7 @@ const Invoices = () => {
         </div>
       </form>
 
-      <div style={cardStyle}>
+      <div style={recordCardStyle}>
         <div style={formGridStyle}>
           <label style={labelStyle}>
             Search Invoice

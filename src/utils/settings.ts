@@ -43,6 +43,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     canViewReports: false,
     canViewDashboard: true
   },
+  creditPolicy: {
+    starterLimitCap: 25000,
+    overdueGraceDays: 3
+  },
   loyaltySettings: {
     pointsPerThousand: 0,
     onTimePaymentBonus: 0,
@@ -130,6 +134,10 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   staffPermissions: {
     ...DEFAULT_SETTINGS.staffPermissions,
     ...settings?.staffPermissions
+  },
+  creditPolicy: {
+    ...DEFAULT_SETTINGS.creditPolicy,
+    ...settings?.creditPolicy
   },
   loyaltySettings: {
     ...DEFAULT_SETTINGS.loyaltySettings,
@@ -234,6 +242,14 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
 
   if (!Number.isFinite(Number(activeSettings.fixedMonthlyCosts)) || Number(activeSettings.fixedMonthlyCosts) < 0) {
     errors.push('Fixed monthly costs cannot be negative.');
+  }
+
+  if (!Number.isFinite(Number(activeSettings.creditPolicy.starterLimitCap)) || Number(activeSettings.creditPolicy.starterLimitCap) < 0) {
+    errors.push('Starter credit limit cap cannot be negative.');
+  }
+
+  if (!Number.isInteger(Number(activeSettings.creditPolicy.overdueGraceDays)) || Number(activeSettings.creditPolicy.overdueGraceDays) < 0) {
+    errors.push('Overdue grace days must be a non-negative whole number.');
   }
 
   if (!activeSettings.invoicePrefix.trim()) {

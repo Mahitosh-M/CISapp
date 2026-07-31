@@ -1,5 +1,28 @@
 rules_version = '2';
 
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+// Existing collections retain their current schemas and validators below:
+// users, settings, customers, invoices, payments, giftHistory, giftItems,
+// offers, monthlyCustomerStats, loyaltyLedger, rewardItems,
+// redemptionRequests, overduePcRequests, and bonusPcRequests.
+//
+// customerCreditProfiles/{customerId}: admin-only calculated credit data.
+// Includes customer identity, tier, credit days, monetary calculation fields,
+// factors, history counts, approval state, hold state, optional override map,
+// and ISO-string review timestamps. Clients never write these documents.
+//
+// customerCreditSummaries/{customerId}: customer-safe summary containing only
+// customerId (string), availableCredit/usedCredit/creditDays (numbers),
+// optional next due date/amount, creditStatus (enum), and updatedAt (string).
+// Clients never write these documents.
+//
+// creditAuditLogs/{logId}: immutable admin audit entry containing customerId,
+// customerName, action, adminUid, timestamp, oldValue, newValue, and reason.
+// Clients never write these documents.
+// ===============================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -367,14 +390,22 @@ service cloud.firestore {
           'updatedAt'
         ])
         && data.uid is string
+        && data.uid.size() > 0
+        && data.uid.size() <= 160
         && data.email is string
+        && data.email.size() > 3
+        && data.email.size() <= 254
         && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 140
         && data.role in ['Admin', 'Staff', 'customer']
         && data.active is bool
         && data.createdAt is string
+        && data.createdAt.size() <= 40
         && data.updatedAt is string
-        && (!('customerId' in data) || data.customerId is string)
-        && (!('customerName' in data) || data.customerName is string);
+        && data.updatedAt.size() <= 40
+        && validOptionalString(data, 'customerId', 160)
+        && validOptionalString(data, 'customerName', 140);
     }
 
     match /users/{userId} {
@@ -397,6 +428,9 @@ service cloud.firestore {
             && request.resource.data.uid == request.auth.uid
             && request.resource.data.role == 'Admin'
             && request.resource.data.active == true
+            && request.auth.token.email == 'ashokaagency2025@gmail.com'
+            && request.auth.token.email_verified == true
+            && request.resource.data.email == request.auth.token.email
           )
         );
 
@@ -428,6 +462,22 @@ service cloud.firestore {
       allow read: if isTeam() || ownsCustomerRecord(resource.data);
       allow create, update: if isTeam();
       allow delete: if isAdmin();
+    }
+
+    match /customerCreditProfiles/{customerDocId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /customerCreditSummaries/{customerDocId} {
+      allow get: if isTeam() || (isCustomer() && customerDocId == customerId());
+      allow list: if isTeam();
+      allow create, update, delete: if false;
+    }
+
+    match /creditAuditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /giftHistory/{giftId} {

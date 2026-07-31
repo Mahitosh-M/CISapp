@@ -545,6 +545,13 @@ const Payments = () => {
     marginBottom: 20
   };
 
+  const recordCardStyle: CSSProperties = {
+    ...cardStyle,
+    background: 'linear-gradient(135deg, #071A33 0%, #020B18 52%, #000000 100%)',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
+    boxShadow: '0 18px 38px rgba(0, 0, 0, 0.34)'
+  };
+
   const formGridStyle: CSSProperties = {
     display: 'grid',
     gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(190px, 1fr))',
@@ -668,8 +675,8 @@ const Payments = () => {
                     >
                       <input type={editingPaymentId ? 'radio' : 'checkbox'} checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
                       <span style={{ minWidth: 0 }}>
-                        <span style={{ display: 'block', color: '#FFFFFF', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
-                        <span style={{ display: 'block', color: '#FCA5A5', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
+                        <span style={{ display: 'block', color: '#000000', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
+                        <span style={{ display: 'block', color: '#7F1D1D', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>
                       </span>
                     </label>
                   );
@@ -728,7 +735,7 @@ const Payments = () => {
         </div>
       </form>
 
-      <div style={cardStyle}>
+      <div style={recordCardStyle}>
         <div style={formGridStyle}>
           <label style={labelStyle}>
             Search Payments
@@ -778,7 +785,7 @@ const Payments = () => {
                     <td style={cellStyle}>{formatDate(payment.date)}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
                     <td style={cellStyle}>{invoiceLabel}</td>
-                    <td style={{ ...cellStyle, fontWeight: 800 }}>
+                    <td style={{ ...cellStyle, color: '#4ADE80', fontWeight: 800 }}>
                       {payment.paymentKind === 'advance_application'
                         ? `${formatMoney(payment.advanceAppliedAmount)} advance adjusted`
                         : formatMoney(payment.amount)}
