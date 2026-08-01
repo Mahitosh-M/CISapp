@@ -2,22 +2,64 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import {
-  deleteUserProfileRecord,
   getAppSettings,
-  getUserProfiles,
-  updateAppSettings,
-  updateUserProfileRecord
+  updateAppSettings
 } from '../services/firestoreService';
 import { createStaffAuthAccount } from '../services/authService';
 import { useAuth } from '../contexts/AuthContext';
-import type { AppSettings, TargetTierKey, UserProfile, UserRole } from '../types';
-import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import type { AppSettings, TargetTierKey, UserRole } from '../types';
 import { DEFAULT_SETTINGS, isScoringWeightTotalValid, mergeWithDefaultSettings, validateAppSettings } from '../utils/settings';
 import { CUSTOMER_TIERS, getTierDisplayName } from '../utils/tiers';
 
+interface ToggleSettingProps {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+  activeColor?: string;
+}
+
+const ToggleSetting = ({ checked, label, onChange, activeColor = '#16A34A' }: ToggleSettingProps) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    onClick={() => onChange(!checked)}
+    style={{
+      minHeight: 44,
+      padding: '7px 10px',
+      borderRadius: 8,
+      border: `1px solid ${checked ? activeColor : '#64748B'}`,
+      background: checked ? 'rgba(255,255,255,0.12)' : 'rgba(2,6,23,0.28)',
+      color: '#FFFFFF',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 10,
+      fontWeight: 900,
+      cursor: 'pointer'
+    }}
+  >
+    <span
+      aria-hidden="true"
+      style={{
+        width: 38,
+        height: 22,
+        borderRadius: 999,
+        padding: 2,
+        boxSizing: 'border-box',
+        background: checked ? activeColor : '#64748B',
+        display: 'flex',
+        justifyContent: checked ? 'flex-end' : 'flex-start',
+        transition: 'background 160ms ease'
+      }}
+    >
+      <span style={{ width: 18, height: 18, borderRadius: '50%', background: '#FFFFFF', boxShadow: '0 1px 4px rgba(0,0,0,0.35)' }} />
+    </span>
+    {label}
+  </button>
+);
+
 const Settings = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [users, setUsers] = useState<UserProfile[]>([]);
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
   const [staffName, setStaffName] = useState('');
@@ -37,9 +79,8 @@ const Settings = () => {
     try {
       setLoading(true);
       setError('');
-      const [appSettings, userRows] = await Promise.all([getAppSettings(), getUserProfiles()]);
+      const appSettings = await getAppSettings();
       setSettings(mergeWithDefaultSettings(appSettings));
-      setUsers(userRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load settings.');
     } finally {
@@ -53,7 +94,6 @@ const Settings = () => {
 
   const settingsValidation = useMemo(() => validateAppSettings(settings), [settings]);
   const hasValidScoringTotal = isScoringWeightTotalValid(settingsValidation.scoringWeightTotal);
-  const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
 
   const updateNestedNumber = (
     group: 'giftPercentages' | 'creditDays' | 'paymentBuffers' | 'scoringWeights',
@@ -115,23 +155,6 @@ const Settings = () => {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleRoleChange = async (user: UserProfile, role: UserRole) => {
-    await updateUserProfileRecord(user.id, { role }, auditUser);
-    await loadSettings();
-  };
-
-  const handleToggleActive = async (user: UserProfile) => {
-    await updateUserProfileRecord(user.id, { active: !user.active }, auditUser);
-    await loadSettings();
-  };
-
-  const handleDeleteUserProfile = async (user: UserProfile) => {
-    const confirmed = window.confirm(`Delete profile for ${user.email}? This removes ERP role access. You can recreate access with the same email by using that email's current password, or send a password reset first.`);
-    if (!confirmed) return;
-    await deleteUserProfileRecord(user.id, auditUser);
-    await loadSettings();
   };
 
   const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder' | 'down', value: string | boolean) => {
@@ -243,14 +266,14 @@ const Settings = () => {
 
       <form style={cardStyle} onSubmit={handleSaveSettings}>
         <div style={sectionTitleStyle}>System Access</div>
-        <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-          <input
-            type="checkbox"
+        <div style={{ marginBottom: 24 }}>
+          <ToggleSetting
             checked={settings.down}
-            onChange={(event) => handleTopLevelSettingChange('down', event.target.checked)}
+            label="App Down"
+            activeColor="#DC2626"
+            onChange={(checked) => handleTopLevelSettingChange('down', checked)}
           />
-          Down
-        </label>
+        </div>
 
         <div style={sectionTitleStyle}>Gift Settings</div>
         <div style={gridStyle}>
@@ -453,22 +476,20 @@ const Settings = () => {
             />
             Show customer category in customer portal
           </label>
-          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
-            <input
-              type="checkbox"
+          <div style={{ marginTop: 26 }}>
+            <ToggleSetting
               checked={settings.turnOnOrder}
-              onChange={(event) => handleTopLevelSettingChange('turnOnOrder', event.target.checked)}
+              label="Order Page"
+              onChange={(checked) => handleTopLevelSettingChange('turnOnOrder', checked)}
             />
-            Turn on order
-          </label>
-          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
-            <input
-              type="checkbox"
+          </div>
+          <div style={{ marginTop: 26 }}>
+            <ToggleSetting
               checked={settings.headerOrder}
-              onChange={(event) => handleTopLevelSettingChange('headerOrder', event.target.checked)}
+              label="Header Order"
+              onChange={(checked) => handleTopLevelSettingChange('headerOrder', checked)}
             />
-            Header Order
-          </label>
+          </div>
         </div>
 
         <div style={{ ...sectionTitleStyle, marginTop: 24 }}>Staff Permissions</div>
@@ -508,46 +529,6 @@ const Settings = () => {
         </button>
       </form>
 
-      <div style={cardStyle}>
-        <div style={sectionTitleStyle}>Existing Users</div>
-        <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'].map((header) => (
-                  <th key={header} style={{ textAlign: 'left', padding: 12, background: 'var(--role-card-subtle)', borderBottom: '1px solid var(--role-card-border)' }}>{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedUsers.map((user) => (
-                <tr key={user.id}>
-                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.name}</td>
-                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.email}</td>
-                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>
-                    <select style={inputStyle} value={user.role} onChange={(event) => handleRoleChange(user, event.target.value as UserRole)}>
-                      <option value="Staff">Staff</option>
-                      <option value="Admin">Admin</option>
-                      <option value="customer">Customer</option>
-                    </select>
-                  </td>
-                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.customerName || '-'}</td>
-                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>{user.active ? 'Yes' : 'No'}</td>
-                  <td style={{ padding: 12, borderBottom: '1px solid #E8EDF4' }}>
-                    <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8 }} onClick={() => handleToggleActive(user)}>
-                      {user.active ? 'Disable' : 'Enable'}
-                    </button>
-                    <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDeleteUserProfile(user)}>
-                      Delete Profile
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 };

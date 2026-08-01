@@ -14,6 +14,8 @@ import type { UserProfile, UserRole } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 
+type AdminPanel = 'staff' | 'customers' | null;
+
 const Admin = () => {
   const { customers, loading, error } = useErpData();
   const { userProfile } = useAuth();
@@ -30,6 +32,7 @@ const Admin = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [adminError, setAdminError] = useState('');
+  const [activePanel, setActivePanel] = useState<AdminPanel>(null);
 
   const auditUser = {
     userId: userProfile?.uid,
@@ -52,6 +55,8 @@ const Admin = () => {
   }, []);
 
   const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
+  const sortedStaffUsers = useMemo(() => sortedUsers.filter((user) => user.role !== 'customer'), [sortedUsers]);
+  const sortedCustomerUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'customer'), [sortedUsers]);
   const isAdmin = userProfile?.role === 'Admin';
   const staffUserCount = useMemo(() => users.filter((user) => user.role === 'Staff').length, [users]);
   const adminUserCount = useMemo(() => users.filter((user) => user.role === 'Admin').length, [users]);
@@ -116,6 +121,16 @@ const Admin = () => {
 
   const handleUserRoleChange = async (user: UserProfile, role: UserRole) => {
     await updateUserProfileRecord(user.id, { role }, auditUser);
+    await loadAdminData();
+  };
+
+  const handleToggleUserActive = async (user: UserProfile) => {
+    if (user.uid === userProfile?.uid || user.email === userProfile?.email) {
+      setAdminError('You cannot disable your own active admin login.');
+      return;
+    }
+
+    await updateUserProfileRecord(user.id, { active: !user.active }, auditUser);
     await loadAdminData();
   };
 
@@ -265,7 +280,28 @@ const Admin = () => {
         </div>
       </div>
 
-      <form className="admin-card" style={cardStyle} onSubmit={handleCreateStaff}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+        <button
+          className="admin-button admin-button-primary"
+          type="button"
+          aria-pressed={activePanel === 'staff'}
+          onClick={() => setActivePanel((current) => current === 'staff' ? null : 'staff')}
+          style={{ ...buttonStyle, minHeight: 44, display: 'inline-flex', alignItems: 'center', gap: 8, background: activePanel === 'staff' ? '#D4AF37' : 'linear-gradient(135deg, #11185A 0%, #1E2961 100%)', color: activePanel === 'staff' ? '#11185A' : '#FFFFFF' }}
+        >
+          <UserPlus size={18} />Add Staff
+        </button>
+        <button
+          className="admin-button admin-button-primary"
+          type="button"
+          aria-pressed={activePanel === 'customers'}
+          onClick={() => setActivePanel((current) => current === 'customers' ? null : 'customers')}
+          style={{ ...buttonStyle, minHeight: 44, display: 'inline-flex', alignItems: 'center', gap: 8, background: activePanel === 'customers' ? '#D4AF37' : 'linear-gradient(135deg, #11185A 0%, #1E2961 100%)', color: activePanel === 'customers' ? '#11185A' : '#FFFFFF' }}
+        >
+          <Users size={18} />Customers
+        </button>
+      </div>
+
+      {activePanel === 'staff' ? <form className="admin-card" style={cardStyle} onSubmit={handleCreateStaff}>
         <div className="admin-card-title"><UserPlus size={18} />Manage Staff Users</div>
         <div style={gridStyle}>
           <label style={{ fontWeight: 800 }}>Name<input style={inputStyle} value={staffName} onChange={(event) => setStaffName(event.target.value)} /></label>
@@ -289,9 +325,9 @@ const Admin = () => {
         <button className="admin-button admin-button-primary" type="submit" disabled={saving} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginTop: 16 }}>
           <UserPlus size={16} />Create User
         </button>
-      </form>
+      </form> : null}
 
-      <form className="admin-card" style={cardStyle} onSubmit={handleCreateCustomerLogin}>
+      {activePanel === 'customers' ? <form className="admin-card" style={cardStyle} onSubmit={handleCreateCustomerLogin}>
         <div className="admin-card-title"><KeyRound size={18} />Create Customer Login</div>
         <div style={{ color: '#D7DEEA', marginBottom: 12 }}>Admin creates customer credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
         <div style={gridStyle}>
@@ -317,15 +353,15 @@ const Admin = () => {
         <button className="admin-button admin-button-gold" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 16 }}>
           <KeyRound size={16} />Create Customer Login
         </button>
-      </form>
+      </form> : null}
 
-      <div className="admin-card" style={cardStyle}>
-        <div className="admin-card-title"><Users size={18} />Existing Users</div>
+      {activePanel ? <div className="admin-card" style={cardStyle}>
+        <div className="admin-card-title"><Users size={18} />{activePanel === 'staff' ? 'Existing Staff & Admins' : 'Existing Customers'}</div>
         <div style={{ color: '#D7DEEA', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
         {renderTable(
           ['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'],
           <>
-            {sortedUsers.map((user) => (
+            {(activePanel === 'staff' ? sortedStaffUsers : sortedCustomerUsers).map((user) => (
               <tr className="admin-table-row" key={user.id}>
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>
@@ -342,6 +378,9 @@ const Admin = () => {
                   <button className="admin-button admin-button-soft" type="button" disabled={saving} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8 }} onClick={() => handleSendPasswordReset(user)}>
                     <Mail size={15} />Reset Password
                   </button>
+                  <button className="admin-button admin-button-soft" type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8 }} onClick={() => handleToggleUserActive(user)}>
+                    {user.active ? 'Disable' : 'Enable'}
+                  </button>
                   <button className="admin-button admin-button-danger" type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>
                     <Trash2 size={15} />Delete User
                   </button>
@@ -350,7 +389,7 @@ const Admin = () => {
             ))}
           </>
         )}
-      </div>
+      </div> : null}
 
     </div>
   );

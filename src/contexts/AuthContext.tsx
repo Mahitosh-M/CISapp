@@ -25,7 +25,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const INACTIVITY_LOGOUT_MS = 10 * 60 * 1000;
 const LAST_ACTIVITY_STORAGE_KEY = 'cisapp:lastActivityAt';
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
-export const SYSTEM_DOWN_MESSAGE = 'System is temporarily unavailable for Staff and Customer access. Admin login remains available.';
+export const SYSTEM_DOWN_MESSAGE = 'App is currently down. Admin login remains available.';
 
 const readStoredLastActivityAt = () => {
   try {
