@@ -1,9 +1,9 @@
 import { FormEvent, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { SYSTEM_DOWN_MESSAGE, useAuth } from '../contexts/AuthContext';
 
 const Login = () => {
-  const { firebaseUser, role, login } = useAuth();
+  const { firebaseUser, role, login, systemDown } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -44,6 +44,12 @@ const Login = () => {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--app-page-background)', padding: 20 }}>
       <form onSubmit={handleSubmit} style={{ background: 'linear-gradient(135deg, #4A155F 0%, #2A1049 45%, #091D42 100%)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#FFFFFF', boxShadow: '0 24px 54px rgba(0,0,0,0.42)' }}>
+        {systemDown ? (
+          <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 8, color: '#991B1B', padding: 12, marginBottom: 16, fontWeight: 800 }}>
+            {SYSTEM_DOWN_MESSAGE}
+          </div>
+        ) : null}
+
         <label style={{ display: 'block', fontWeight: 800, marginBottom: 14 }}>
           Email
           <input className="login-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} style={inputStyle} />

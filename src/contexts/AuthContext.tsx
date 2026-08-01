@@ -1,6 +1,7 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { listenToAuthState, loadOrCreateUserProfile, loginWithEmail, logoutUser } from '../services/authService';
+import { getAppSettings, listenToAppSettings } from '../services/firestoreService';
 import type { UserProfile, UserRole } from '../types';
 
 interface AuthContextValue {
@@ -8,6 +9,7 @@ interface AuthContextValue {
   userProfile: UserProfile | null;
   role: UserRole | null;
   loading: boolean;
+  systemDown: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   canDeleteRecords: boolean;
@@ -23,6 +25,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const INACTIVITY_LOGOUT_MS = 10 * 60 * 1000;
 const LAST_ACTIVITY_STORAGE_KEY = 'cisapp:lastActivityAt';
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+export const SYSTEM_DOWN_MESSAGE = 'System is temporarily unavailable for Staff and Customer access. Admin login remains available.';
 
 const readStoredLastActivityAt = () => {
   try {
@@ -57,6 +60,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [systemDown, setSystemDown] = useState(false);
+
+  const refreshSystemDown = useCallback(async () => {
+    try {
+      const settings = await getAppSettings(true);
+      setSystemDown(settings.down);
+      return settings.down;
+    } catch (error) {
+      console.error('Unable to check system access settings.', error);
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     const unsubscribe = listenToAuthState(async (currentUser) => {
@@ -79,6 +94,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         // Business rule: Firestore users collection controls app roles.
         const profile = await loadOrCreateUserProfile(currentUser);
+        const isDown = profile.active ? await refreshSystemDown() : false;
+
+        if (profile.active && isDown && profile.role !== 'Admin') {
+          setFirebaseUser(null);
+          setUserProfile(null);
+          clearStoredLastActivityAt();
+          await logoutUser();
+          return;
+        }
+
         setUserProfile(profile.active ? profile : null);
       } catch (err) {
         // If Admin deleted the Firestore user profile, Firebase Auth may still accept
@@ -96,7 +121,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return unsubscribe;
-  }, []);
+  }, [refreshSystemDown]);
+
+  useEffect(() => {
+    if (!firebaseUser || !userProfile) return undefined;
+
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    let logoutStarted = false;
+
+    const handleSettingsChange = (settings: Awaited<ReturnType<typeof getAppSettings>>) => {
+      if (cancelled) return;
+
+      setSystemDown(settings.down);
+      if (!settings.down || userProfile.role === 'Admin' || logoutStarted) return;
+
+      logoutStarted = true;
+      setFirebaseUser(null);
+      setUserProfile(null);
+      clearStoredLastActivityAt();
+      void logoutUser();
+    };
+
+    void listenToAppSettings(handleSettingsChange, (error) => {
+      console.error('Unable to monitor system access settings.', error);
+    }).then((stopListening) => {
+      if (cancelled) {
+        stopListening();
+        return;
+      }
+
+      unsubscribe = stopListening;
+    }).catch((error) => {
+      console.error('Unable to start system access monitoring.', error);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [firebaseUser, userProfile]);
 
   useEffect(() => {
     if (!firebaseUser || !userProfile) return undefined;
@@ -190,6 +254,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       userProfile,
       role,
       loading,
+      systemDown,
       login: async (email: string, password: string) => {
         writeStoredLastActivityAt(Date.now());
         try {
@@ -198,6 +263,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (!profile.active) {
             throw new Error('This login is inactive. Please contact Admin.');
+          }
+
+          const isDown = await refreshSystemDown();
+          if (isDown && profile.role !== 'Admin') {
+            throw new Error(SYSTEM_DOWN_MESSAGE);
           }
 
           setFirebaseUser(credential.user);
@@ -222,7 +292,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       canApproveGifts: role === 'Admin',
       canManageUsers: role === 'Admin'
     };
-  }, [firebaseUser, loading, userProfile]);
+  }, [firebaseUser, loading, refreshSystemDown, systemDown, userProfile]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

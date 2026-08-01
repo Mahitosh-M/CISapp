@@ -227,6 +227,7 @@ export interface AppSettings {
   showCustomerTierToCustomer: boolean;
   turnOnOrder: boolean;
   headerOrder: boolean;
+  down: boolean;
   updatedAt?: string;
 }
 

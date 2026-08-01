@@ -134,7 +134,7 @@ const Settings = () => {
     await loadSettings();
   };
 
-  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder', value: string | boolean) => {
+  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder' | 'down', value: string | boolean) => {
     setSettings((current) => ({
       ...current,
       [field]: field === 'highOutstandingThreshold' ? Number(value) || 0 : value
@@ -242,6 +242,16 @@ const Settings = () => {
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
 
       <form style={cardStyle} onSubmit={handleSaveSettings}>
+        <div style={sectionTitleStyle}>System Access</div>
+        <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+          <input
+            type="checkbox"
+            checked={settings.down}
+            onChange={(event) => handleTopLevelSettingChange('down', event.target.checked)}
+          />
+          Down
+        </label>
+
         <div style={sectionTitleStyle}>Gift Settings</div>
         <div style={gridStyle}>
           {CUSTOMER_TIERS.map((tier) => (

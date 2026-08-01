@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   limit as firestoreLimit,
+  onSnapshot,
   orderBy,
   query,
   QueryConstraint,
@@ -356,6 +357,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,
     turnOnOrder: data.turnOnOrder === true,
     headerOrder: data.headerOrder === undefined ? DEFAULT_SETTINGS.headerOrder : data.headerOrder === true,
+    down: data.down === true,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
   });
 };
@@ -1479,6 +1481,25 @@ export const getAppSettings = async (forceRefresh = false) => {
   };
 
   return appSettingsCache;
+};
+
+export const listenToAppSettings = async (
+  onChange: (settings: AppSettings) => void,
+  onError?: (error: Error) => void
+) => {
+  const currentSettings = await getAppSettings(true);
+  onChange(currentSettings);
+
+  return onSnapshot(
+    doc(db, SETTINGS, currentSettings.id || APP_SETTINGS_DOC_ID),
+    (snapshot) => {
+      if (!snapshot.exists()) return;
+
+      appSettingsCache = mapSettingsDoc(snapshot.id, snapshot.data());
+      onChange(appSettingsCache);
+    },
+    (error) => onError?.(error)
+  );
 };
 
 export const updateAppSettings = async (settings: AppSettings, auditUser?: AuditUser) => {
