@@ -488,10 +488,7 @@ const Customers = () => {
 
   return (
     <div>
-      <SectionHeader
-        title="Customers"
-        description={isStaff ? undefined : 'Create, search, edit, and delete customer accounts directly in Firestore.'}
-      />
+      <SectionHeader title="Customers" />
 
       {isStaff ? (
         <div style={staffTileGridStyle}>

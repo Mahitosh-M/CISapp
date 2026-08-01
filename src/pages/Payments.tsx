@@ -607,10 +607,7 @@ const Payments = () => {
 
   return (
     <div>
-      <SectionHeader
-        title="Payments"
-        description={userProfile?.role === 'Staff' ? undefined : 'Payments clear invoices oldest-first. Any extra amount is saved as customer advance.'}
-      />
+      <SectionHeader title="Payments" />
 
       <form style={cardStyle} onSubmit={handleSubmit}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>

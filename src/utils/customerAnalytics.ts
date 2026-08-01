@@ -888,6 +888,7 @@ export const buildMonthlyRankings = (
         .map((score) => ({
           customerId: score.customerId,
           customerName: score.customerName,
+          customerArea: score.customerArea,
           rank: score.rank,
           tier: score.tier,
           intelligenceScore: score.intelligenceScore,

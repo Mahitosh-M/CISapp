@@ -466,6 +466,7 @@ export interface CustomerScore {
 export interface MonthlyRankingRow {
   customerId: string;
   customerName: string;
+  customerArea: string;
   rank: number;
   tier: CustomerTier;
   intelligenceScore: number;

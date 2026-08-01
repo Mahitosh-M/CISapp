@@ -464,7 +464,7 @@ const OverduePcRequests = () => {
           </div>
         ) : null}
 
-      <div style={cardStyle}>
+      <div style={sortedPendingRequests.length > 0 ? cardStyle : { ...cardStyle, display: 'inline-block', padding: 10 }}>
         <div style={{ marginBottom: sortedPendingRequests.length > 0 ? 14 : 0 }}>
           <button type="button" disabled={generating} onClick={handleGenerate} style={primaryActionStyle}>
             {generating ? 'Generating...' : 'Generate Requests'}
@@ -527,7 +527,7 @@ const OverduePcRequests = () => {
         </div> : null}
       </div>
 
-      <div style={cardStyle}>
+      <div style={sortedPendingBonusRequests.length > 0 ? cardStyle : { ...cardStyle, display: 'inline-block', padding: 10 }}>
         <div style={{ marginBottom: sortedPendingBonusRequests.length > 0 ? 14 : 0 }}>
           <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={primaryActionStyle}>
             {generatingBonus ? 'Generating...' : 'Generate Bonus Requests'}

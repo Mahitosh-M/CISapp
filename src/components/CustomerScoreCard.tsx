@@ -1,6 +1,7 @@
 import ScoreBar from './ScoreBar';
 import TierBadge from './TierBadge';
 import type { CustomerScore } from '../types';
+import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { formatMoney } from '../utils/formatters';
 
 interface CustomerScoreCardProps {
@@ -70,7 +71,7 @@ const CustomerScoreCard = ({ customer }: CustomerScoreCardProps) => {
     <div style={cardStyle}>
       <div style={headerStyle}>
         <div>
-          <div style={{ fontWeight: 800 }}>{customer.customerName}</div>
+          <div style={{ fontWeight: 800 }}>{formatCustomerSelectLabel(customer)}</div>
           <div style={metaStyle}>{customer.customerArea}</div>
         </div>
         <TierBadge tier={customer.tier} />

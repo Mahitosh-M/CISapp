@@ -553,10 +553,7 @@ const Invoices = () => {
 
   return (
     <div>
-      <SectionHeader
-        title="Invoices"
-        description={userProfile?.role === 'Staff' ? undefined : 'Create, edit, print, filter, and delete Firestore invoices with automatic sequential numbering.'}
-      />
+      <SectionHeader title="Invoices" />
 
       <form style={cardStyle} onSubmit={handleSubmit}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>

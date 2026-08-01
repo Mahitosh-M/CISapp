@@ -18,7 +18,7 @@ import type { CustomerScore } from '../types';
 type IntelligenceSection = 'overview' | 'score' | 'rankings';
 
 const intelligenceSections = [
-  { id: 'overview', label: 'Customer Overview', icon: Users },
+  { id: 'overview', label: 'Top Customers', icon: Users },
   { id: 'score', label: 'Score Breakdown', icon: Gauge },
   { id: 'rankings', label: 'Monthly Rankings', icon: CalendarDays }
 ] satisfies { id: IntelligenceSection; label: string; icon: typeof Users }[];
@@ -29,7 +29,7 @@ const Intelligence = () => {
   const isMobile = useIsMobile();
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedRankingMonth, setSelectedRankingMonth] = useState('');
-  const [activeSection, setActiveSection] = useState<IntelligenceSection>('overview');
+  const [activeSection, setActiveSection] = useState<IntelligenceSection | null>(null);
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
   const formatWholeOrders = (value: number) => String(Math.round(value));
   const isStaff = userProfile?.role === 'Staff';
@@ -121,7 +121,7 @@ const Intelligence = () => {
   ) => (
     <div key={customer.customerId} style={rowStyle}>
       <div>
-        <div style={{ fontWeight: 800 }}>{customer.customerName}</div>
+        <div style={{ fontWeight: 800 }}>{formatCustomerSelectLabel(customer)}</div>
         <div style={mutedTextStyle}>{helper}</div>
       </div>
       <div style={{ textAlign: 'right' }}>
@@ -272,7 +272,7 @@ const Intelligence = () => {
                       {selectedMonthlyRanking.rankings.map((ranking) => (
                         <div key={`${selectedMonthlyRanking.monthKey}-${ranking.customerId}`} style={rowStyle}>
                           <div>
-                            <div style={{ fontWeight: 800 }}>{ranking.customerName}</div>
+                            <div style={{ fontWeight: 800 }}>{formatCustomerSelectLabel(ranking)}</div>
                             <div style={mutedTextStyle}>
                               {formatMoney(ranking.totalSales)} sales | {formatMoney(ranking.giftBudget)} PC
                             </div>
