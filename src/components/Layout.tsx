@@ -186,9 +186,9 @@ const Layout = () => {
             onMouseEnter={() => setIsSidebarExpanded(true)}
             onMouseLeave={() => setIsSidebarExpanded(false)}
           >
-            <div style={headerStyle} title="Pharma ERP">
+            <div style={headerStyle} title="ERP">
               <ShieldCheck size={24} style={{ flex: '0 0 auto' }} />
-              <span style={{ opacity: isSidebarExpanded ? 1 : 0, transition: 'opacity 120ms ease', fontSize: 20, fontWeight: 900 }}>Pharma ERP</span>
+              <span style={{ opacity: isSidebarExpanded ? 1 : 0, transition: 'opacity 120ms ease', fontSize: 20, fontWeight: 900 }}>ERP</span>
             </div>
             {mobileNavItems.map((item) => {
               const Icon = item.icon;
@@ -215,8 +215,7 @@ const Layout = () => {
       <main style={contentStyle}>
         <div style={topBarStyle}>
           <div>
-            <div style={titleStyle}>Customer Intelligence ERP</div>
-            <div style={{ color: '#BFC8D9', marginTop: 4, fontSize: isMobile ? 12 : 14 }}>Pharma wholesale + retail insights</div>
+            <div style={titleStyle}>COINS</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: isMobile ? 0 : 'auto' }}>
             <div style={{ color: '#D4AF37', fontWeight: 700 }}>{userProfile?.role ?? 'User'}</div>

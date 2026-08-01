@@ -1532,6 +1532,27 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
   appSettingsCache = { ...appSettings, id: settings.id, updatedAt: timestamp };
 };
 
+export type AppSettingsToggleField = 'down' | 'turnOnOrder' | 'headerOrder';
+
+export const updateAppSettingsToggle = async (field: AppSettingsToggleField, value: boolean) => {
+  const currentSettings = await getAppSettings();
+  const settingsId = currentSettings.id || APP_SETTINGS_DOC_ID;
+  const timestamp = nowIso();
+
+  await updateDoc(doc(db, SETTINGS, settingsId), {
+    [field]: value,
+    updatedAt: timestamp
+  });
+
+  clearFirestoreSessionCache(SETTINGS);
+  appSettingsCache = {
+    ...currentSettings,
+    id: settingsId,
+    [field]: value,
+    updatedAt: timestamp
+  };
+};
+
 export const getGiftHistory = async (options?: DateRangeQueryOptions) => {
   return getCached(cacheKey(GIFT_HISTORY, options), async () => {
     const constraints: QueryConstraint[] = [];

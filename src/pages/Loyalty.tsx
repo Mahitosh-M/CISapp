@@ -1,6 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { ClipboardCheck, Gift, History, SlidersHorizontal, Tags } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
+import SectionTileNav from '../components/SectionTileNav';
 import ExternalImage from '../components/ExternalImage';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
@@ -50,6 +52,16 @@ const emptyOfferForm: OfferFormData = {
   isActive: true
 };
 
+type LoyaltySection = 'settings' | 'offers' | 'rewards' | 'requests' | 'history';
+
+const loyaltySections = [
+  { id: 'settings', label: 'Loyalty Settings', icon: SlidersHorizontal },
+  { id: 'offers', label: 'Offers', icon: Tags },
+  { id: 'rewards', label: 'Reward Catalogue', icon: Gift },
+  { id: 'requests', label: 'Redemption Requests', icon: ClipboardCheck },
+  { id: 'history', label: 'Reward History', icon: History }
+] satisfies { id: LoyaltySection; label: string; icon: typeof Gift }[];
+
 const Loyalty = () => {
   const { userProfile } = useAuth();
   const isAdmin = userProfile?.role === 'Admin';
@@ -62,7 +74,9 @@ const Loyalty = () => {
   const [offerForm, setOfferForm] = useState<OfferFormData>(emptyOfferForm);
   const [editingRewardId, setEditingRewardId] = useState('');
   const [editingOfferId, setEditingOfferId] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [activeSection, setActiveSection] = useState<LoyaltySection | null>(null);
+  const [loadedSections, setLoadedSections] = useState<Set<LoyaltySection>>(() => new Set());
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -73,22 +87,26 @@ const Loyalty = () => {
     role: userProfile?.role
   };
 
-  const loadData = async () => {
+  const loadData = async (section = activeSection) => {
+    if (!section) return;
+
     try {
       setLoading(true);
       setError('');
-      const [appSettings, rewardRows, offerRows, requestRows, historyRows] = await Promise.all([
-        getAppSettings(),
-        getRewardItems(),
-        getOffers(),
-        getRedemptionRequests(),
-        getGiftHistory()
-      ]);
-      setSettings(mergeWithDefaultSettings(appSettings));
-      setRewards(rewardRows);
-      setOffers(offerRows);
-      setRequests(requestRows);
-      setGiftHistory(historyRows);
+
+      if (section === 'settings') {
+        setSettings(mergeWithDefaultSettings(await getAppSettings()));
+      } else if (section === 'offers') {
+        setOffers(await getOffers());
+      } else if (section === 'rewards') {
+        setRewards(await getRewardItems());
+      } else if (section === 'requests') {
+        setRequests(await getRedemptionRequests());
+      } else {
+        setGiftHistory(await getGiftHistory());
+      }
+
+      setLoadedSections((current) => new Set(current).add(section));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load loyalty data.');
     } finally {
@@ -96,9 +114,18 @@ const Loyalty = () => {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const handleSectionSelect = (section: LoyaltySection) => {
+    if (loading) return;
+
+    if (activeSection === section) {
+      setActiveSection(null);
+      return;
+    }
+
+    setActiveSection(section);
+    setMessage('');
+    if (!loadedSections.has(section)) void loadData(section);
+  };
 
   const sortedRewards = useMemo(() => sortNewestFirst(rewards, ['updatedAt', 'createdAt']), [rewards]);
   const sortedOffers = useMemo(() => sortOffersByLatest(offers), [offers]);
@@ -423,6 +450,11 @@ const Loyalty = () => {
       setSaving(true);
       setError('');
       await markRedemptionRequestGifted(request.id, auditUser);
+      setLoadedSections((current) => {
+        const next = new Set(current);
+        next.delete('history');
+        return next;
+      });
       setMessage('Reward marked gifted and moved to reward history.');
       await loadData();
     } catch (err) {
@@ -435,10 +467,6 @@ const Loyalty = () => {
   const offerImagePreviewSource = offerForm.imageUrl;
   const rewardImagePreviewSource = rewardForm.imageUrl;
 
-  if (loading) {
-    return <SectionHeader title="Partner Program" description="Loading loyalty module..." />;
-  }
-
   return (
     <div>
       <SectionHeader title="Partner Program" description="Manage PC points, partner levels, rewards, and redemption approvals." />
@@ -446,7 +474,10 @@ const Loyalty = () => {
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
 
-      {isAdmin ? (
+      <SectionTileNav items={loyaltySections.filter((section) => isAdmin || section.id !== 'settings')} activeId={activeSection} onSelect={handleSectionSelect} />
+      {loading ? <div style={{ color: '#D7DEEA', marginBottom: 16 }}>Loading selected section...</div> : null}
+
+      {isAdmin && activeSection === 'settings' ? (
         <form style={cardStyle} onSubmit={saveSettings}>
           <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Loyalty Settings</div>
           <div style={gridStyle}>
@@ -461,7 +492,7 @@ const Loyalty = () => {
         </form>
       ) : null}
 
-      <div style={cardStyle}>
+      {activeSection === 'offers' ? <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>{editingOfferId ? 'Edit Offer' : 'Create Offer'}</div>
         <div style={{ color: '#D7DEEA', marginBottom: 12 }}>
           Active offers appear in the customer popup and Offers carousel. Inactive offers stay saved but are hidden from customers.
@@ -599,9 +630,9 @@ const Loyalty = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </div> : null}
 
-      <div style={cardStyle}>
+      {activeSection === 'rewards' ? <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Reward Catalogue</div>
         {isAdmin ? (
           <>
@@ -690,9 +721,9 @@ const Loyalty = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </div> : null}
 
-      <div style={cardStyle}>
+      {activeSection === 'requests' ? <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Redemption Requests</div>
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
@@ -726,9 +757,9 @@ const Loyalty = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </div> : null}
 
-      <div style={cardStyle}>
+      {activeSection === 'history' ? <div style={cardStyle}>
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Reward History</div>
         <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
@@ -767,7 +798,7 @@ const Loyalty = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </div> : null}
     </div>
   );
 };

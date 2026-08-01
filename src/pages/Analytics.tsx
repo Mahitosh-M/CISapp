@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { BarChart3, CircleDollarSign, Lightbulb, PieChart as PieChartIcon, Scale } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
+import SectionTileNav from '../components/SectionTileNav';
 import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { buildCustomerContributionRows, buildTopFivePieRows } from '../utils/contribution';
@@ -14,6 +16,15 @@ import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
+type AnalyticsSection = 'overview' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
+
+const analyticsSections = [
+  { id: 'overview', label: 'Performance Overview', icon: BarChart3 },
+  { id: 'breakeven', label: 'Breakeven Analysis', icon: Scale },
+  { id: 'contribution', label: 'Customer Contribution', icon: PieChartIcon },
+  { id: 'insights', label: 'Business Insights', icon: Lightbulb },
+  { id: 'briefing', label: 'Analyst Briefing', icon: CircleDollarSign }
+] satisfies { id: AnalyticsSection; label: string; icon: typeof BarChart3 }[];
 
 const formatPercent = (value: number) => `${Math.round(Number.isFinite(value) ? value : 0)}%`;
 const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#7C3AED', '#9AA6B2'];
@@ -85,7 +96,12 @@ const Analytics = () => {
   const [activeFromDate, setActiveFromDate] = useState(defaultRange.fromDate);
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
   const [contributionGroup, setContributionGroup] = useState<ContributionGroup>('top5');
-  const { customers, invoices, payments, settings, loading, error } = useErpData({ fromDate: activeFromDate, toDate: activeToDate });
+  const [activeSection, setActiveSection] = useState<AnalyticsSection | null>(null);
+  const { customers, invoices, payments, settings, loading, error } = useErpData({
+    fromDate: activeFromDate,
+    toDate: activeToDate,
+    includeScores: false
+  });
   const isMobile = useIsMobile();
 
   const selectedDateKeys = useMemo(() => getDateKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
@@ -489,7 +505,9 @@ const Analytics = () => {
         </div>
       </div>
 
-      <div style={gridStyle}>
+      <SectionTileNav items={analyticsSections} activeId={activeSection} onSelect={setActiveSection} singleRow />
+
+      {activeSection === 'overview' ? <div style={gridStyle}>
             <div style={cardStyle}>
               <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Sales</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.sales)}</div>
@@ -510,9 +528,9 @@ const Analytics = () => {
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
               <div style={{ color: '#D7DEEA', marginTop: 6 }}>Selected range balance</div>
             </div>
-          </div>
+          </div> : null}
 
-          <div style={{ ...cardStyle, marginBottom: 18 }}>
+          {activeSection === 'breakeven' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Breakeven Analysis</div>
@@ -592,14 +610,14 @@ const Analytics = () => {
                 </tbody>
               </table>
             </div>
-          </div>
+          </div> : null}
 
-          <div style={gridStyle}>
+          {activeSection === 'contribution' ? <div style={gridStyle}>
             {renderContributionPie('Sales Contribution', salesPieRows)}
             {renderContributionPie('Profit Contribution', profitPieRows)}
-          </div>
+          </div> : null}
 
-          <div style={gridStyle}>
+          {activeSection === 'insights' ? <div style={gridStyle}>
             {insightCards.map((insight) => (
               <div key={insight.title} style={{ ...cardStyle, borderTop: `4px solid ${getSignalColor(insight.tone)}` }}>
                 <div style={{ color: '#D7DEEA', fontWeight: 800 }}>{insight.title}</div>
@@ -607,9 +625,9 @@ const Analytics = () => {
                 <div style={{ color: '#FFFFFF', marginTop: 8, lineHeight: 1.45 }}>{insight.detail}</div>
               </div>
             ))}
-          </div>
+          </div> : null}
 
-          <div style={{ ...cardStyle, marginBottom: 18 }}>
+          {activeSection === 'contribution' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Contribution Explorer</div>
@@ -677,9 +695,9 @@ const Analytics = () => {
                 </tbody>
               </table>
             </div>
-          </div>
+          </div> : null}
 
-          <div style={cardStyle}>
+          {activeSection === 'briefing' ? <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Business Analyst Briefing</div>
@@ -697,7 +715,7 @@ const Analytics = () => {
                 </div>
               ))}
             </div>
-          </div>
+          </div> : null}
     </div>
   );
 };

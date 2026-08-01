@@ -427,8 +427,8 @@ const Invoices = () => {
         <body>
           <div class="header">
             <div>
-              <div class="brand">Pharma ERP Invoice</div>
-              <div>Customer Intelligence ERP</div>
+              <div class="brand">ERP Invoice</div>
+              <div>COINS</div>
             </div>
             <div>
               <strong>${escapeHtml(invoice.invoiceNumber)}</strong><br />
@@ -555,7 +555,7 @@ const Invoices = () => {
     <div>
       <SectionHeader
         title="Invoices"
-        description="Create, edit, print, filter, and delete Firestore invoices with automatic sequential numbering."
+        description={userProfile?.role === 'Staff' ? undefined : 'Create, edit, print, filter, and delete Firestore invoices with automatic sequential numbering.'}
       />
 
       <form style={cardStyle} onSubmit={handleSubmit}>

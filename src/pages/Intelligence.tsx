@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { CalendarDays, Gauge, Users } from 'lucide-react';
 import CustomerScoreCard from '../components/CustomerScoreCard';
 import SectionHeader from '../components/SectionHeader';
+import SectionTileNav from '../components/SectionTileNav';
 import StatCard from '../components/StatCard';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,12 +15,21 @@ import { formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import type { CustomerScore } from '../types';
 
+type IntelligenceSection = 'overview' | 'score' | 'rankings';
+
+const intelligenceSections = [
+  { id: 'overview', label: 'Customer Overview', icon: Users },
+  { id: 'score', label: 'Score Breakdown', icon: Gauge },
+  { id: 'rankings', label: 'Monthly Rankings', icon: CalendarDays }
+] satisfies { id: IntelligenceSection; label: string; icon: typeof Users }[];
+
 const Intelligence = () => {
   const { userProfile } = useAuth();
   const { customers, invoices, payments, settings, customerScores, loading, error } = useErpData();
   const isMobile = useIsMobile();
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedRankingMonth, setSelectedRankingMonth] = useState('');
+  const [activeSection, setActiveSection] = useState<IntelligenceSection>('overview');
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
   const formatWholeOrders = (value: number) => String(Math.round(value));
   const isStaff = userProfile?.role === 'Staff';
@@ -149,13 +160,20 @@ const Intelligence = () => {
         title="Customer Intelligence"
         description="Rolling 2-month customer ranking, partner level assignment, overdue status, and PC points from Firestore."
       />
+      {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
+
+      <SectionTileNav
+        items={intelligenceSections.filter((section) => !isStaff || section.id !== 'rankings')}
+        activeId={activeSection}
+        onSelect={setActiveSection}
+      />
+
+      {activeSection === 'overview' ? <>
       {!isStaff ? (
         <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>
           Score uses the last 60 days; PC is calculated separately. Overdue or new customers may be capped even if their score is high.
         </div>
       ) : null}
-
-      {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
 
       {!isStaff ? (
         <div style={metricGridStyle}>
@@ -193,7 +211,9 @@ const Intelligence = () => {
           )}
         </div>
       )}
+      </> : null}
 
+      {activeSection === 'score' ? <>
       <SectionHeader
         title="Score Breakdown"
         description="Select a customer to load only that customer's score details on screen."
@@ -214,8 +234,9 @@ const Intelligence = () => {
           <div style={{ color: '#D7DEEA', marginTop: 12 }}>Select a customer to view score breakdown.</div>
         )}
       </div>
+      </> : null}
 
-      {!isStaff ? (
+      {!isStaff && activeSection === 'rankings' ? (
         <>
           <SectionHeader
             title="Monthly Rankings"

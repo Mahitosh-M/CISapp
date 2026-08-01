@@ -88,7 +88,8 @@ export interface CustomerCreditProfile {
   creditDays: number;
   currentOutstanding: number;
   confirmedUninvoicedCreditOrders: number;
-  totalCreditInvoiceAmountLast90Days: number;
+  creditHistoryDays: 60 | 90;
+  totalCreditInvoiceAmountInLookback: number;
   averageMonthlyCreditSales: number;
   baseCreditLimit: number;
   calculatedCreditLimit: number;
@@ -221,6 +222,7 @@ export interface AppSettings {
   creditPolicy: {
     starterLimitCap: number;
     overdueGraceDays: number;
+    lookbackDays: 60 | 90;
   };
   targetSettings: Record<TargetTierKey, TierTargetSetting>;
   loyaltySettings: LoyaltySettings;

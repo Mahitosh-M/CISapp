@@ -52,7 +52,8 @@ const mapProfile = (snapshot: QueryDocumentSnapshot<DocumentData> | Awaited<Retu
     creditDays: numberOrZero(data.creditDays),
     currentOutstanding: numberOrZero(data.currentOutstanding),
     confirmedUninvoicedCreditOrders: numberOrZero(data.confirmedUninvoicedCreditOrders),
-    totalCreditInvoiceAmountLast90Days: numberOrZero(data.totalCreditInvoiceAmountLast90Days),
+    creditHistoryDays: Number(data.creditHistoryDays) === 60 ? 60 : 90,
+    totalCreditInvoiceAmountInLookback: numberOrZero(data.totalCreditInvoiceAmountInLookback ?? data.totalCreditInvoiceAmountLast90Days),
     averageMonthlyCreditSales: numberOrZero(data.averageMonthlyCreditSales),
     baseCreditLimit: numberOrZero(data.baseCreditLimit),
     calculatedCreditLimit: numberOrZero(data.calculatedCreditLimit),
@@ -144,6 +145,7 @@ export interface ManageCreditInput {
   reason?: string;
   amount?: number;
   expiresAt?: string;
+  lookbackDays?: 60 | 90;
 }
 
 export const manageCustomerCredit = async (input: ManageCreditInput) => {
@@ -151,12 +153,12 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
   return (await callable(input)).data;
 };
 
-export const saveCreditPolicy = async (starterLimitCap: number, overdueGraceDays: number) => {
-  const callable = httpsCallable<{ starterLimitCap: number; overdueGraceDays: number }, { ok: boolean }>(functions, 'updateCreditPolicy');
-  return (await callable({ starterLimitCap, overdueGraceDays })).data;
+export const saveCreditPolicy = async (starterLimitCap: number, overdueGraceDays: number, lookbackDays: 60 | 90) => {
+  const callable = httpsCallable<{ starterLimitCap: number; overdueGraceDays: number; lookbackDays: 60 | 90 }, { ok: boolean }>(functions, 'updateCreditPolicy');
+  return (await callable({ starterLimitCap, overdueGraceDays, lookbackDays })).data;
 };
 
-export const recalculateAllCustomerCredit = async () => {
-  const callable = httpsCallable<void, { ok: boolean; count: number }>(functions, 'recalculateAllCustomerCredit');
-  return (await callable()).data;
+export const recalculateAllCustomerCredit = async (lookbackDays: 60 | 90) => {
+  const callable = httpsCallable<{ lookbackDays: 60 | 90 }, { ok: boolean; count: number }>(functions, 'recalculateAllCustomerCredit');
+  return (await callable({ lookbackDays })).data;
 };

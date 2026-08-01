@@ -13,6 +13,11 @@ const DEFAULT_SETTINGS_ID = 'appSettings';
 
 type ProfileOverrides = Record<string, unknown>;
 
+const getLookbackDays = (value: unknown): 60 | 90 | undefined => {
+  const parsed = Number(value);
+  return parsed === 60 || parsed === 90 ? parsed : undefined;
+};
+
 const getAdmin = async (uid?: string) => {
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in before managing customer credit.');
   const profile = await db.doc(`users/${uid}`).get();
@@ -29,7 +34,7 @@ const getSettings = async (): Promise<FirebaseFirestore.DocumentData> => {
   return fallback.docs[0] ? { ...fallback.docs[0].data(), __docId: fallback.docs[0].id } : { __docId: DEFAULT_SETTINGS_ID };
 };
 
-const buildCustomerCredit = async (customerId: string, reason: string, overrides: ProfileOverrides = {}) => {
+const buildCustomerCredit = async (customerId: string, reason: string, overrides: ProfileOverrides = {}, lookbackDays?: 60 | 90) => {
   const customerRef = db.doc(`customers/${customerId}`);
   const profileRef = db.doc(`customerCreditProfiles/${customerId}`);
   const [customer, invoices, payments, settings, existingProfile] = await Promise.all([
@@ -49,7 +54,8 @@ const buildCustomerCredit = async (customerId: string, reason: string, overrides
     payments: payments.docs.map((payment) => ({ id: payment.id, data: payment.data() })),
     settings,
     existingProfile: { ...(existingProfile.data() ?? {}), ...overrides },
-    reviewReason: reason
+    reviewReason: reason,
+    lookbackDays
   });
 };
 
@@ -61,22 +67,22 @@ const writeCreditResult = async (customerId: string, result: Awaited<ReturnType<
   await batch.commit();
 };
 
-const recalculateCustomer = async (customerId: string, reason: string, overrides: ProfileOverrides = {}) => {
+const recalculateCustomer = async (customerId: string, reason: string, overrides: ProfileOverrides = {}, lookbackDays?: 60 | 90) => {
   if (!customerId) return;
-  const result = await buildCustomerCredit(customerId, reason, overrides);
+  const result = await buildCustomerCredit(customerId, reason, overrides, lookbackDays);
   await writeCreditResult(customerId, result);
 };
 
-const recalculateCustomers = async (customerIds: string[], reason: string) => {
+const recalculateCustomers = async (customerIds: string[], reason: string, lookbackDays?: 60 | 90) => {
   const uniqueIds = [...new Set(customerIds.filter(Boolean))];
   for (let index = 0; index < uniqueIds.length; index += 20) {
-    await Promise.all(uniqueIds.slice(index, index + 20).map((customerId) => recalculateCustomer(customerId, reason)));
+    await Promise.all(uniqueIds.slice(index, index + 20).map((customerId) => recalculateCustomer(customerId, reason, {}, lookbackDays)));
   }
 };
 
-const recalculateAll = async (reason: string) => {
+const recalculateAll = async (reason: string, lookbackDays?: 60 | 90) => {
   const customers = await db.collection('customers').select().get();
-  await recalculateCustomers(customers.docs.map((customer) => customer.id), reason);
+  await recalculateCustomers(customers.docs.map((customer) => customer.id), reason, lookbackDays);
   return customers.size;
 };
 
@@ -175,14 +181,15 @@ export const manageCustomerCredit = onCall({ region: REGION }, async (request) =
   const reason = action === 'recalculate'
     ? String(request.data?.reason || 'Admin-triggered review').slice(0, 500)
     : requiredString(request.data?.reason, 'Reason');
+  const lookbackDays = getLookbackDays(request.data?.lookbackDays);
 
   if (action === 'recalculate') {
-    await recalculateCustomer(customerId, 'admin_review');
+    await recalculateCustomer(customerId, 'admin_review', {}, lookbackDays);
     return { ok: true };
   }
 
   const currentSnapshot = await db.doc(`customerCreditProfiles/${customerId}`).get();
-  if (!currentSnapshot.exists) await recalculateCustomer(customerId, 'admin_initial_review');
+  if (!currentSnapshot.exists) await recalculateCustomer(customerId, 'admin_initial_review', {}, lookbackDays);
   const refreshedSnapshot = await db.doc(`customerCreditProfiles/${customerId}`).get();
   if (!refreshedSnapshot.exists) throw new HttpsError('not-found', 'Customer credit profile was not found.');
   const current = refreshedSnapshot.data()!;
@@ -224,7 +231,7 @@ export const manageCustomerCredit = onCall({ region: REGION }, async (request) =
     throw new HttpsError('invalid-argument', 'Unsupported credit action.');
   }
 
-  const calculated = await buildCustomerCredit(customerId, `admin_${action}`, overrides);
+  const calculated = await buildCustomerCredit(customerId, `admin_${action}`, overrides, lookbackDays);
   if (!calculated) throw new HttpsError('not-found', 'Customer was not found.');
 
   if (action === 'approve' || action === 'manual_starter') {
@@ -281,9 +288,10 @@ export const updateCreditPolicy = onCall({ region: REGION }, async (request) => 
     throw new HttpsError('invalid-argument', 'Overdue grace days must be a whole number from 0 to 365.');
   }
   const settings = await getSettings();
+  const lookbackDays = getLookbackDays(request.data?.lookbackDays ?? settings.creditPolicy?.lookbackDays) ?? 90;
   const settingsId = String(settings.__docId || DEFAULT_SETTINGS_ID);
   await db.doc(`settings/${settingsId}`).set({
-    creditPolicy: { starterLimitCap, overdueGraceDays },
+    creditPolicy: { starterLimitCap, overdueGraceDays, lookbackDays },
     updatedAt: new Date().toISOString()
   }, { merge: true });
   return { ok: true };
@@ -291,7 +299,7 @@ export const updateCreditPolicy = onCall({ region: REGION }, async (request) => 
 
 export const recalculateAllCustomerCredit = onCall({ region: REGION, timeoutSeconds: 540 }, async (request) => {
   await getAdmin(request.auth?.uid);
-  const count = await recalculateAll('admin_bulk_review');
+  const count = await recalculateAll('admin_bulk_review', getLookbackDays(request.data?.lookbackDays));
   logger.info('Bulk credit review complete', { count, adminUid: request.auth!.uid });
   return { ok: true, count };
 });

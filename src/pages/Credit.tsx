@@ -83,6 +83,7 @@ const Credit = () => {
   });
   const [starterLimitCap, setStarterLimitCap] = useState(25000);
   const [overdueGraceDays, setOverdueGraceDays] = useState(3);
+  const [lookbackDays, setLookbackDays] = useState<60 | 90>(90);
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<'all' | CustomerTier>('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -115,6 +116,7 @@ const Credit = () => {
       setMetrics(dashboardMetrics);
       setStarterLimitCap(settings.creditPolicy.starterLimitCap);
       setOverdueGraceDays(settings.creditPolicy.overdueGraceDays);
+      setLookbackDays(settings.creditPolicy.lookbackDays);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load customer credit.');
     } finally {
@@ -159,7 +161,8 @@ const Credit = () => {
         action: dialog.action,
         reason: actionReason,
         amount: ['approve', 'manual_starter', 'override'].includes(dialog.action) ? actionAmount : undefined,
-        expiresAt: dialog.action === 'override' ? overrideExpiry : undefined
+        expiresAt: dialog.action === 'override' ? overrideExpiry : undefined,
+        lookbackDays
       });
       setDialog(undefined);
       setMessage('Customer credit updated.');
@@ -175,7 +178,7 @@ const Credit = () => {
     try {
       setSaving(true);
       setError('');
-      await saveCreditPolicy(starterLimitCap, overdueGraceDays);
+      await saveCreditPolicy(starterLimitCap, overdueGraceDays, lookbackDays);
       setMessage('Credit policy saved. Recalculation is running in the background.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save credit policy.');
@@ -188,7 +191,7 @@ const Credit = () => {
     try {
       setSaving(true);
       setError('');
-      const result = await recalculateAllCustomerCredit();
+      const result = await recalculateAllCustomerCredit(lookbackDays);
       setMessage(`${result.count} customer credit profiles recalculated.`);
       await loadData();
     } catch (err) {
@@ -233,6 +236,28 @@ const Credit = () => {
             <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Applies to starter approvals and overdue holds.</div>
           </div>
           <div className="credit-policy-controls">
+            <div>
+              <span style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>Calculation period</span>
+              <div style={{ display: 'inline-flex', border: '1px solid #D8DEE9', borderRadius: 6, overflow: 'hidden' }}>
+                {([60, 90] as const).map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    aria-pressed={lookbackDays === days}
+                    onClick={() => setLookbackDays(days)}
+                    style={{
+                      ...buttonStyle,
+                      borderRadius: 0,
+                      minWidth: 88,
+                      background: lookbackDays === days ? '#D4AF37' : '#FFFFFF',
+                      color: '#11185A'
+                    }}
+                  >
+                    {days === 60 ? '2 Month' : '3 Month'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <label>
               <span>Starter cap</span>
               <input style={inputStyle} type="number" min="0" value={starterLimitCap} onChange={(event) => setStarterLimitCap(Number(event.target.value) || 0)} />
@@ -335,7 +360,7 @@ const Credit = () => {
 
             {dialog.action === 'breakdown' ? (
               <div className="credit-breakdown">
-                <div><span>90-day completed credit sales</span><strong>{formatMoney(dialog.profile.totalCreditInvoiceAmountLast90Days)}</strong></div>
+                <div><span>{dialog.profile.creditHistoryDays}-day completed credit sales</span><strong>{formatMoney(dialog.profile.totalCreditInvoiceAmountInLookback)}</strong></div>
                 <div><span>Average monthly credit sales</span><strong>{formatMoney(dialog.profile.averageMonthlyCreditSales)}</strong></div>
                 <div><span>Base credit limit</span><strong>{formatMoney(dialog.profile.baseCreditLimit)}</strong></div>
                 <div><span>Payment factor</span><strong>{dialog.profile.paymentFactor.toFixed(2)}</strong></div>

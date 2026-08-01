@@ -20,7 +20,8 @@ const payment = (id: string, invoiceId: string, amount: number, date: string) =>
 const calculate = (
   invoices: ReturnType<typeof invoice>[],
   payments: ReturnType<typeof payment>[],
-  existingProfile = {}
+  existingProfile = {},
+  lookbackDays?: 60 | 90
 ) => calculateCustomerCredit({
   customerId: 'customer-1',
   customer: { name: 'Test Customer', tier: 'Tier 1' },
@@ -29,7 +30,8 @@ const calculate = (
   settings,
   existingProfile,
   reviewReason: 'test',
-  now: new Date('2026-07-30T12:00:00.000Z')
+  now: new Date('2026-07-30T12:00:00.000Z'),
+  lookbackDays
 });
 
 test('calculates established limit and caps an increase at 20 percent', () => {
@@ -90,4 +92,24 @@ test('keeps an approved manual starter limit when payment history is unavailable
   assert.equal(result.profile.calculatedCreditLimit, 500);
   assert.equal(result.profile.approvedCreditLimit, 500);
   assert.equal(result.profile.availableCredit, 500);
+});
+
+test('uses the selected 60 or 90 day history window', () => {
+  const invoices = [
+    invoice('i1', 1000, '2026-07-01', '2026-07-20'),
+    invoice('i2', 1000, '2026-06-15', '2026-07-15'),
+    invoice('i3', 1000, '2026-06-01', '2026-06-20'),
+    invoice('i4', 3000, '2026-05-15', '2026-06-15')
+  ];
+  const payments = invoices.map((row, index) => payment(`p${index + 1}`, row.id, Number(row.data.totalSales), String(row.data.dueDate)));
+
+  const twoMonthResult = calculate(invoices, payments, {}, 60);
+  const threeMonthResult = calculate(invoices, payments, {}, 90);
+
+  assert.equal(twoMonthResult.profile.creditHistoryDays, 60);
+  assert.equal(twoMonthResult.profile.totalCreditInvoiceAmountInLookback, 3000);
+  assert.equal(twoMonthResult.profile.averageMonthlyCreditSales, 1500);
+  assert.equal(threeMonthResult.profile.creditHistoryDays, 90);
+  assert.equal(threeMonthResult.profile.totalCreditInvoiceAmountInLookback, 6000);
+  assert.equal(threeMonthResult.profile.averageMonthlyCreditSales, 2000);
 });

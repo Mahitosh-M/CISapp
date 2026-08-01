@@ -58,9 +58,7 @@ const Admin = () => {
   const sortedStaffUsers = useMemo(() => sortedUsers.filter((user) => user.role !== 'customer'), [sortedUsers]);
   const sortedCustomerUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'customer'), [sortedUsers]);
   const isAdmin = userProfile?.role === 'Admin';
-  const staffUserCount = useMemo(() => users.filter((user) => user.role === 'Staff').length, [users]);
   const adminUserCount = useMemo(() => users.filter((user) => user.role === 'Admin').length, [users]);
-  const customerUserCount = useMemo(() => users.filter((user) => user.role === 'customer').length, [users]);
 
   const handleCreateStaff = async (event: FormEvent) => {
     event.preventDefault();
@@ -188,7 +186,7 @@ const Admin = () => {
 
   const metricGridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gridTemplateColumns: 'minmax(150px, 260px)',
     gap: 12,
     marginBottom: 20
   };
@@ -269,14 +267,6 @@ const Admin = () => {
         <div className="admin-card admin-metric" style={metricCardStyle}>
           <div className="admin-icon-badge"><ShieldCheck size={20} /></div>
           <div><div className="admin-metric-value">{adminUserCount}</div><div className="admin-metric-label">Admins</div></div>
-        </div>
-        <div className="admin-card admin-metric" style={metricCardStyle}>
-          <div className="admin-icon-badge"><Users size={20} /></div>
-          <div><div className="admin-metric-value">{staffUserCount}</div><div className="admin-metric-label">Staff</div></div>
-        </div>
-        <div className="admin-card admin-metric" style={metricCardStyle}>
-          <div className="admin-icon-badge"><UserPlus size={20} /></div>
-          <div><div className="admin-metric-value">{customerUserCount}</div><div className="admin-metric-label">Customers</div></div>
         </div>
       </div>
 

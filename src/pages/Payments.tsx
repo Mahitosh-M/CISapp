@@ -609,7 +609,7 @@ const Payments = () => {
     <div>
       <SectionHeader
         title="Payments"
-        description="Payments clear invoices oldest-first. Any extra amount is saved as customer advance."
+        description={userProfile?.role === 'Staff' ? undefined : 'Payments clear invoices oldest-first. Any extra amount is saved as customer advance.'}
       />
 
       <form style={cardStyle} onSubmit={handleSubmit}>

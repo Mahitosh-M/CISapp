@@ -45,7 +45,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   creditPolicy: {
     starterLimitCap: 25000,
-    overdueGraceDays: 3
+    overdueGraceDays: 3,
+    lookbackDays: 90
   },
   loyaltySettings: {
     pointsPerThousand: 0,
@@ -252,6 +253,10 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
 
   if (!Number.isInteger(Number(activeSettings.creditPolicy.overdueGraceDays)) || Number(activeSettings.creditPolicy.overdueGraceDays) < 0) {
     errors.push('Overdue grace days must be a non-negative whole number.');
+  }
+
+  if (![60, 90].includes(Number(activeSettings.creditPolicy.lookbackDays))) {
+    errors.push('Credit history period must be 60 or 90 days.');
   }
 
   if (!activeSettings.invoicePrefix.trim()) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { approveReferralBonus, BONUS_PC_LABELS, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
+import { approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
 import type { AppSettings, BonusPcRequest, Customer, Invoice, OverduePcRequest, Payment, RedemptionRequest } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
@@ -325,6 +325,12 @@ const OverduePcRequests = () => {
     cursor: 'pointer'
   };
 
+  const primaryActionStyle: CSSProperties = {
+    ...buttonStyle,
+    background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
+    color: '#FFFFFF'
+  };
+
   const tableStyle: CSSProperties = {
     width: '100%',
     minWidth: 1040,
@@ -345,29 +351,29 @@ const OverduePcRequests = () => {
   };
 
   if (loading) {
-    return <SectionHeader title="PC" description="Loading Partner Coin requests..." />;
+    return <SectionHeader title="PC" />;
   }
 
   return (
     <div>
-      <SectionHeader title="PC" description="Approve Partner Coins for invoices paid after the tier due date plus buffer days." />
+      <SectionHeader title="PC" />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
       {message ? <div style={{ color: '#D4AF37', marginBottom: 16, fontWeight: 800 }}>{message}</div> : null}
 
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900 }}>Customer PC Balance</div>
-            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>View available, incoming, and redeemed Partner Coins.</div>
-          </div>
-          <button type="button" onClick={() => setShowPcViewer((current) => !current)} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }}>
+      <div style={{ ...cardStyle, display: 'inline-block', padding: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto' }}>
+          <button type="button" onClick={() => setShowPcViewer((current) => !current)} style={primaryActionStyle}>
             VIEW PC
           </button>
+          <button type="button" onClick={() => setShowReferral((current) => !current)} style={primaryActionStyle}>
+            Referral
+          </button>
         </div>
+      </div>
 
-        {showPcViewer ? (
-          <div style={{ marginTop: 16, display: 'grid', gap: 14 }}>
+      {showPcViewer ? (
+          <div style={{ ...cardStyle, display: 'grid', gap: 14 }}>
             <label style={{ fontWeight: 800 }}>
               Select Customer
               <select
@@ -428,23 +434,8 @@ const OverduePcRequests = () => {
             ) : null}
           </div>
         ) : null}
-      </div>
-
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900 }}>Referral Bonus</div>
-            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
-              Approve {formatPc(settings.loyaltySettings.referralBonus)} for a customer referral.
-            </div>
-          </div>
-          <button type="button" onClick={() => setShowReferral((current) => !current)} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
-            Referral
-          </button>
-        </div>
-
-        {showReferral ? (
-          <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
+      {showReferral ? (
+          <div style={{ ...cardStyle, display: 'grid', gap: 12 }}>
             <label style={{ fontWeight: 800 }}>
               Select Customer
               <select
@@ -472,22 +463,15 @@ const OverduePcRequests = () => {
             ) : null}
           </div>
         ) : null}
-      </div>
 
       <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900 }}>Request Queue</div>
-            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
-              The generator checks recent paid invoices and skips requests already created for an invoice.
-            </div>
-          </div>
-          <button type="button" disabled={generating} onClick={handleGenerate} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
+        <div style={{ marginBottom: sortedPendingRequests.length > 0 ? 14 : 0 }}>
+          <button type="button" disabled={generating} onClick={handleGenerate} style={primaryActionStyle}>
             {generating ? 'Generating...' : 'Generate Requests'}
           </button>
         </div>
 
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
+        {sortedPendingRequests.length > 0 ? <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -497,9 +481,7 @@ const OverduePcRequests = () => {
               </tr>
             </thead>
             <tbody>
-              {sortedPendingRequests.length === 0 ? (
-                <tr><td style={tdStyle} colSpan={10}>No pending PC requests.</td></tr>
-              ) : sortedPendingRequests.map((request) => (
+              {sortedPendingRequests.map((request) => (
                 <tr key={request.id}>
                   <td style={tdStyle}>{request.customerName}</td>
                   <td style={tdStyle}>
@@ -542,38 +524,17 @@ const OverduePcRequests = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </div> : null}
       </div>
 
       <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 900 }}>Bonus Request Queue</div>
-            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
-              Pending bonuses need approval before PC is added. Approved/rejected requests are hidden from this queue but kept in history.
-            </div>
-            <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
-              Payment and target bonuses are generated once per customer per month. Referral bonuses are approved manually above.
-            </div>
-          </div>
-          <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }}>
+        <div style={{ marginBottom: sortedPendingBonusRequests.length > 0 ? 14 : 0 }}>
+          <button type="button" disabled={generatingBonus} onClick={handleGenerateBonus} style={primaryActionStyle}>
             {generatingBonus ? 'Generating...' : 'Generate Bonus Requests'}
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          {(['new_customer', 'payment', 'purchase_target', 'referral'] as const).map((key) => (
-            <span key={key} style={{ background: '#FFF7D6', color: '#11185A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
-              {BONUS_PC_LABELS[key]}
-            </span>
-          ))}
-        </div>
-
-        <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 12 }}>
-          Bonus PC is capped at 20% of the customer&apos;s base PC earned for the month when generated automatically.
-        </div>
-
-        <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
+        {sortedPendingBonusRequests.length > 0 ? <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -583,9 +544,7 @@ const OverduePcRequests = () => {
               </tr>
             </thead>
             <tbody>
-              {sortedPendingBonusRequests.length === 0 ? (
-                <tr><td style={tdStyle} colSpan={8}>No pending bonus requests.</td></tr>
-              ) : sortedPendingBonusRequests.map((request) => (
+              {sortedPendingBonusRequests.map((request) => (
                 <tr key={request.id}>
                   <td style={tdStyle}>{request.customerName}</td>
                   <td style={tdStyle}>
@@ -619,7 +578,7 @@ const OverduePcRequests = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </div> : null}
       </div>
     </div>
   );

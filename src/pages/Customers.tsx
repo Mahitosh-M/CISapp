@@ -490,7 +490,7 @@ const Customers = () => {
     <div>
       <SectionHeader
         title="Customers"
-        description="Create, search, edit, and delete customer accounts directly in Firestore."
+        description={isStaff ? undefined : 'Create, search, edit, and delete customer accounts directly in Firestore.'}
       />
 
       {isStaff ? (
