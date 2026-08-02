@@ -197,8 +197,12 @@ service cloud.firestore {
           'createdAt'
         ])
         && data.customerId is string
-        && data.type in ['purchase', 'on_time_payment', 'monthly_target', 'order_frequency', 'overdue_payment', 'bonus', 'redemption']
+        && data.type in ['purchase', 'on_time_payment', 'monthly_target', 'order_frequency', 'overdue_payment', 'bonus', 'redemption', 'opening_balance', 'manual_adjustment', 'redemption_reversal']
         && data.points is number
+        && ((data.type == 'manual_adjustment' && data.points != 0)
+          || (data.type == 'redemption' && data.points < 0)
+          || (data.type == 'opening_balance' && data.points >= 0)
+          || (!(data.type in ['manual_adjustment', 'redemption', 'opening_balance']) && data.points > 0))
         && data.reason is string
         && data.reason.size() <= 160
         && data.referenceId is string
@@ -206,6 +210,27 @@ service cloud.firestore {
         && data.month is string
         && data.month.matches('^\\d{4}-\\d{2}$')
         && data.createdAt is string;
+    }
+
+    function validPcBalance(data, customerDocId) {
+      return data.keys().hasOnly([
+          'customerId',
+          'availablePc',
+          'incomingPc',
+          'redeemedPc',
+          'protectedAt',
+          'updatedAt'
+        ])
+        && data.customerId == customerDocId
+        && data.availablePc is number
+        && data.availablePc >= 0
+        && data.incomingPc is number
+        && data.incomingPc >= 0
+        && data.redeemedPc is number
+        && data.redeemedPc >= 0
+        && data.availablePc == data.incomingPc - data.redeemedPc
+        && data.protectedAt is string
+        && data.updatedAt is string;
     }
 
     function validRewardItem(data) {
@@ -408,6 +433,166 @@ service cloud.firestore {
         && validOptionalString(data, 'customerName', 140);
     }
 
+    function validCreditOverride(data) {
+      return data is map
+        && data.keys().hasOnly(['amount', 'reason', 'expiresAt', 'createdAt', 'createdBy'])
+        && data.amount is number
+        && data.amount >= 0
+        && data.reason is string
+        && data.reason.size() > 0
+        && data.reason.size() <= 500
+        && data.expiresAt is string
+        && data.expiresAt.size() == 10
+        && data.createdAt is string
+        && data.createdAt.size() <= 40
+        && data.createdBy is string
+        && data.createdBy.size() > 0
+        && data.createdBy.size() <= 160;
+    }
+
+    function validCreditProfile(data, customerDocId) {
+      return data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'tier',
+          'creditDays',
+          'currentOutstanding',
+          'confirmedUninvoicedCreditOrders',
+          'creditHistoryDays',
+          'totalCreditInvoiceAmountInLookback',
+          'totalCreditInvoiceAmountLast90Days',
+          'averageMonthlyCreditSales',
+          'baseCreditLimit',
+          'calculatedCreditLimit',
+          'approvedCreditLimit',
+          'availableCredit',
+          'paymentFactor',
+          'historyFactor',
+          'onTimePaymentPercentage',
+          'completedCreditInvoices',
+          'overdueAmount',
+          'hasOverdueBeyondGrace',
+          'creditStatus',
+          'creditLimitApprovalStatus',
+          'nextInvoiceDueDate',
+          'nextInvoiceDueAmount',
+          'lastCreditReviewAt',
+          'lastCreditReviewReason',
+          'manualHold',
+          'manualStarterLimit',
+          'creditOverride',
+          'updatedAt'
+        ])
+        && data.customerId == customerDocId
+        && data.customerName is string
+        && data.customerName.size() > 0
+        && data.customerName.size() <= 140
+        && data.tier in ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4']
+        && data.creditDays is int
+        && data.creditDays >= 0
+        && data.creditHistoryDays in [60, 90]
+        && data.currentOutstanding is number
+        && data.currentOutstanding >= 0
+        && data.confirmedUninvoicedCreditOrders is number
+        && data.confirmedUninvoicedCreditOrders >= 0
+        && data.totalCreditInvoiceAmountInLookback is number
+        && data.totalCreditInvoiceAmountInLookback >= 0
+        && data.totalCreditInvoiceAmountLast90Days is number
+        && data.totalCreditInvoiceAmountLast90Days >= 0
+        && data.averageMonthlyCreditSales is number
+        && data.averageMonthlyCreditSales >= 0
+        && data.baseCreditLimit is number
+        && data.baseCreditLimit >= 0
+        && data.calculatedCreditLimit is number
+        && data.calculatedCreditLimit >= 0
+        && data.approvedCreditLimit is number
+        && data.approvedCreditLimit >= 0
+        && data.availableCredit is number
+        && data.availableCredit >= 0
+        && data.paymentFactor is number
+        && data.paymentFactor >= 0
+        && data.historyFactor is number
+        && data.historyFactor >= 0
+        && data.onTimePaymentPercentage is number
+        && data.onTimePaymentPercentage >= 0
+        && data.onTimePaymentPercentage <= 100
+        && data.completedCreditInvoices is int
+        && data.completedCreditInvoices >= 0
+        && data.overdueAmount is number
+        && data.overdueAmount >= 0
+        && data.hasOverdueBeyondGrace is bool
+        && data.creditStatus in ['starter', 'active', 'hold', 'disabled']
+        && data.creditLimitApprovalStatus in ['pending_starter', 'pending_calculated', 'approved', 'rejected']
+        && (data.nextInvoiceDueDate == null || (data.nextInvoiceDueDate is string && data.nextInvoiceDueDate.size() == 10))
+        && (data.nextInvoiceDueAmount == null || (data.nextInvoiceDueAmount is number && data.nextInvoiceDueAmount >= 0))
+        && data.lastCreditReviewAt is string
+        && data.lastCreditReviewAt.size() <= 40
+        && data.lastCreditReviewReason is string
+        && data.lastCreditReviewReason.size() > 0
+        && data.lastCreditReviewReason.size() <= 500
+        && data.manualHold is bool
+        && data.updatedAt is string
+        && data.updatedAt.size() <= 40
+        && (!('manualStarterLimit' in data) || (data.manualStarterLimit is number && data.manualStarterLimit >= 0))
+        && (!('creditOverride' in data) || validCreditOverride(data.creditOverride));
+    }
+
+    function validCreditSummary(data, customerDocId) {
+      return data.keys().hasOnly([
+          'customerId',
+          'approvedCreditLimit',
+          'availableCredit',
+          'usedCredit',
+          'creditDays',
+          'nextInvoiceDueDate',
+          'nextInvoiceDueAmount',
+          'creditStatus',
+          'manualHold',
+          'updatedAt'
+        ])
+        && data.customerId == customerDocId
+        && (!('approvedCreditLimit' in data) || (data.approvedCreditLimit is number && data.approvedCreditLimit >= 0))
+        && data.availableCredit is number
+        && data.availableCredit >= 0
+        && data.usedCredit is number
+        && data.usedCredit >= 0
+        && data.creditDays is int
+        && data.creditDays >= 0
+        && (data.nextInvoiceDueDate == null || (data.nextInvoiceDueDate is string && data.nextInvoiceDueDate.size() == 10))
+        && (data.nextInvoiceDueAmount == null || (data.nextInvoiceDueAmount is number && data.nextInvoiceDueAmount >= 0))
+        && data.creditStatus in ['starter', 'active', 'hold', 'disabled']
+        && (!('manualHold' in data) || data.manualHold is bool)
+        && data.updatedAt is string
+        && data.updatedAt.size() <= 40;
+    }
+
+    function validCreditAudit(data) {
+      return data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'action',
+          'adminUid',
+          'timestamp',
+          'oldValue',
+          'newValue',
+          'reason'
+        ])
+        && data.customerId is string
+        && data.customerId.size() > 0
+        && data.customerId.size() <= 160
+        && data.customerName is string
+        && data.customerName.size() <= 140
+        && data.action in ['approve', 'reject', 'manual_starter', 'hold', 'remove_hold', 'override', 'remove_override']
+        && data.adminUid == request.auth.uid
+        && data.timestamp is string
+        && data.timestamp.size() <= 40
+        && (data.oldValue == null || (data.oldValue is map && data.oldValue.keys().size() <= 10))
+        && (data.newValue == null || (data.newValue is map && data.newValue.keys().size() <= 10))
+        && data.reason is string
+        && data.reason.size() > 0
+        && data.reason.size() <= 500;
+    }
+
     match /users/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin()
@@ -457,18 +642,21 @@ service cloud.firestore {
 
     match /customerCreditProfiles/{customerDocId} {
       allow read: if isAdmin();
-      allow create, update, delete: if false;
+      allow create, update: if isAdmin() && validCreditProfile(request.resource.data, customerDocId);
+      allow delete: if isAdmin();
     }
 
     match /customerCreditSummaries/{customerDocId} {
       allow get: if isTeam() || (isCustomer() && customerDocId == customerId());
       allow list: if isTeam();
-      allow create, update, delete: if false;
+      allow create, update: if isAdmin() && validCreditSummary(request.resource.data, customerDocId);
+      allow delete: if isAdmin();
     }
 
     match /creditAuditLogs/{logId} {
       allow read: if isAdmin();
-      allow create, update, delete: if false;
+      allow create: if isAdmin() && validCreditAudit(request.resource.data);
+      allow update, delete: if false;
     }
 
     match /giftHistory/{giftId} {
@@ -494,9 +682,15 @@ service cloud.firestore {
     }
 
     match /loyaltyLedger/{entryId} {
-      allow read: if isTeam();
-      allow create, update: if isAdmin() && validLoyaltyLedgerEntry(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isTeam() || ownsCustomerRecord(resource.data);
+      allow create: if isAdmin() && validLoyaltyLedgerEntry(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    match /pcBalances/{customerDocId} {
+      allow read: if isTeam() || (isCustomer() && customerId() == customerDocId);
+      allow create, update: if isAdmin() && validPcBalance(request.resource.data, customerDocId);
+      allow delete: if false;
     }
 
     match /rewardItems/{rewardId} {

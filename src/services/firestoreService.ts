@@ -37,6 +37,7 @@ import type {
   PaymentFormData,
   MonthlyCustomerStats,
   LoyaltyLedgerEntry,
+  PcBalanceRecord,
   OverduePcRequest,
   OverduePcRequestStatus,
   RewardFormData,
@@ -72,6 +73,7 @@ const USERS = 'users';
 const OFFERS = 'offers';
 const MONTHLY_CUSTOMER_STATS = 'monthlyCustomerStats';
 const LOYALTY_LEDGER = 'loyaltyLedger';
+const PC_BALANCES = 'pcBalances';
 const REWARD_ITEMS = 'rewardItems';
 const REDEMPTION_REQUESTS = 'redemptionRequests';
 const OVERDUE_PC_REQUESTS = 'overduePcRequests';
@@ -108,6 +110,27 @@ interface CustomerQueryOptions {
 const nowIso = () => new Date().toISOString();
 
 const getTodayDateString = () => nowIso().slice(0, 10);
+
+const mapLoyaltyLedgerEntry = (id: string, data: Record<string, unknown>): LoyaltyLedgerEntry => ({
+  id,
+  customerId: String(data.customerId || ''),
+  type: data.type as LoyaltyLedgerEntry['type'],
+  points: numberOrZero(data.points),
+  reason: String(data.reason || ''),
+  referenceId: String(data.referenceId || ''),
+  month: String(data.month || ''),
+  createdAt: String(data.createdAt || '')
+});
+
+const mapPcBalanceRecord = (id: string, data: Record<string, unknown>): PcBalanceRecord => ({
+  id,
+  customerId: String(data.customerId || id),
+  availablePc: Math.max(0, Math.round(numberOrZero(data.availablePc))),
+  incomingPc: Math.max(0, Math.round(numberOrZero(data.incomingPc))),
+  redeemedPc: Math.max(0, Math.round(numberOrZero(data.redeemedPc))),
+  protectedAt: String(data.protectedAt || ''),
+  updatedAt: String(data.updatedAt || '')
+});
 
 type CacheEntry<T> = {
   value: T;
@@ -917,7 +940,11 @@ export const syncCustomerPartnerLevelsFromFirestore = async () => {
 };
 
 export const deleteCustomerRecord = async (customerId: string, auditUser?: AuditUser) => {
-  await deleteDoc(doc(db, CUSTOMERS, customerId));
+  const batch = writeBatch(db);
+  batch.delete(doc(db, CUSTOMERS, customerId));
+  batch.delete(doc(db, 'customerCreditProfiles', customerId));
+  batch.delete(doc(db, 'customerCreditSummaries', customerId));
+  await batch.commit();
   clearFirestoreSessionCache();
 };
 
@@ -1748,6 +1775,11 @@ export const getMonthlyCustomerStatsForMonth = async (month = getCurrentMonthKey
   return snapshot.docs.map((statsDoc) => mapMonthlyCustomerStatsDoc(statsDoc.id, statsDoc.data()));
 };
 
+export const getMonthlyCustomerStatsRecords = async (limitCount = 5000) => {
+  const snapshot = await getDocs(query(collection(db, MONTHLY_CUSTOMER_STATS), firestoreLimit(limitCount)));
+  return snapshot.docs.map((statsDoc) => mapMonthlyCustomerStatsDoc(statsDoc.id, statsDoc.data()));
+};
+
 export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), auditUser?: AuditUser) => {
   const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
     getCustomers(),
@@ -1774,6 +1806,9 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
 
       if (stats.pointsEarned > 0) {
         const ledgerId = `${stats.customerId}_${month.replace('-', '_')}_monthly_points`;
+        const ledgerRef = doc(db, LOYALTY_LEDGER, ledgerId);
+        const existingLedgerSnapshot = await getDoc(ledgerRef);
+        if (existingLedgerSnapshot.exists()) return;
         const ledgerEntry: Omit<LoyaltyLedgerEntry, 'id'> = {
           customerId: stats.customerId,
           type: 'purchase',
@@ -1784,13 +1819,196 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
           createdAt: timestamp
         };
 
-        await setDoc(doc(db, LOYALTY_LEDGER, ledgerId), ledgerEntry, { merge: false });
+        await setDoc(ledgerRef, ledgerEntry, { merge: false });
       }
     })
   );
 
   clearFirestoreSessionCache();
   return statsRows;
+};
+
+export const getCustomerPcBalanceRecord = async (customerId: string) => {
+  if (!customerId) return undefined;
+  const snapshot = await getDoc(doc(db, PC_BALANCES, customerId));
+  return snapshot.exists() ? mapPcBalanceRecord(snapshot.id, snapshot.data()) : undefined;
+};
+
+export const getPcBalanceRecords = async (limitCount = 5000) => {
+  const snapshot = await getDocs(query(collection(db, PC_BALANCES), firestoreLimit(limitCount)));
+  return snapshot.docs.map((balanceDoc) => mapPcBalanceRecord(balanceDoc.id, balanceDoc.data()));
+};
+
+export const getLoyaltyLedgerEntries = async (limitCount = 5000) => {
+  const snapshot = await getDocs(query(collection(db, LOYALTY_LEDGER), firestoreLimit(limitCount)));
+  return snapshot.docs.map((entryDoc) => mapLoyaltyLedgerEntry(entryDoc.id, entryDoc.data()));
+};
+
+export const getCustomerPcLedgerEntries = async (customerId: string, limitCount = 500) => {
+  if (!customerId) return [];
+  const snapshot = await getDocs(query(
+    collection(db, LOYALTY_LEDGER),
+    where('customerId', '==', customerId),
+    firestoreLimit(limitCount)
+  ));
+  return snapshot.docs
+    .map((entryDoc) => mapLoyaltyLedgerEntry(entryDoc.id, entryDoc.data()))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+};
+
+const requireAdminAudit = (auditUser?: AuditUser) => {
+  if (auditUser?.role !== 'Admin') throw new Error('Only Admin users can change protected PC balances.');
+};
+
+export const protectCustomerPcBalance = async (
+  customerId: string,
+  currentBalance: number,
+  auditUser?: AuditUser
+) => {
+  requireAdminAudit(auditUser);
+  const cleanBalance = Math.max(0, Math.round(numberOrZero(currentBalance)));
+  const balanceRef = doc(db, PC_BALANCES, customerId);
+  const openingRef = doc(db, LOYALTY_LEDGER, `${customerId}_pc_opening_balance_v1`);
+  const timestamp = nowIso();
+
+  await runTransaction(db, async (transaction) => {
+    const existing = await transaction.get(balanceRef);
+    if (existing.exists()) throw new Error('This customer PC balance is already protected.');
+
+    transaction.set(balanceRef, {
+      customerId,
+      availablePc: cleanBalance,
+      incomingPc: cleanBalance,
+      redeemedPc: 0,
+      protectedAt: timestamp,
+      updatedAt: timestamp
+    });
+    transaction.set(openingRef, {
+      customerId,
+      type: 'opening_balance',
+      points: cleanBalance,
+      reason: 'Protected PC opening balance',
+      referenceId: 'pc_opening_balance_v1',
+      month: timestamp.slice(0, 7),
+      createdAt: timestamp
+    });
+  });
+
+  clearFirestoreSessionCache();
+  return getCustomerPcBalanceRecord(customerId);
+};
+
+export const adjustCustomerPcBalance = async (
+  customerId: string,
+  direction: 'add' | 'deduct',
+  points: number,
+  reason: string,
+  auditUser?: AuditUser
+) => {
+  requireAdminAudit(auditUser);
+  const cleanPoints = Math.max(0, Math.round(numberOrZero(points)));
+  const cleanReason = reason.trim();
+  if (cleanPoints <= 0) throw new Error('PC amount must be above 0.');
+  if (!cleanReason) throw new Error('Reason is required for a manual PC adjustment.');
+  if (cleanReason.length > 140) throw new Error('Reason must be 140 characters or fewer.');
+
+  const balanceRef = doc(db, PC_BALANCES, customerId);
+  const entryRef = doc(collection(db, LOYALTY_LEDGER));
+  const timestamp = nowIso();
+  const delta = direction === 'add' ? cleanPoints : -cleanPoints;
+
+  await runTransaction(db, async (transaction) => {
+    const balanceSnapshot = await transaction.get(balanceRef);
+    if (!balanceSnapshot.exists()) throw new Error('Protect this customer PC balance before adjusting it.');
+    const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+    const nextAvailable = balance.availablePc + delta;
+    if (nextAvailable < 0) throw new Error('PC deduction cannot exceed the available balance.');
+
+    transaction.update(balanceRef, {
+      availablePc: nextAvailable,
+      incomingPc: balance.incomingPc + (delta > 0 ? delta : 0),
+      redeemedPc: balance.redeemedPc + (delta < 0 ? Math.abs(delta) : 0),
+      updatedAt: timestamp
+    });
+    transaction.set(entryRef, {
+      customerId,
+      type: 'manual_adjustment',
+      points: delta,
+      reason: cleanReason,
+      referenceId: entryRef.id,
+      month: timestamp.slice(0, 7),
+      createdAt: timestamp
+    });
+  });
+
+  clearFirestoreSessionCache();
+  return getCustomerPcBalanceRecord(customerId);
+};
+
+export const syncProtectedCustomerInvoicePc = async (customerId: string, auditUser?: AuditUser) => {
+  requireAdminAudit(auditUser);
+  const [balance, customer, invoices, payments, settings, ledgerEntries] = await Promise.all([
+    getCustomerPcBalanceRecord(customerId),
+    getCustomerById(customerId),
+    getInvoicesByCustomerId(customerId),
+    getPaymentsByCustomerId(customerId),
+    getAppSettings(),
+    getCustomerPcLedgerEntries(customerId)
+  ]);
+  if (!balance) throw new Error('Protect this customer PC balance before syncing earned PC.');
+  if (!customer) throw new Error('Selected customer no longer exists.');
+
+  const existingInvoiceIds = new Set(
+    ledgerEntries.filter((entry) => entry.type === 'purchase').map((entry) => entry.referenceId)
+  );
+  const protectedDate = balance.protectedAt.slice(0, 10);
+  const eligible = invoices
+    .map((invoice) => ({
+      invoice,
+      fullPaymentDate: getInvoiceFullPaymentDate(invoice, payments),
+      earnedPc: calculateInvoiceApcInfo(invoice, payments, customer.tier, settings).earnedApc
+    }))
+    .filter(({ invoice, fullPaymentDate, earnedPc }) =>
+      Boolean(fullPaymentDate)
+      && fullPaymentDate > protectedDate
+      && earnedPc > 0
+      && !existingInvoiceIds.has(invoice.id)
+    );
+
+  let credited = 0;
+  for (const row of eligible) {
+    const entryRef = doc(db, LOYALTY_LEDGER, `${customerId}_${row.invoice.id}_invoice_pc`);
+    const balanceRef = doc(db, PC_BALANCES, customerId);
+    const timestamp = nowIso();
+    const added = await runTransaction(db, async (transaction) => {
+      const [entrySnapshot, balanceSnapshot] = await Promise.all([
+        transaction.get(entryRef),
+        transaction.get(balanceRef)
+      ]);
+      if (entrySnapshot.exists() || !balanceSnapshot.exists()) return false;
+      const current = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+
+      transaction.set(entryRef, {
+        customerId,
+        type: 'purchase',
+        points: row.earnedPc,
+        reason: `Invoice PC: ${row.invoice.invoiceNumber || row.invoice.id}`,
+        referenceId: row.invoice.id,
+        month: row.fullPaymentDate.slice(0, 7),
+        createdAt: timestamp
+      });
+      transaction.update(balanceRef, {
+        availablePc: current.availablePc + row.earnedPc,
+        incomingPc: current.incomingPc + row.earnedPc,
+        updatedAt: timestamp
+      });
+      return true;
+    });
+    if (added) credited += row.earnedPc;
+  }
+
+  clearFirestoreSessionCache();
+  return { credited, balance: await getCustomerPcBalanceRecord(customerId) };
 };
 
 export const getOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
@@ -1904,6 +2122,8 @@ export const reviewOverduePcRequest = async (
     }
 
     const cleanCoins = Math.max(0, Math.round(numberOrZero(approvedCoins)));
+    const balanceRef = doc(db, PC_BALANCES, pcRequest.customerId);
+    const balanceSnapshot = await transaction.get(balanceRef);
 
     transaction.update(requestRef, {
       status,
@@ -1923,6 +2143,14 @@ export const reviewOverduePcRequest = async (
         month: (pcRequest.fullPaymentDate || getTodayDateString()).slice(0, 7),
         createdAt: timestamp
       });
+      if (balanceSnapshot.exists()) {
+        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+        transaction.update(balanceRef, {
+          availablePc: balance.availablePc + cleanCoins,
+          incomingPc: balance.incomingPc + cleanCoins,
+          updatedAt: timestamp
+        });
+      }
     }
   });
 
@@ -1987,6 +2215,8 @@ export const approveReferralBonus = async (customerId: string, auditUser?: Audit
   const notes = 'Referral bonus approved by Admin';
 
   await runTransaction(db, async (transaction) => {
+    const balanceRef = doc(db, PC_BALANCES, customer.id);
+    const balanceSnapshot = await transaction.get(balanceRef);
     transaction.set(requestRef, {
       customerId: customer.id,
       customerName: customer.name,
@@ -2013,6 +2243,14 @@ export const approveReferralBonus = async (customerId: string, auditUser?: Audit
       month: timestamp.slice(0, 7),
       createdAt: timestamp
     });
+    if (balanceSnapshot.exists()) {
+      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+      transaction.update(balanceRef, {
+        availablePc: balance.availablePc + referralCoins,
+        incomingPc: balance.incomingPc + referralCoins,
+        updatedAt: timestamp
+      });
+    }
   });
 
   clearFirestoreSessionCache();
@@ -2188,6 +2426,8 @@ export const reviewBonusPcRequest = async (
     }
 
     const cleanCoins = Math.max(0, Math.round(numberOrZero(approvedCoins)));
+    const balanceRef = doc(db, PC_BALANCES, bonusRequest.customerId);
+    const balanceSnapshot = await transaction.get(balanceRef);
 
     transaction.update(requestRef, {
       status,
@@ -2207,6 +2447,14 @@ export const reviewBonusPcRequest = async (
         month: getMonthFromBonusRequest(bonusRequest),
         createdAt: timestamp
       });
+      if (balanceSnapshot.exists()) {
+        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+        transaction.update(balanceRef, {
+          availablePc: balance.availablePc + cleanCoins,
+          incomingPc: balance.incomingPc + cleanCoins,
+          updatedAt: timestamp
+        });
+      }
     }
   });
 
@@ -2331,6 +2579,7 @@ export const reviewRedemptionRequest = async (
   auditUser?: AuditUser,
   notes = ''
 ) => {
+  requireAdminAudit(auditUser);
   const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
   const timestamp = nowIso();
 
@@ -2352,6 +2601,28 @@ export const reviewRedemptionRequest = async (
       return;
     }
 
+    const balanceRef = doc(db, PC_BALANCES, redemption.customerId);
+    const ledgerRef = doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`);
+    const balanceSnapshot = await transaction.get(balanceRef);
+    if (balanceSnapshot.exists()) {
+      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+      if (redemption.points > balance.availablePc) throw new Error('Customer does not have enough available PC for this gift.');
+      transaction.update(balanceRef, {
+        availablePc: balance.availablePc - redemption.points,
+        redeemedPc: balance.redeemedPc + redemption.points,
+        updatedAt: timestamp
+      });
+      transaction.set(ledgerRef, {
+        customerId: redemption.customerId,
+        type: 'redemption',
+        points: -Math.abs(redemption.points),
+        reason: `Gift approved: ${redemption.rewardName}`,
+        referenceId: requestId,
+        month: timestamp.slice(0, 7),
+        createdAt: timestamp
+      });
+    }
+
     transaction.update(requestRef, {
       status,
       reviewedAt: timestamp,
@@ -2364,7 +2635,9 @@ export const reviewRedemptionRequest = async (
 };
 
 export const removeRedemptionApproval = async (requestId: string, auditUser?: AuditUser) => {
+  requireAdminAudit(auditUser);
   const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
+  const timestamp = nowIso();
 
   await runTransaction(db, async (transaction) => {
     const requestSnapshot = await transaction.get(requestRef);
@@ -2379,6 +2652,15 @@ export const removeRedemptionApproval = async (requestId: string, auditUser?: Au
       throw new Error('Only approved redemption requests can have approval removed.');
     }
 
+    const ledgerRef = doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`);
+    const reversalRef = doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption_reversal`);
+    const balanceRef = doc(db, PC_BALANCES, redemption.customerId);
+    const [ledgerSnapshot, reversalSnapshot, balanceSnapshot] = await Promise.all([
+      transaction.get(ledgerRef),
+      transaction.get(reversalRef),
+      transaction.get(balanceRef)
+    ]);
+
     transaction.update(requestRef, {
       status: 'Pending',
       reviewedAt: '',
@@ -2386,13 +2668,32 @@ export const removeRedemptionApproval = async (requestId: string, auditUser?: Au
       notes: 'Approval removed'
     });
 
-    transaction.delete(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`));
+    if (ledgerSnapshot.exists() && !reversalSnapshot.exists()) {
+      transaction.set(reversalRef, {
+        customerId: redemption.customerId,
+        type: 'redemption_reversal',
+        points: Math.abs(redemption.points),
+        reason: `Gift approval removed: ${redemption.rewardName}`,
+        referenceId: requestId,
+        month: timestamp.slice(0, 7),
+        createdAt: timestamp
+      });
+      if (balanceSnapshot.exists()) {
+        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+        transaction.update(balanceRef, {
+          availablePc: balance.availablePc + redemption.points,
+          redeemedPc: Math.max(0, balance.redeemedPc - redemption.points),
+          updatedAt: timestamp
+        });
+      }
+    }
   });
 
   clearFirestoreSessionCache();
 };
 
 export const markRedemptionRequestGifted = async (requestId: string, auditUser?: AuditUser) => {
+  requireAdminAudit(auditUser);
   const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
   const timestamp = nowIso();
   const today = getTodayDateString();
@@ -2410,7 +2711,13 @@ export const markRedemptionRequestGifted = async (requestId: string, auditUser?:
       throw new Error('Approve the redemption request before marking it gifted.');
     }
 
-    const customerSnapshot = redemption.customerId ? await transaction.get(doc(db, CUSTOMERS, redemption.customerId)) : undefined;
+    const ledgerRef = doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`);
+    const balanceRef = doc(db, PC_BALANCES, redemption.customerId);
+    const [customerSnapshot, ledgerSnapshot, balanceSnapshot] = await Promise.all([
+      redemption.customerId ? transaction.get(doc(db, CUSTOMERS, redemption.customerId)) : Promise.resolve(undefined),
+      transaction.get(ledgerRef),
+      transaction.get(balanceRef)
+    ]);
     const customerTier = (customerSnapshot?.data()?.tier as CustomerTier | undefined) || 'Tier 4';
     const giftRef = doc(collection(db, GIFT_HISTORY));
 
@@ -2449,15 +2756,26 @@ export const markRedemptionRequestGifted = async (requestId: string, auditUser?:
       notes: 'Gifted'
     });
 
-    transaction.set(doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`), {
-      customerId: redemption.customerId,
-      type: 'redemption',
-      points: -Math.abs(redemption.points),
-      reason: `Reward gifted: ${redemption.rewardName}`,
-      referenceId: requestId,
-      month: getCurrentMonthKey(),
-      createdAt: timestamp
-    });
+    if (!ledgerSnapshot.exists()) {
+      transaction.set(ledgerRef, {
+        customerId: redemption.customerId,
+        type: 'redemption',
+        points: -Math.abs(redemption.points),
+        reason: `Reward gifted: ${redemption.rewardName}`,
+        referenceId: requestId,
+        month: getCurrentMonthKey(),
+        createdAt: timestamp
+      });
+      if (balanceSnapshot.exists()) {
+        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+        if (redemption.points > balance.availablePc) throw new Error('Customer does not have enough available PC for this gift.');
+        transaction.update(balanceRef, {
+          availablePc: balance.availablePc - redemption.points,
+          redeemedPc: balance.redeemedPc + redemption.points,
+          updatedAt: timestamp
+        });
+      }
+    }
   });
 
   clearFirestoreSessionCache();

@@ -1,23 +1,23 @@
-import type { DocumentData } from 'firebase-admin/firestore';
+export type CreditDocumentData = Record<string, any>;
 
-export type CreditStatus = 'starter' | 'active' | 'hold' | 'disabled';
-export type ApprovalStatus = 'pending_starter' | 'pending_calculated' | 'approved' | 'rejected';
+export type CalculatedCreditStatus = 'starter' | 'active' | 'hold' | 'disabled';
+export type CalculatedApprovalStatus = 'pending_starter' | 'pending_calculated' | 'approved' | 'rejected';
 
 export interface CreditCalculationInput {
   customerId: string;
-  customer: DocumentData;
-  invoices: Array<{ id: string; data: DocumentData }>;
-  payments: Array<{ id: string; data: DocumentData }>;
-  settings: DocumentData;
-  existingProfile?: DocumentData;
+  customer: CreditDocumentData;
+  invoices: Array<{ id: string; data: CreditDocumentData }>;
+  payments: Array<{ id: string; data: CreditDocumentData }>;
+  settings: CreditDocumentData;
+  existingProfile?: CreditDocumentData;
   reviewReason: string;
   now?: Date;
   lookbackDays?: 60 | 90;
 }
 
 export interface CreditCalculationResult {
-  profile: DocumentData;
-  summary: DocumentData;
+  profile: CreditDocumentData;
+  summary: CreditDocumentData;
 }
 
 const numberOrZero = (value: unknown) => {
@@ -35,7 +35,7 @@ const addDays = (dateString: string, days: number) => {
   return date.toISOString().slice(0, 10);
 };
 
-const isExcludedInvoice = (invoice: DocumentData) => {
+const isExcludedInvoice = (invoice: CreditDocumentData) => {
   const type = String(invoice.invoiceType || '').trim().toLowerCase();
   return [
     'sales return',
@@ -51,12 +51,12 @@ const isExcludedInvoice = (invoice: DocumentData) => {
   ].includes(type);
 };
 
-const isOpeningBalance = (invoice: DocumentData) => {
+const isOpeningBalance = (invoice: CreditDocumentData) => {
   const type = String(invoice.invoiceType || '').trim().toLowerCase();
   return invoice.isOpeningBalance === true || type === 'opening_balance' || type === 'opening balance';
 };
 
-const paymentEffect = (payment: DocumentData) => {
+const paymentEffect = (payment: CreditDocumentData) => {
   const amount = payment.amountAppliedToInvoice === undefined
     ? numberOrZero(payment.amount ?? payment.amountReceived)
     : numberOrZero(payment.amountAppliedToInvoice);
@@ -90,7 +90,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const graceDays = Math.max(0, Math.round(numberOrZero(input.settings.creditPolicy?.overdueGraceDays ?? 3)));
   const configuredLookbackDays = numberOrZero(input.lookbackDays ?? input.settings.creditPolicy?.lookbackDays);
   const lookbackDays: 60 | 90 = configuredLookbackDays === 60 ? 60 : 90;
-  const paymentsByInvoice = new Map<string, DocumentData[]>();
+  const paymentsByInvoice = new Map<string, CreditDocumentData[]>();
 
   input.payments.forEach(({ data }) => {
     const invoiceId = String(data.invoiceId || '');
@@ -114,7 +114,6 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
 
     return {
       id,
-      data,
       total,
       outstanding,
       invoiceDate,
@@ -164,7 +163,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const overrideExpiresAt = String(override?.expiresAt || '');
   const hasActiveOverride = Boolean(override && overrideExpiresAt >= today && numberOrZero(override.amount) >= 0);
   let approvedCreditLimit = existingApproved;
-  let approvalStatus: ApprovalStatus = isStarter ? 'pending_starter' : 'pending_calculated';
+  let approvalStatus: CalculatedApprovalStatus = isStarter ? 'pending_starter' : 'pending_calculated';
 
   if (creditDays <= 0) {
     calculatedCreditLimit = 0;
@@ -188,7 +187,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const overdueAmount = roundMoney(overdueRows.reduce((sum, invoice) => sum + invoice.outstanding, 0));
   const hasOverdueBeyondGrace = overdueRows.length > 0;
   const manualHold = input.existingProfile?.manualHold === true;
-  let creditStatus: CreditStatus = creditDays <= 0 ? 'disabled' : isStarter ? 'starter' : 'active';
+  let creditStatus: CalculatedCreditStatus = creditDays <= 0 ? 'disabled' : isStarter ? 'starter' : 'active';
   if (manualHold || hasOverdueBeyondGrace) creditStatus = 'hold';
 
   const availableCredit = creditStatus === 'hold' || creditStatus === 'disabled'
@@ -198,7 +197,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     .filter((invoice) => invoice.outstanding > 0 && invoice.dueDate)
     .sort((left, right) => left.dueDate.localeCompare(right.dueDate))[0];
   const customerName = String(input.customer.name || input.customer.customerName || '');
-  const profile: DocumentData = {
+  const profile: CreditDocumentData = {
     customerId: input.customerId,
     customerName,
     tier,
@@ -230,7 +229,6 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   };
 
   if (isStarter && manualStarterLimit > 0) profile.manualStarterLimit = manualStarterLimit;
-
   if (hasActiveOverride) profile.creditOverride = override;
 
   return {

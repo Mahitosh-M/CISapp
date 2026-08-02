@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
-import type { AppSettings, BonusPcRequest, Customer, Invoice, OverduePcRequest, Payment, RedemptionRequest } from '../types';
+import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequests, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequests, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoices, getInvoicesByCustomerId, getLoyaltyLedgerEntries, getMonthlyCustomerStatsRecords, getOverduePcRequests, getPayments, getPaymentsByCustomerId, getPcBalanceRecords, getRedemptionRequests, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest, syncProtectedCustomerInvoicePc } from '../services/firestoreService';
+import type { AppSettings, BonusPcRequest, Customer, Invoice, LoyaltyLedgerEntry, OverduePcRequest, Payment, RedemptionRequest } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
@@ -28,6 +28,7 @@ interface CustomerPcView {
   availablePc: number;
   incomingPc: number;
   redeemedPc: number;
+  protected: boolean;
 }
 
 interface PcHistorySources {
@@ -39,6 +40,34 @@ interface PcHistorySources {
   redemptions: RedemptionRequest[];
   performanceBonus: number;
 }
+
+interface PcRecoveryRow {
+  customer: Customer;
+  calculatedPc: number;
+  ledgerPc: number;
+  recommendedPc: number;
+  protected: boolean;
+}
+
+const ledgerHistoryTitle = (entry: LoyaltyLedgerEntry) => {
+  if (entry.type === 'opening_balance') return 'Protected opening balance';
+  if (entry.type === 'manual_adjustment') return 'Manual PC adjustment';
+  if (entry.type === 'redemption') return 'Gift approved';
+  if (entry.type === 'redemption_reversal') return 'Gift approval removed';
+  if (entry.type === 'purchase') return 'Invoice PC';
+  if (entry.type === 'overdue_payment') return 'Overdue PC';
+  if (entry.type === 'bonus') return 'Bonus PC';
+  return 'PC earned';
+};
+
+const mapLedgerHistory = (entries: LoyaltyLedgerEntry[]): PcHistoryItem[] => entries.map((entry) => ({
+  id: entry.id,
+  direction: entry.points >= 0 ? 'Incoming' : 'Redeemed',
+  title: ledgerHistoryTitle(entry),
+  detail: entry.reason,
+  points: Math.abs(entry.points),
+  date: entry.createdAt.slice(0, 10)
+}));
 
 const OverduePcRequests = () => {
   const { userProfile } = useAuth();
@@ -59,7 +88,16 @@ const OverduePcRequests = () => {
   const [customerPcView, setCustomerPcView] = useState<CustomerPcView | null>(null);
   const [loadingPcView, setLoadingPcView] = useState(false);
   const [pcHistorySources, setPcHistorySources] = useState<PcHistorySources | null>(null);
+  const [savedPcHistory, setSavedPcHistory] = useState<PcHistoryItem[] | null>(null);
   const [pcHistory, setPcHistory] = useState<PcHistoryItem[] | null>(null);
+  const [showAdjustment, setShowAdjustment] = useState(false);
+  const [adjustmentCustomerId, setAdjustmentCustomerId] = useState('');
+  const [adjustmentDirection, setAdjustmentDirection] = useState<'add' | 'deduct'>('add');
+  const [adjustmentPoints, setAdjustmentPoints] = useState('');
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryRows, setRecoveryRows] = useState<PcRecoveryRow[]>([]);
+  const [loadingRecovery, setLoadingRecovery] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -197,6 +235,7 @@ const OverduePcRequests = () => {
     setSelectedPcCustomerId(customerId);
     setCustomerPcView(null);
     setPcHistorySources(null);
+    setSavedPcHistory(null);
     setPcHistory(null);
 
     if (!customerId) return;
@@ -210,12 +249,14 @@ const OverduePcRequests = () => {
     try {
       setLoadingPcView(true);
       setError('');
-      const [invoiceRows, paymentRows, approvedBonusRows, approvedOverdueRows, redemptionRows] = await Promise.all([
+      const [invoiceRows, paymentRows, approvedBonusRows, approvedOverdueRows, redemptionRows, protectedBalance, ledgerEntries] = await Promise.all([
         getInvoicesByCustomerId(customerId),
         getPaymentsByCustomerId(customerId),
         getApprovedBonusPcRequestsForCustomer(customerId, 200),
         getApprovedOverduePcRequestsForCustomer(customerId, 200),
-        getRedemptionRequestsForCustomer(customerId, 200)
+        getRedemptionRequestsForCustomer(customerId, 200),
+        getCustomerPcBalanceRecord(customerId),
+        getCustomerPcLedgerEntries(customerId)
       ]);
       const businessInvoices = getBusinessInvoices(invoiceRows);
       const intelligenceResult = buildCustomerScores([customer], businessInvoices, paymentRows, new Date(), settings)[0];
@@ -224,10 +265,12 @@ const OverduePcRequests = () => {
 
       setCustomerPcView({
         customer: portalCustomer,
-        availablePc: pcBalance.availablePc,
-        incomingPc: pcBalance.incomingPc,
-        redeemedPc: pcBalance.redeemedPc
+        availablePc: protectedBalance?.availablePc ?? pcBalance.availablePc,
+        incomingPc: protectedBalance?.incomingPc ?? pcBalance.incomingPc,
+        redeemedPc: protectedBalance?.redeemedPc ?? pcBalance.redeemedPc,
+        protected: Boolean(protectedBalance)
       });
+      setSavedPcHistory(protectedBalance ? mapLedgerHistory(ledgerEntries) : null);
       setPcHistorySources({
         customer: portalCustomer,
         invoices: businessInvoices,
@@ -247,6 +290,11 @@ const OverduePcRequests = () => {
   const handleViewPcHistory = () => {
     if (pcHistory) {
       setPcHistory(null);
+      return;
+    }
+
+    if (savedPcHistory) {
+      setPcHistory(savedPcHistory);
       return;
     }
 
@@ -293,7 +341,7 @@ const OverduePcRequests = () => {
       date: (request.reviewedAt || request.generatedAt).slice(0, 10)
     }));
     const redemptionHistory: PcHistoryItem[] = pcHistorySources.redemptions
-      .filter((request) => request.status === 'Gifted')
+      .filter((request) => request.status === 'Approved' || request.status === 'Gifted')
       .map((request) => ({
         id: `redemption-${request.id}`,
         direction: 'Redeemed',
@@ -306,6 +354,145 @@ const OverduePcRequests = () => {
     setPcHistory([...invoiceHistory, ...performanceHistory, ...bonusHistory, ...overdueHistory, ...redemptionHistory]
       .filter((item) => item.points > 0)
       .sort((left, right) => right.date.localeCompare(left.date)));
+  };
+
+  const handleProtectPc = async () => {
+    if (!customerPcView) return;
+    try {
+      setSavingId('protect-pc');
+      setError('');
+      setMessage('');
+      await protectCustomerPcBalance(customerPcView.customer.id, customerPcView.availablePc, auditUser);
+      setMessage('Current PC is protected. Future invoice changes cannot reduce this balance.');
+      await handlePcCustomerChange(customerPcView.customer.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to protect this PC balance.');
+    } finally {
+      setSavingId('');
+    }
+  };
+
+  const handleSyncPc = async () => {
+    if (!customerPcView) return;
+    try {
+      setSavingId('sync-pc');
+      setError('');
+      setMessage('');
+      const result = await syncProtectedCustomerInvoicePc(customerPcView.customer.id, auditUser);
+      setMessage(result.credited > 0 ? `${formatPc(result.credited)} newly earned invoice PC added.` : 'No new eligible invoice PC found.');
+      await handlePcCustomerChange(customerPcView.customer.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to sync earned PC.');
+    } finally {
+      setSavingId('');
+    }
+  };
+
+  const handleManualAdjustment = async () => {
+    if (!adjustmentCustomerId) {
+      setError('Select a customer for the PC adjustment.');
+      return;
+    }
+    try {
+      setSavingId('adjust-pc');
+      setError('');
+      setMessage('');
+      await adjustCustomerPcBalance(adjustmentCustomerId, adjustmentDirection, Number(adjustmentPoints), adjustmentReason, auditUser);
+      setMessage(`PC ${adjustmentDirection === 'add' ? 'added' : 'deducted'} and recorded in permanent history.`);
+      setAdjustmentPoints('');
+      setAdjustmentReason('');
+      if (selectedPcCustomerId === adjustmentCustomerId) await handlePcCustomerChange(adjustmentCustomerId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to adjust PC.');
+    } finally {
+      setSavingId('');
+    }
+  };
+
+  const handlePreviewRecovery = async () => {
+    try {
+      setLoadingRecovery(true);
+      setError('');
+      setMessage('');
+      const rows: PcRecoveryRow[] = [];
+      const [recoveryCustomers, allInvoices, allPayments, allBonusRows, allOverdueRows, allRedemptions, allLedgerEntries, allMonthlyStats, allProtectedBalances] = await Promise.all([
+        getCustomers({ limitCount: 5000 }),
+        getInvoices({ limitCount: 5000 }),
+        getPayments({ limitCount: 5000 }),
+        getApprovedBonusPcRequests(5000),
+        getApprovedOverduePcRequests(5000),
+        getRedemptionRequests(5000),
+        getLoyaltyLedgerEntries(5000),
+        getMonthlyCustomerStatsRecords(5000),
+        getPcBalanceRecords(5000)
+      ]);
+
+      for (const customer of recoveryCustomers) {
+        const invoiceRows = allInvoices.filter((invoice) => invoice.customerId === customer.id || invoice.customerName === customer.name);
+        const paymentRows = allPayments.filter((payment) => payment.customerId === customer.id || payment.customerName === customer.name);
+        const approvedBonusRows = allBonusRows.filter((request) => request.customerId === customer.id);
+        const approvedOverdueRows = allOverdueRows.filter((request) => request.customerId === customer.id);
+        const redemptionRows = allRedemptions.filter((request) => request.customerId === customer.id);
+        const ledgerEntries = allLedgerEntries.filter((entry) => entry.customerId === customer.id);
+        const monthlyStatsPc = Math.max(0, Math.round(allMonthlyStats
+          .filter((stats) => stats.customerId === customer.id)
+          .reduce((sum, stats) => sum + stats.pointsEarned, 0)));
+        const protectedBalance = allProtectedBalances.find((balance) => balance.customerId === customer.id);
+        const businessInvoices = getBusinessInvoices(invoiceRows);
+        const intelligenceResult = buildCustomerScores([customer], businessInvoices, paymentRows, new Date(), settings)[0];
+        const portalCustomer = intelligenceResult ? { ...customer, tier: intelligenceResult.tier } : customer;
+        const preProtectionBalance = buildCustomerPortalPcBalance(
+          portalCustomer,
+          businessInvoices,
+          paymentRows,
+          settings,
+          redemptionRows.filter((request) => request.status === 'Gifted'),
+          approvedOverdueRows,
+          approvedBonusRows
+        );
+        const ledgerPc = Math.max(monthlyStatsPc, Math.max(0, Math.round(ledgerEntries.reduce((sum, entry) => sum + entry.points, 0))));
+
+        rows.push({
+          customer: portalCustomer,
+          calculatedPc: preProtectionBalance.availablePc,
+          ledgerPc,
+          recommendedPc: protectedBalance?.availablePc ?? Math.max(preProtectionBalance.availablePc, ledgerPc),
+          protected: Boolean(protectedBalance)
+        });
+      }
+
+      setRecoveryRows(rows.sort((left, right) => right.recommendedPc - left.recommendedPc));
+      setMessage('Recovery preview ready. Review the values before protecting balances.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to prepare the PC recovery preview.');
+    } finally {
+      setLoadingRecovery(false);
+    }
+  };
+
+  const handleApplyRecovery = async () => {
+    const pendingRows = recoveryRows.filter((row) => !row.protected);
+    if (pendingRows.length === 0) {
+      setMessage('All listed customer PC balances are already protected.');
+      return;
+    }
+
+    try {
+      setSavingId('recover-all-pc');
+      setError('');
+      setMessage('');
+      let protectedCount = 0;
+      for (const row of pendingRows) {
+        await protectCustomerPcBalance(row.customer.id, row.recommendedPc, auditUser);
+        protectedCount += 1;
+      }
+      setRecoveryRows((current) => current.map((row) => ({ ...row, protected: true })));
+      setMessage(`${protectedCount} customer PC balance(s) recovered and protected.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PC recovery stopped before all balances were protected. Run the preview again to verify progress.');
+    } finally {
+      setSavingId('');
+    }
   };
 
   const cardStyle: CSSProperties = {
@@ -369,6 +556,12 @@ const OverduePcRequests = () => {
           <button type="button" onClick={() => setShowReferral((current) => !current)} style={primaryActionStyle}>
             Referral
           </button>
+          <button type="button" onClick={() => setShowAdjustment((current) => !current)} style={primaryActionStyle}>
+            Adjust PC
+          </button>
+          <button type="button" onClick={() => setShowRecovery((current) => !current)} style={primaryActionStyle}>
+            PC Recovery
+          </button>
         </div>
       </div>
 
@@ -393,12 +586,28 @@ const OverduePcRequests = () => {
             {customerPcView && !loadingPcView ? (
               <>
                 <div style={{ padding: 16, borderRadius: 14, background: '#FFF7D6', color: '#11185A', border: '1px solid #D4AF37' }}>
-                  <div style={{ fontSize: 18, fontWeight: 900 }}>{customerPcView.customer.name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 18, fontWeight: 900 }}>{customerPcView.customer.name}</div>
+                    <div style={{ color: customerPcView.protected ? '#166534' : '#B42318', fontWeight: 900 }}>
+                      {customerPcView.protected ? 'Protected balance' : 'Legacy calculated balance'}
+                    </div>
+                  </div>
                   <div style={{ color: '#334155', marginTop: 3 }}>Area: {customerPcView.customer.area || '-'}</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginTop: 14 }}>
                     <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Available PC</div><div style={{ color: '#166534', fontSize: 24, fontWeight: 900 }}>{formatPc(customerPcView.availablePc)}</div></div>
                     <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Total Incoming</div><div style={{ fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.incomingPc)}</div></div>
                     <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Total Redeemed</div><div style={{ color: '#B42318', fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.redeemedPc)}</div></div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+                    {customerPcView.protected ? (
+                      <button type="button" disabled={Boolean(savingId)} onClick={handleSyncPc} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
+                        {savingId === 'sync-pc' ? 'Syncing...' : 'Sync Earned PC'}
+                      </button>
+                    ) : (
+                      <button type="button" disabled={Boolean(savingId)} onClick={handleProtectPc} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }}>
+                        {savingId === 'protect-pc' ? 'Protecting...' : 'Protect Current PC'}
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -434,6 +643,83 @@ const OverduePcRequests = () => {
             ) : null}
           </div>
         ) : null}
+      {showAdjustment ? (
+        <div style={{ ...cardStyle, display: 'grid', gap: 12 }}>
+          <label style={{ fontWeight: 800 }}>
+            Select Customer
+            <select
+              value={adjustmentCustomerId}
+              onChange={(event) => setAdjustmentCustomerId(event.target.value)}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#11185A' }}
+            >
+              <option value="">Select customer</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
+              ))}
+            </select>
+          </label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {(['add', 'deduct'] as const).map((direction) => (
+              <button
+                type="button"
+                key={direction}
+                onClick={() => setAdjustmentDirection(direction)}
+                style={{ ...buttonStyle, background: adjustmentDirection === direction ? (direction === 'add' ? '#166534' : '#B42318') : '#E8EDF4', color: adjustmentDirection === direction ? '#FFFFFF' : '#11185A' }}
+              >
+                {direction === 'add' ? 'Add PC' : 'Deduct PC'}
+              </button>
+            ))}
+          </div>
+          <label style={{ fontWeight: 800 }}>
+            PC Amount
+            <input type="number" min="1" step="1" value={adjustmentPoints} onChange={(event) => setAdjustmentPoints(event.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6 }} />
+          </label>
+          <label style={{ fontWeight: 800 }}>
+            Reason
+            <input type="text" maxLength={140} value={adjustmentReason} onChange={(event) => setAdjustmentReason(event.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6 }} />
+          </label>
+          <div>
+            <button type="button" disabled={Boolean(savingId)} onClick={handleManualAdjustment} style={{ ...buttonStyle, background: adjustmentDirection === 'add' ? '#166534' : '#B42318', color: '#FFFFFF' }}>
+              {savingId === 'adjust-pc' ? 'Saving...' : adjustmentDirection === 'add' ? 'Add and Record' : 'Deduct and Record'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {showRecovery ? (
+        <div style={{ ...cardStyle, display: 'grid', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" disabled={loadingRecovery || Boolean(savingId)} onClick={handlePreviewRecovery} style={primaryActionStyle}>
+              {loadingRecovery ? 'Calculating...' : 'Preview Recovery'}
+            </button>
+            {recoveryRows.length > 0 ? (
+              <button type="button" disabled={Boolean(savingId) || loadingRecovery} onClick={handleApplyRecovery} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
+                {savingId === 'recover-all-pc' ? 'Protecting...' : 'Recover and Protect All'}
+              </button>
+            ) : null}
+          </div>
+          {recoveryRows.length > 0 ? (
+            <div style={{ ...latestFiveScrollStyle, maxHeight: 480, overflow: 'auto' }}>
+              <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>{['Customer', 'Area', 'Invoice Calculation', 'Saved Records', 'Recommended', 'Status'].map((header) => <th key={header} style={thStyle}>{header}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {recoveryRows.map((row) => (
+                    <tr key={row.customer.id}>
+                      <td style={tdStyle}>{row.customer.name}</td>
+                      <td style={tdStyle}>{row.customer.area || '-'}</td>
+                      <td style={tdStyle}>{formatPc(row.calculatedPc)}</td>
+                      <td style={tdStyle}>{formatPc(row.ledgerPc)}</td>
+                      <td style={{ ...tdStyle, color: '#4ADE80', fontWeight: 900 }}>{formatPc(row.recommendedPc)}</td>
+                      <td style={{ ...tdStyle, color: row.protected ? '#4ADE80' : '#FACC15', fontWeight: 900 }}>{row.protected ? 'Protected' : 'Ready'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {showReferral ? (
           <div style={{ ...cardStyle, display: 'grid', gap: 12 }}>
             <label style={{ fontWeight: 800 }}>

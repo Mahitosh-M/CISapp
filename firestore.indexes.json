@@ -73,6 +73,14 @@
       ]
     },
     {
+      "collectionGroup": "customerCreditProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "availableCredit", "order": "ASCENDING" },
+        { "fieldPath": "currentOutstanding", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "creditAuditLogs",
       "queryScope": "COLLECTION",
       "fields": [

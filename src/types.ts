@@ -113,12 +113,14 @@ export interface CustomerCreditProfile {
 export interface CustomerCreditSummary {
   id: string;
   customerId: string;
+  approvedCreditLimit?: number;
   availableCredit: number;
   usedCredit: number;
   creditDays: number;
   nextInvoiceDueDate?: string;
   nextInvoiceDueAmount?: number;
   creditStatus: CreditStatus;
+  manualHold?: boolean;
   updatedAt: string;
 }
 
@@ -531,12 +533,22 @@ export interface CustomerApcSummary {
 export interface LoyaltyLedgerEntry {
   id: string;
   customerId: string;
-  type: 'purchase' | 'on_time_payment' | 'monthly_target' | 'order_frequency' | 'overdue_payment' | 'bonus' | 'redemption';
+  type: 'purchase' | 'on_time_payment' | 'monthly_target' | 'order_frequency' | 'overdue_payment' | 'bonus' | 'redemption' | 'opening_balance' | 'manual_adjustment' | 'redemption_reversal';
   points: number;
   reason: string;
   referenceId: string;
   month: string;
   createdAt: string;
+}
+
+export interface PcBalanceRecord {
+  id: string;
+  customerId: string;
+  availablePc: number;
+  incomingPc: number;
+  redeemedPc: number;
+  protectedAt: string;
+  updatedAt: string;
 }
 
 export interface OverduePcRequest {

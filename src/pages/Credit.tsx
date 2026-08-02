@@ -179,7 +179,7 @@ const Credit = () => {
       setSaving(true);
       setError('');
       await saveCreditPolicy(starterLimitCap, overdueGraceDays, lookbackDays);
-      setMessage('Credit policy saved. Recalculation is running in the background.');
+      setMessage('Credit policy saved. Use Recalculate all to apply it to every customer.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save credit policy.');
     } finally {

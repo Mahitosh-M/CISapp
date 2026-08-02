@@ -21,7 +21,7 @@ export const buildCustomerPortalPcBalance = (
   const overduePc = approvedOverduePcRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
   const approvedBonusPc = approvedBonusPcRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
   const redeemedPc = redemptions
-    .filter((request) => request.status === 'Gifted')
+    .filter((request) => request.status === 'Approved' || request.status === 'Gifted')
     .reduce((sum, request) => sum + request.points, 0);
   const incomingPc = basePc + performanceBonusPc + overduePc + approvedBonusPc;
 
