@@ -58,7 +58,7 @@ service cloud.firestore {
     }
 
     function isCustomer() {
-      return isActive() && profile().role == 'customer';
+      return isActive() && profile().role in ['customer', 'Medical'];
     }
 
     function customerId() {
@@ -398,7 +398,7 @@ service cloud.firestore {
         && data.name is string
         && data.name.size() > 0
         && data.name.size() <= 140
-        && data.role in ['Admin', 'Staff', 'customer']
+        && data.role in ['Admin', 'Staff', 'customer', 'Medical']
         && data.active is bool
         && data.createdAt is string
         && data.createdAt.size() <= 40
@@ -419,26 +419,17 @@ service cloud.firestore {
           )
         );
 
-      allow create: if signedIn()
-        && validUserProfile(request.resource.data)
-        && (
-          isAdmin()
-          || (
-            request.auth.uid == userId
-            && request.resource.data.uid == request.auth.uid
-            && request.resource.data.role == 'Admin'
-            && request.resource.data.active == true
-            && request.auth.token.email == 'ashokaagency2025@gmail.com'
-            && request.auth.token.email_verified == true
-            && request.resource.data.email == request.auth.token.email
-          )
-        );
+      allow create: if isAdmin()
+        && validUserProfile(request.resource.data);
 
       allow update: if isAdmin()
         && validUserProfile(request.resource.data)
-        && request.resource.data.uid == resource.data.uid;
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role;
 
-      allow delete: if isAdmin() && request.auth.uid != resource.data.uid;
+      // Authentication and profile deletion must stay synchronized through
+      // the Admin-only deleteManagedUser Cloud Function.
+      allow delete: if false;
     }
 
     match /settings/{settingId} {

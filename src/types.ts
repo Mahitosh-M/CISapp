@@ -8,7 +8,7 @@ export type OnboardingStage = 'None' | 'Stage A' | 'Stage B' | 'Stage C' | 'Stag
 
 export type PaymentMode = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Card' | 'Other';
 
-export type UserRole = 'Admin' | 'Staff' | 'customer';
+export type UserRole = 'Admin' | 'Staff' | 'customer' | 'Medical';
 
 export type CreditStatus = 'starter' | 'active' | 'hold' | 'disabled';
 
@@ -230,6 +230,7 @@ export interface AppSettings {
   turnOnOrder: boolean;
   headerOrder: boolean;
   down: boolean;
+  customerDown: boolean;
   updatedAt?: string;
 }
 

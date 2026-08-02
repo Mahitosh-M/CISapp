@@ -1,11 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { KeyRound, Mail, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { KeyRound, Mail, ShieldCheck, Stethoscope, Trash2, UserPlus, Users } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { createCustomerAuthAccount, createStaffAuthAccount, sendUserPasswordResetEmail } from '../services/authService';
+import { createCustomerAuthAccount, createMedicalAuthAccount, createStaffAuthAccount, deleteManagedUserAccount, sendUserPasswordResetEmail } from '../services/authService';
 import {
-  deleteUserProfileRecord,
   getUserProfiles,
   updateUserProfileRecord,
 } from '../services/firestoreService';
@@ -14,7 +13,7 @@ import type { UserProfile, UserRole } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 
-type AdminPanel = 'staff' | 'customers' | null;
+type AdminPanel = 'staff' | 'customers' | 'medicals' | null;
 
 const Admin = () => {
   const { customers, loading, error } = useErpData();
@@ -24,11 +23,15 @@ const Admin = () => {
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
   const [showStaffPassword, setShowStaffPassword] = useState(false);
-  const [staffRole, setStaffRole] = useState<UserRole>('Staff');
+  const [staffRole, setStaffRole] = useState<Extract<UserRole, 'Admin' | 'Staff'>>('Staff');
   const [customerLoginId, setCustomerLoginId] = useState('');
   const [customerLoginEmail, setCustomerLoginEmail] = useState('');
   const [customerLoginPassword, setCustomerLoginPassword] = useState('');
   const [showCustomerLoginPassword, setShowCustomerLoginPassword] = useState(false);
+  const [medicalLoginId, setMedicalLoginId] = useState('');
+  const [medicalLoginEmail, setMedicalLoginEmail] = useState('');
+  const [medicalLoginPassword, setMedicalLoginPassword] = useState('');
+  const [showMedicalLoginPassword, setShowMedicalLoginPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [adminError, setAdminError] = useState('');
@@ -55,8 +58,9 @@ const Admin = () => {
   }, []);
 
   const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
-  const sortedStaffUsers = useMemo(() => sortedUsers.filter((user) => user.role !== 'customer'), [sortedUsers]);
+  const sortedStaffUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'Admin' || user.role === 'Staff'), [sortedUsers]);
   const sortedCustomerUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'customer'), [sortedUsers]);
+  const sortedMedicalUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'Medical'), [sortedUsers]);
   const isAdmin = userProfile?.role === 'Admin';
   const adminUserCount = useMemo(() => users.filter((user) => user.role === 'Admin').length, [users]);
 
@@ -117,9 +121,32 @@ const Admin = () => {
     }
   };
 
-  const handleUserRoleChange = async (user: UserProfile, role: UserRole) => {
-    await updateUserProfileRecord(user.id, { role }, auditUser);
-    await loadAdminData();
+  const handleCreateMedicalLogin = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const linkedCustomer = customers.find((customer) => customer.id === medicalLoginId);
+    const cleanEmail = medicalLoginEmail.trim().toLowerCase();
+
+    if (!linkedCustomer || !cleanEmail || !medicalLoginPassword) {
+      setAdminError('Customer, email, and password are required for medical login.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setAdminError('');
+      setMessage('');
+      await createMedicalAuthAccount(cleanEmail, medicalLoginPassword, linkedCustomer.id, linkedCustomer.name);
+      setMedicalLoginId('');
+      setMedicalLoginEmail('');
+      setMedicalLoginPassword('');
+      setMessage('Medical login created and linked.');
+      await loadAdminData();
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Unable to create medical login.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleToggleUserActive = async (user: UserProfile) => {
@@ -156,7 +183,7 @@ const Admin = () => {
       return;
     }
 
-    const confirmed = window.confirm(`Delete ERP access for ${user.email}? This removes the app user profile. You can recreate access with the same email by using that email's current password, or send a password reset first.`);
+    const confirmed = window.confirm('Delete ERP access for ' + user.email + '? This permanently removes the Firebase Authentication account, password, and ERP user profile.');
 
     if (!confirmed) {
       return;
@@ -165,8 +192,8 @@ const Admin = () => {
     try {
       setSaving(true);
       setAdminError('');
-      await deleteUserProfileRecord(user.id, auditUser);
-      setMessage(`ERP access deleted for ${user.email}. To reuse this email, create access again with the current password or send a password reset first.`);
+      await deleteManagedUserAccount(user.id, user.uid);
+      setMessage('ERP access and login credentials deleted for ' + user.email + '. The email can now be reused for a new Admin-created account.');
       await loadAdminData();
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Unable to delete user access.');
@@ -289,6 +316,15 @@ const Admin = () => {
         >
           <Users size={18} />Customers
         </button>
+        <button
+          className="admin-button admin-button-primary"
+          type="button"
+          aria-pressed={activePanel === 'medicals'}
+          onClick={() => setActivePanel((current) => current === 'medicals' ? null : 'medicals')}
+          style={{ ...buttonStyle, minHeight: 44, display: 'inline-flex', alignItems: 'center', gap: 8, background: activePanel === 'medicals' ? '#D4AF37' : 'linear-gradient(135deg, #11185A 0%, #1E2961 100%)', color: activePanel === 'medicals' ? '#11185A' : '#FFFFFF' }}
+        >
+          <Stethoscope size={18} />Medicals
+        </button>
       </div>
 
       {activePanel === 'staff' ? <form className="admin-card" style={cardStyle} onSubmit={handleCreateStaff}>
@@ -306,7 +342,7 @@ const Admin = () => {
           </label>
           <label style={{ fontWeight: 800 }}>
             Role
-            <select style={inputStyle} value={staffRole} onChange={(event) => setStaffRole(event.target.value as UserRole)}>
+            <select style={inputStyle} value={staffRole} onChange={(event) => setStaffRole(event.target.value as Extract<UserRole, 'Admin' | 'Staff'>)}>
               <option value="Staff">Staff</option>
               <option value="Admin">Admin</option>
             </select>
@@ -345,23 +381,45 @@ const Admin = () => {
         </button>
       </form> : null}
 
+      {activePanel === 'medicals' ? <form className="admin-card" style={cardStyle} onSubmit={handleCreateMedicalLogin}>
+        <div className="admin-card-title"><Stethoscope size={18} />Create Medical Login</div>
+        <div style={{ color: '#D7DEEA', marginBottom: 12 }}>Admin creates medical credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
+        <div style={gridStyle}>
+          <label style={{ fontWeight: 800 }}>
+            Link Customer
+            <select style={inputStyle} value={medicalLoginId} onChange={(event) => setMedicalLoginId(event.target.value)}>
+              <option value="">Select customer</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ fontWeight: 800 }}>Login Email<input style={inputStyle} type="email" value={medicalLoginEmail} onChange={(event) => setMedicalLoginEmail(event.target.value)} /></label>
+          <label style={{ fontWeight: 800 }}>
+            Password
+            <input style={inputStyle} type={showMedicalLoginPassword ? 'text' : 'password'} value={medicalLoginPassword} onChange={(event) => setMedicalLoginPassword(event.target.value)} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#D7DEEA', fontSize: 12, marginTop: 8 }}>
+              <input type="checkbox" checked={showMedicalLoginPassword} onChange={(event) => setShowMedicalLoginPassword(event.target.checked)} />
+              Show password while creating
+            </span>
+          </label>
+        </div>
+        <button className="admin-button admin-button-gold" type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 16 }}>
+          <Stethoscope size={16} />Create Medical Login
+        </button>
+      </form> : null}
+
       {activePanel ? <div className="admin-card" style={cardStyle}>
-        <div className="admin-card-title"><Users size={18} />{activePanel === 'staff' ? 'Existing Staff & Admins' : 'Existing Customers'}</div>
+        <div className="admin-card-title"><Users size={18} />{activePanel === 'staff' ? 'Existing Staff & Admins' : activePanel === 'customers' ? 'Existing Customers' : 'Existing Medicals'}</div>
         <div style={{ color: '#D7DEEA', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
         {renderTable(
           ['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'],
           <>
-            {(activePanel === 'staff' ? sortedStaffUsers : sortedCustomerUsers).map((user) => (
+            {(activePanel === 'staff' ? sortedStaffUsers : activePanel === 'customers' ? sortedCustomerUsers : sortedMedicalUsers).map((user) => (
               <tr className="admin-table-row" key={user.id}>
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>
-                <td style={cellStyle}>
-                  <select style={inputStyle} value={user.role} onChange={(event) => handleUserRoleChange(user, event.target.value as UserRole)}>
-                    <option value="Staff">Staff</option>
-                    <option value="Admin">Admin</option>
-                    <option value="customer">Customer</option>
-                  </select>
-                </td>
+                <td style={cellStyle}><strong>{user.role === 'customer' ? 'Customer' : user.role}</strong></td>
                 <td style={cellStyle}>{user.customerName || '-'}</td>
                 <td style={cellStyle}><span className={user.active ? 'admin-status active' : 'admin-status inactive'}>{user.active ? 'Yes' : 'No'}</span></td>
                 <td style={cellStyle}>

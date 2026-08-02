@@ -358,6 +358,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     turnOnOrder: data.turnOnOrder === true,
     headerOrder: data.headerOrder === undefined ? DEFAULT_SETTINGS.headerOrder : data.headerOrder === true,
     down: data.down === true,
+    customerDown: data.customerDown === true,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
   });
 };
@@ -730,12 +731,20 @@ const sanitizeOfferPayload = (offer: OfferFormData): OfferFormData => ({
   isActive: offer.isActive
 });
 
+const parseUserRole = (value: unknown): UserRole => {
+  if (value === 'Admin' || value === 'Staff' || value === 'customer' || value === 'Medical') {
+    return value;
+  }
+
+  throw new Error('User profile has an invalid role. An Admin must delete and recreate this access.');
+};
+
 export const mapUserProfileDoc = (id: string, data: Record<string, unknown>): UserProfile => ({
   id,
   uid: String(data.uid || ''),
   email: String(data.email || ''),
   name: String(data.name || data.customerName || data.email || ''),
-  role: data.role === 'Admin' ? 'Admin' : data.role === 'customer' ? 'customer' : 'Staff',
+  role: parseUserRole(data.role),
   customerId: data.customerId ? String(data.customerId) : undefined,
   customerName: data.customerName ? String(data.customerName) : undefined,
   active: data.active !== false,
@@ -1532,7 +1541,7 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
   appSettingsCache = { ...appSettings, id: settings.id, updatedAt: timestamp };
 };
 
-export type AppSettingsToggleField = 'down' | 'turnOnOrder' | 'headerOrder';
+export type AppSettingsToggleField = 'down' | 'customerDown' | 'turnOnOrder' | 'headerOrder';
 
 export const updateAppSettingsToggle = async (field: AppSettingsToggleField, value: boolean) => {
   const currentSettings = await getAppSettings();
@@ -1655,13 +1664,6 @@ export const getUserProfileByUid = async (uid: string) => {
   return userDoc ? mapUserProfileDoc(userDoc.id, userDoc.data()) : undefined;
 };
 
-export const getUserProfileByEmail = async (email: string) => {
-  const userQuery = query(collection(db, USERS), where('email', '==', email));
-  const snapshot = await getDocs(userQuery);
-  const userDoc = snapshot.docs[0];
-  return userDoc ? mapUserProfileDoc(userDoc.id, userDoc.data()) : undefined;
-};
-
 export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'createdAt' | 'updatedAt'>) => {
   const profileRef = profile.uid ? doc(db, USERS, profile.uid) : doc(collection(db, USERS));
   const timestamp = nowIso();
@@ -1675,16 +1677,12 @@ export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'creat
   return profileRef;
 };
 
-export const updateUserProfileRecord = async (profileId: string, profile: Partial<UserProfile>, auditUser?: AuditUser) => {
+export const updateUserProfileRecord = async (profileId: string, profile: Partial<Pick<UserProfile, 'name' | 'email' | 'customerId' | 'customerName' | 'active'>>, auditUser?: AuditUser) => {
   await updateDoc(doc(db, USERS, profileId), {
     ...withoutUndefined(profile),
     updatedAt: nowIso()
   });
 
-};
-
-export const deleteUserProfileRecord = async (profileId: string, auditUser?: AuditUser) => {
-  await deleteDoc(doc(db, USERS, profileId));
 };
 
 export const getOffers = async () => {

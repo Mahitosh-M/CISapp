@@ -10,7 +10,7 @@ const Login = () => {
   const [saving, setSaving] = useState(false);
 
   if (firebaseUser && role) {
-    return <Navigate to={role === 'customer' ? '/customer' : '/'} replace />;
+    return <Navigate to={role === 'customer' || role === 'Medical' ? '/customer' : '/'} replace />;
   }
 
   const handleSubmit = async (event: FormEvent) => {

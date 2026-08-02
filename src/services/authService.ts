@@ -11,12 +11,11 @@ import {
   signOut
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
-import { auth, firebaseConfig } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, firebaseConfig, functions } from '../firebase';
 import {
   createUserProfile,
-  getUserProfileByEmail,
-  getUserProfileByUid,
-  updateUserProfileRecord
+  getUserProfileByUid
 } from './firestoreService';
 import type { UserProfile, UserRole } from '../types';
 
@@ -40,7 +39,7 @@ const getReusableAuthCredential = async (secondaryAuth: ReturnType<typeof getAut
       return { credential, createdNewAuthUser: false };
     } catch {
       await sendPasswordResetEmail(auth, email);
-      throw new Error('This email already exists in Firebase Auth with a different password. A password reset email has been sent; use the reset link, then create or use this customer login with the updated password.');
+      throw new Error('This email already exists in Firebase Auth with a different password. A password reset email has been sent; use the reset link, then create the Admin-selected ERP login with the updated password.');
     }
   }
 };
@@ -56,88 +55,17 @@ export const logoutUser = async () => {
   return signOut(auth);
 };
 
-export const loadOrCreateUserProfile = async (user: User): Promise<UserProfile> => {
-  const existingByUid = await getUserProfileByUid(user.uid);
+export const loadUserProfile = async (user: User): Promise<UserProfile> => {
+  const profile = await getUserProfileByUid(user.uid);
 
-  if (existingByUid) {
-    if (existingByUid.id !== user.uid) {
-      await createUserProfile({
-        uid: user.uid,
-        email: normalizeEmail(existingByUid.email || user.email || ''),
-        name: existingByUid.name || user.displayName || user.email || 'ERP User',
-        role: existingByUid.role,
-        customerId: existingByUid.customerId,
-        customerName: existingByUid.customerName,
-        active: existingByUid.active
-      });
-
-      return {
-        ...existingByUid,
-        id: user.uid,
-        uid: user.uid,
-        email: normalizeEmail(existingByUid.email || user.email || '')
-      };
-    }
-
-    return existingByUid;
+  if (!profile || profile.uid !== user.uid) {
+    throw new Error('This email does not have Admin-created ERP access.');
   }
 
-  const rawEmail = user.email || '';
-  const email = normalizeEmail(rawEmail);
-  const existingByEmail = email
-    ? (await getUserProfileByEmail(email)) || (rawEmail !== email ? await getUserProfileByEmail(rawEmail) : undefined)
-    : undefined;
-
-  if (existingByEmail) {
-    const repairedProfile = {
-      uid: user.uid,
-      email,
-      name: existingByEmail.name || user.displayName || user.email || 'ERP User',
-      role: existingByEmail.role,
-      customerId: existingByEmail.customerId,
-      customerName: existingByEmail.customerName,
-      active: true
-    };
-
-    await updateUserProfileRecord(existingByEmail.id, {
-      uid: repairedProfile.uid,
-      email: repairedProfile.email,
-      name: repairedProfile.name,
-      active: repairedProfile.active
-    });
-    await createUserProfile(repairedProfile);
-
-    return {
-      ...existingByEmail,
-      id: user.uid,
-      uid: user.uid,
-      email,
-      active: true
-    };
-  }
-
-  // First unmatched Firebase Auth login becomes Admin so a fresh project can bootstrap.
-  // After bootstrap, Admin-created users get deterministic users/{uid} profiles.
-  const role: UserRole = 'Admin';
-
-  await createUserProfile({
-    uid: user.uid,
-    email,
-    name: user.displayName || user.email || 'ERP User',
-    role,
-    active: true
-  });
-
-  const createdProfile = await getUserProfileByUid(user.uid);
-
-  if (!createdProfile) {
-    throw new Error('User profile could not be created.');
-  }
-
-  return createdProfile;
+  return profile;
 };
 
-export const createStaffAuthAccount = async (email: string, password: string, name: string, role: UserRole) => {
+export const createStaffAuthAccount = async (email: string, password: string, name: string, role: Extract<UserRole, 'Admin' | 'Staff'>) => {
   // A secondary Firebase app prevents staff creation from logging out the current Admin session.
   const secondaryApp = initializeApp(firebaseConfig, `staff-admin-${Date.now()}`);
   const normalizedEmail = normalizeEmail(email);
@@ -168,14 +96,15 @@ export const createStaffAuthAccount = async (email: string, password: string, na
   }
 };
 
-export const createCustomerAuthAccount = async (
+const createCustomerPortalAuthAccount = async (
   email: string,
   password: string,
   customerId: string,
-  customerName: string
+  customerName: string,
+  role: Extract<UserRole, 'customer' | 'Medical'>
 ) => {
-  // A secondary Firebase app prevents customer login creation from replacing the current Admin session.
-  const secondaryApp = initializeApp(firebaseConfig, `customer-admin-${Date.now()}`);
+  // A secondary Firebase app prevents portal login creation from replacing the current Admin session.
+  const secondaryApp = initializeApp(firebaseConfig, `${role.toLowerCase()}-admin-${Date.now()}`);
   const normalizedEmail = normalizeEmail(email);
 
   try {
@@ -189,7 +118,7 @@ export const createCustomerAuthAccount = async (
         uid: credential.user.uid,
         email: normalizedEmail,
         name: normalizedCustomerName,
-        role: 'customer',
+        role,
         customerId,
         customerName: normalizedCustomerName,
         active: true
@@ -206,6 +135,17 @@ export const createCustomerAuthAccount = async (
   } finally {
     await deleteApp(secondaryApp);
   }
+};
+
+export const createCustomerAuthAccount = (email: string, password: string, customerId: string, customerName: string) =>
+  createCustomerPortalAuthAccount(email, password, customerId, customerName, 'customer');
+
+export const createMedicalAuthAccount = (email: string, password: string, customerId: string, customerName: string) =>
+  createCustomerPortalAuthAccount(email, password, customerId, customerName, 'Medical');
+
+export const deleteManagedUserAccount = async (profileId: string, uid: string) => {
+  const callable = httpsCallable<{ profileId: string; uid: string }, { ok: boolean }>(functions, 'deleteManagedUser');
+  return (await callable({ profileId, uid })).data;
 };
 
 export const sendUserPasswordResetEmail = async (email: string) => {

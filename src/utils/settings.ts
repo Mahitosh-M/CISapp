@@ -87,7 +87,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showCustomerTierToCustomer: false,
   turnOnOrder: false,
   headerOrder: true,
-  down: false
+  down: false,
+  customerDown: false
 };
 
 const roundToTwoDecimals = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -153,6 +154,7 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   turnOnOrder: settings?.turnOnOrder ?? DEFAULT_SETTINGS.turnOnOrder,
   headerOrder: settings?.headerOrder ?? DEFAULT_SETTINGS.headerOrder,
   down: settings?.down ?? DEFAULT_SETTINGS.down,
+  customerDown: settings?.customerDown ?? DEFAULT_SETTINGS.customerDown,
   targetSettings: {
     tier1: mergeTierTargetSettings(settings?.targetSettings?.tier1, DEFAULT_SETTINGS.targetSettings.tier1),
     tier2: mergeTierTargetSettings(settings?.targetSettings?.tier2, DEFAULT_SETTINGS.targetSettings.tier2),

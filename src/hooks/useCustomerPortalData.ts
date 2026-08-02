@@ -54,7 +54,7 @@ export const useCustomerPortalData = () => {
   const [error, setError] = useState('');
 
   const refreshData = useCallback(async () => {
-    if (!userProfile || userProfile.role !== 'customer') {
+    if (!userProfile || !['customer', 'Medical'].includes(userProfile.role)) {
       setLoading(false);
       return;
     }

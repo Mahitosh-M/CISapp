@@ -165,7 +165,7 @@ const Settings = () => {
     }
   };
 
-  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder' | 'down', value: string | boolean) => {
+  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder' | 'down' | 'customerDown', value: string | boolean) => {
     setSettings((current) => ({
       ...current,
       [field]: field === 'highOutstandingThreshold' ? Number(value) || 0 : value
@@ -181,7 +181,8 @@ const Settings = () => {
 
     try {
       await updateAppSettingsToggle(field, value);
-      setMessage(`${field === 'down' ? 'App Down' : field === 'turnOnOrder' ? 'Order Page' : 'Header Order'} updated.`);
+      const label = field === 'down' ? 'App Down' : field === 'customerDown' ? 'Customer' : field === 'turnOnOrder' ? 'Order Page' : 'Header Order';
+      setMessage(label + ' updated.');
     } catch (err) {
       setSettings((current) => ({ ...current, [field]: previousValue }));
       setError(err instanceof Error ? err.message : 'Unable to update setting.');
@@ -296,19 +297,25 @@ const Settings = () => {
           <ToggleSetting
             checked={settings.down}
             label="App Down"
-            disabled={savingToggle !== null}
+            disabled={savingToggle === 'down'}
             onChange={(checked) => handleToggleChange('down', checked)}
+          />
+          <ToggleSetting
+            checked={settings.customerDown}
+            label="Customer"
+            disabled={savingToggle === 'customerDown'}
+            onChange={(checked) => handleToggleChange('customerDown', checked)}
           />
           <ToggleSetting
             checked={settings.turnOnOrder}
             label="Order Page"
-            disabled={savingToggle !== null}
+            disabled={savingToggle === 'turnOnOrder'}
             onChange={(checked) => handleToggleChange('turnOnOrder', checked)}
           />
           <ToggleSetting
             checked={settings.headerOrder}
             label="Header Order"
-            disabled={savingToggle !== null}
+            disabled={savingToggle === 'headerOrder'}
             onChange={(checked) => handleToggleChange('headerOrder', checked)}
           />
         </div>

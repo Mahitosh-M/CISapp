@@ -36,7 +36,7 @@ const AdminStaffLanding = () => {
 const RootRouteShell = () => {
   const { role } = useAuth();
 
-  if (role === 'customer') {
+  if (role === 'customer' || role === 'Medical') {
     return <Navigate to="/customer" replace />;
   }
 
@@ -66,7 +66,7 @@ const App = () => {
     <Suspense fallback={<SplashScreen />}>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/customer" element={<ProtectedRoute allowedRoles={['customer']}><CustomerMobileLayout /></ProtectedRoute>}>
+        <Route path="/customer" element={<ProtectedRoute allowedRoles={['customer', 'Medical']}><CustomerMobileLayout /></ProtectedRoute>}>
           <Route index element={<CustomerLanding />} />
           <Route path="dashboard" element={<CustomerDashboard />} />
           <Route path="invoices" element={<CustomerInvoices />} />

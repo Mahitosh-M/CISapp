@@ -154,7 +154,7 @@ const CustomerMobileLayout = () => {
         })}
       </nav>
 
-      <InstallAppPrompt disabled={role !== 'customer' || Boolean(pcBalancePopup || latestUnreadBonus)} />
+      <InstallAppPrompt disabled={!['customer', 'Medical'].includes(role ?? '') || Boolean(pcBalancePopup || latestUnreadBonus)} />
 
       {pcBalancePopup ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(11,31,58,0.72)', display: 'grid', placeItems: 'center', padding: 18, zIndex: 40 }}>
