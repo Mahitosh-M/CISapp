@@ -1,9 +1,7 @@
 import {
   collection,
-  count,
   doc,
   DocumentData,
-  getAggregateFromServer,
   getDoc,
   getDocs,
   limit,
@@ -12,9 +10,7 @@ import {
   query,
   setDoc,
   startAfter,
-  sum,
-  writeBatch,
-  where
+  writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import type {
@@ -86,6 +82,7 @@ const mapProfile = (snapshot: QueryDocumentSnapshot<DocumentData> | Awaited<Retu
     nextInvoiceDueAmount: data.nextInvoiceDueAmount === null || data.nextInvoiceDueAmount === undefined ? undefined : numberOrZero(data.nextInvoiceDueAmount),
     lastCreditReviewAt: String(data.lastCreditReviewAt || ''),
     lastCreditReviewReason: data.lastCreditReviewReason ? String(data.lastCreditReviewReason) : undefined,
+    manualHold: data.manualHold === true,
     creditOverride: data.creditOverride && typeof data.creditOverride === 'object'
       ? {
           amount: numberOrZero(data.creditOverride.amount),
@@ -110,52 +107,6 @@ export const getCreditProfilesPage = async (cursor?: CreditPageCursor) => {
     rows: snapshot.docs.map(mapProfile),
     cursor: snapshot.docs[snapshot.docs.length - 1],
     hasMore: snapshot.size === PAGE_SIZE
-  };
-};
-
-export const getCreditDashboardMetrics = async () => {
-  const profiles = collection(db, PROFILE_COLLECTION);
-  const getTotals = async () => {
-    try {
-      return await getAggregateFromServer(query(profiles), {
-        eligible: count(),
-        outstanding: sum('currentOutstanding'),
-        available: sum('availableCredit')
-      });
-    } catch (err) {
-      const code = typeof err === 'object' && err !== null && 'code' in err
-        ? String((err as { code?: unknown }).code || '')
-        : '';
-      if (code !== 'failed-precondition' && code !== 'firestore/failed-precondition') throw err;
-
-      const [eligible, outstanding, available] = await Promise.all([
-        getAggregateFromServer(query(profiles), { value: count() }),
-        getAggregateFromServer(query(profiles), { value: sum('currentOutstanding') }),
-        getAggregateFromServer(query(profiles), { value: sum('availableCredit') })
-      ]);
-      return {
-        data: () => ({
-          eligible: eligible.data().value,
-          outstanding: outstanding.data().value,
-          available: available.data().value
-        })
-      };
-    }
-  };
-  const [totals, holds, starterPending, calculatedPending] = await Promise.all([
-    getTotals(),
-    getAggregateFromServer(query(profiles, where('creditStatus', '==', 'hold')), { value: count() }),
-    getAggregateFromServer(query(profiles, where('creditLimitApprovalStatus', '==', 'pending_starter')), { value: count() }),
-    getAggregateFromServer(query(profiles, where('creditLimitApprovalStatus', '==', 'pending_calculated')), { value: count() })
-  ]);
-
-  return {
-    eligibleCustomers: numberOrZero(totals.data().eligible),
-    totalOutstanding: numberOrZero(totals.data().outstanding),
-    totalAvailableCredit: numberOrZero(totals.data().available),
-    customersOnHold: numberOrZero(holds.data().value),
-    pendingStarterApprovals: numberOrZero(starterPending.data().value),
-    pendingCalculatedApprovals: numberOrZero(calculatedPending.data().value)
   };
 };
 
@@ -193,6 +144,69 @@ const requiredText = (value: unknown, label: string, maxLength = 500) => {
   if (!clean) throw new Error(`${label} is required.`);
   if (clean.length > maxLength) throw new Error(`${label} is too long.`);
   return clean;
+};
+
+export const autoApproveCalculatedProfiles = async (profiles: CustomerCreditProfile[]) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const pending = profiles.filter((profile) => {
+    const hasActiveOverride = Boolean(profile.creditOverride && profile.creditOverride.expiresAt >= today);
+    return !hasActiveOverride && (
+      profile.creditLimitApprovalStatus !== 'approved'
+      || Math.abs(profile.approvedCreditLimit - profile.calculatedCreditLimit) > 0.01
+    );
+  });
+
+  for (let index = 0; index < pending.length; index += 200) {
+    const batch = writeBatch(db);
+    const updatedAt = new Date().toISOString();
+    pending.slice(index, index + 200).forEach((profile) => {
+      const approvedCreditLimit = profile.calculatedCreditLimit;
+      const usedCredit = profile.currentOutstanding + profile.confirmedUninvoicedCreditOrders;
+      const availableCredit = profile.creditStatus === 'hold' || profile.creditStatus === 'disabled'
+        ? 0
+        : Math.max(0, approvedCreditLimit - usedCredit);
+      batch.update(doc(db, PROFILE_COLLECTION, profile.id), {
+        approvedCreditLimit,
+        availableCredit,
+        creditLimitApprovalStatus: 'approved',
+        updatedAt
+      });
+      batch.set(doc(db, SUMMARY_COLLECTION, profile.id), {
+        customerId: profile.customerId,
+        approvedCreditLimit,
+        availableCredit,
+        usedCredit,
+        creditDays: profile.creditDays,
+        nextInvoiceDueDate: profile.nextInvoiceDueDate ?? null,
+        nextInvoiceDueAmount: profile.nextInvoiceDueAmount ?? null,
+        creditStatus: profile.creditStatus,
+        manualHold: profile.manualHold === true,
+        updatedAt
+      });
+    });
+    await batch.commit();
+  }
+
+  const pendingIds = new Set(pending.map((profile) => profile.id));
+  return profiles.map((profile) => {
+    if (!pendingIds.has(profile.id)) return profile;
+    const approvedCreditLimit = profile.calculatedCreditLimit;
+    const usedCredit = profile.currentOutstanding + profile.confirmedUninvoicedCreditOrders;
+    return {
+      ...profile,
+      approvedCreditLimit,
+      availableCredit: profile.creditStatus === 'hold' || profile.creditStatus === 'disabled'
+        ? 0
+        : Math.max(0, approvedCreditLimit - usedCredit),
+      creditLimitApprovalStatus: 'approved' as const
+    };
+  });
+};
+
+const optionalReason = (value: unknown, maxLength = 500) => {
+  const clean = String(value || '').trim();
+  if (clean.length > maxLength) throw new Error('Reason is too long.');
+  return clean || 'Not provided';
 };
 
 const finiteAmount = (value: unknown, label: string) => {
@@ -302,7 +316,7 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
     return { ok: true };
   }
 
-  const reason = requiredText(input.reason, 'Reason');
+  const reason = optionalReason(input.reason);
   const current = Object.keys(loaded.existingProfile).length > 0
     ? loaded.existingProfile
     : loaded.calculation.profile;
@@ -416,7 +430,7 @@ const recalculateAndWrite = async (customer: Customer, settings: AppSettings, lo
 };
 
 export const recalculateAllCustomerCredit = async (lookbackDays: 60 | 90) => {
-  const [customers, settings] = await Promise.all([getCustomers(), getAppSettings()]);
+  const [customers, settings] = await Promise.all([getCustomers({ limitCount: 5000 }), getAppSettings()]);
   let count = 0;
   for (let index = 0; index < customers.length; index += 10) {
     const results = await Promise.all(

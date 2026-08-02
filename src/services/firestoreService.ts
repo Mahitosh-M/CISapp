@@ -1775,11 +1775,6 @@ export const getMonthlyCustomerStatsForMonth = async (month = getCurrentMonthKey
   return snapshot.docs.map((statsDoc) => mapMonthlyCustomerStatsDoc(statsDoc.id, statsDoc.data()));
 };
 
-export const getMonthlyCustomerStatsRecords = async (limitCount = 5000) => {
-  const snapshot = await getDocs(query(collection(db, MONTHLY_CUSTOMER_STATS), firestoreLimit(limitCount)));
-  return snapshot.docs.map((statsDoc) => mapMonthlyCustomerStatsDoc(statsDoc.id, statsDoc.data()));
-};
-
 export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), auditUser?: AuditUser) => {
   const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
     getCustomers(),
@@ -1832,16 +1827,6 @@ export const getCustomerPcBalanceRecord = async (customerId: string) => {
   if (!customerId) return undefined;
   const snapshot = await getDoc(doc(db, PC_BALANCES, customerId));
   return snapshot.exists() ? mapPcBalanceRecord(snapshot.id, snapshot.data()) : undefined;
-};
-
-export const getPcBalanceRecords = async (limitCount = 5000) => {
-  const snapshot = await getDocs(query(collection(db, PC_BALANCES), firestoreLimit(limitCount)));
-  return snapshot.docs.map((balanceDoc) => mapPcBalanceRecord(balanceDoc.id, balanceDoc.data()));
-};
-
-export const getLoyaltyLedgerEntries = async (limitCount = 5000) => {
-  const snapshot = await getDocs(query(collection(db, LOYALTY_LEDGER), firestoreLimit(limitCount)));
-  return snapshot.docs.map((entryDoc) => mapLoyaltyLedgerEntry(entryDoc.id, entryDoc.data()));
 };
 
 export const getCustomerPcLedgerEntries = async (customerId: string, limitCount = 500) => {
@@ -1943,72 +1928,6 @@ export const adjustCustomerPcBalance = async (
 
   clearFirestoreSessionCache();
   return getCustomerPcBalanceRecord(customerId);
-};
-
-export const syncProtectedCustomerInvoicePc = async (customerId: string, auditUser?: AuditUser) => {
-  requireAdminAudit(auditUser);
-  const [balance, customer, invoices, payments, settings, ledgerEntries] = await Promise.all([
-    getCustomerPcBalanceRecord(customerId),
-    getCustomerById(customerId),
-    getInvoicesByCustomerId(customerId),
-    getPaymentsByCustomerId(customerId),
-    getAppSettings(),
-    getCustomerPcLedgerEntries(customerId)
-  ]);
-  if (!balance) throw new Error('Protect this customer PC balance before syncing earned PC.');
-  if (!customer) throw new Error('Selected customer no longer exists.');
-
-  const existingInvoiceIds = new Set(
-    ledgerEntries.filter((entry) => entry.type === 'purchase').map((entry) => entry.referenceId)
-  );
-  const protectedDate = balance.protectedAt.slice(0, 10);
-  const eligible = invoices
-    .map((invoice) => ({
-      invoice,
-      fullPaymentDate: getInvoiceFullPaymentDate(invoice, payments),
-      earnedPc: calculateInvoiceApcInfo(invoice, payments, customer.tier, settings).earnedApc
-    }))
-    .filter(({ invoice, fullPaymentDate, earnedPc }) =>
-      Boolean(fullPaymentDate)
-      && fullPaymentDate > protectedDate
-      && earnedPc > 0
-      && !existingInvoiceIds.has(invoice.id)
-    );
-
-  let credited = 0;
-  for (const row of eligible) {
-    const entryRef = doc(db, LOYALTY_LEDGER, `${customerId}_${row.invoice.id}_invoice_pc`);
-    const balanceRef = doc(db, PC_BALANCES, customerId);
-    const timestamp = nowIso();
-    const added = await runTransaction(db, async (transaction) => {
-      const [entrySnapshot, balanceSnapshot] = await Promise.all([
-        transaction.get(entryRef),
-        transaction.get(balanceRef)
-      ]);
-      if (entrySnapshot.exists() || !balanceSnapshot.exists()) return false;
-      const current = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
-
-      transaction.set(entryRef, {
-        customerId,
-        type: 'purchase',
-        points: row.earnedPc,
-        reason: `Invoice PC: ${row.invoice.invoiceNumber || row.invoice.id}`,
-        referenceId: row.invoice.id,
-        month: row.fullPaymentDate.slice(0, 7),
-        createdAt: timestamp
-      });
-      transaction.update(balanceRef, {
-        availablePc: current.availablePc + row.earnedPc,
-        incomingPc: current.incomingPc + row.earnedPc,
-        updatedAt: timestamp
-      });
-      return true;
-    });
-    if (added) credited += row.earnedPc;
-  }
-
-  clearFirestoreSessionCache();
-  return { credited, balance: await getCustomerPcBalanceRecord(customerId) };
 };
 
 export const getOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {

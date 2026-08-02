@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,11 +15,13 @@ import {
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
   getPaymentsByInvoiceIds,
+  getPaymentsByCustomerId,
   syncCustomerPartnerLevelsFromFirestore,
   updateInvoiceRecord,
   updatePaymentRecord
 } from '../services/firestoreService';
-import type { AppSettings, Customer, Invoice, InvoiceFormData, Payment, PaymentMode } from '../types';
+import { calculateCustomerCreditSummaryLocally, getCustomerCreditSummary } from '../services/creditService';
+import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
@@ -104,6 +106,9 @@ const Invoices = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('INV-0001');
   const [formData, setFormData] = useState<InvoiceFormData>(buildEmptyInvoiceForm());
+  const [selectedCreditSummary, setSelectedCreditSummary] = useState<CustomerCreditSummary>();
+  const [loadingCreditLimit, setLoadingCreditLimit] = useState(false);
+  const creditRequestRef = useRef(0);
   const [sameDayPaymentAmount, setSameDayPaymentAmount] = useState(0);
   const [sameDayCashDiscount, setSameDayCashDiscount] = useState(0);
   const [sameDayPaymentMode, setSameDayPaymentMode] = useState<PaymentMode>('Cash');
@@ -215,9 +220,37 @@ const Invoices = () => {
     };
   };
 
+  const loadCustomerCreditLimit = async (customerId: string) => {
+    const requestId = ++creditRequestRef.current;
+    setSelectedCreditSummary(undefined);
+    if (!customerId) {
+      setLoadingCreditLimit(false);
+      return;
+    }
+
+    const customer = customers.find((item) => item.id === customerId);
+    if (!customer) return;
+
+    try {
+      setLoadingCreditLimit(true);
+      const [storedSummary, customerInvoices, customerPayments] = await Promise.all([
+        getCustomerCreditSummary(customerId),
+        getInvoicesByCustomerId(customerId),
+        getPaymentsByCustomerId(customerId)
+      ]);
+      if (requestId !== creditRequestRef.current) return;
+      setSelectedCreditSummary(calculateCustomerCreditSummaryLocally(customer, customerInvoices, customerPayments, settings, storedSummary));
+    } catch (err) {
+      if (requestId === creditRequestRef.current) setError(err instanceof Error ? err.message : 'Unable to load available credit.');
+    } finally {
+      if (requestId === creditRequestRef.current) setLoadingCreditLimit(false);
+    }
+  };
+
   const handleFieldChange = (field: keyof InvoiceFormData, value: string) => {
     if (field === 'customerId') {
       const selectedCustomer = customers.find((customer) => customer.id === value);
+      void loadCustomerCreditLimit(value);
 
       setFormData((current) => ({
         ...current,
@@ -250,6 +283,9 @@ const Invoices = () => {
   };
 
   const resetForm = () => {
+    creditRequestRef.current += 1;
+    setSelectedCreditSummary(undefined);
+    setLoadingCreditLimit(false);
     setFormData(buildEmptyInvoiceForm());
     setSameDayPaymentAmount(0);
     setSameDayCashDiscount(0);
@@ -371,6 +407,7 @@ const Invoices = () => {
       totalProfit: invoice.totalProfit,
       notes: invoice.notes
     });
+    void loadCustomerCreditLimit(invoice.customerId);
     setMessage('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -602,10 +639,25 @@ const Invoices = () => {
             <input style={inputStyle} type="number" min="0" value={formData.transportAmount} onChange={(event) => handleFieldChange('transportAmount', event.target.value)} />
           </label>
 
-          <label style={labelStyle}>
-            Notes
-            <input style={inputStyle} value={formData.notes} onChange={(event) => handleFieldChange('notes', event.target.value)} />
-          </label>
+          <div style={labelStyle}>
+            Credit Limit
+            <div style={{
+              ...inputStyle,
+              minHeight: 42,
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: 17,
+              fontWeight: 900,
+              color: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#B42318' : '#166534',
+              background: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#FDECEC' : '#ECFDF3'
+            }}>
+              {loadingCreditLimit
+                ? 'Loading...'
+                : formData.customerId
+                  ? formatMoney(selectedCreditSummary?.availableCredit ?? 0)
+                  : 'Select customer'}
+            </div>
+          </div>
 
           <label style={labelStyle}>
             Payment Received

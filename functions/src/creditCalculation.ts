@@ -72,6 +72,8 @@ const getPaymentFactor = (percentage: number) => {
 };
 
 const getHistoryFactor = (count: number) => {
+  if (count >= 36) return 1.15;
+  if (count >= 24) return 1.1;
   if (count >= 12) return 1;
   if (count >= 6) return 0.75;
   if (count >= 3) return 0.5;
@@ -86,10 +88,9 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     ? String(input.customer.tier)
     : 'Tier 4';
   const creditDays = Math.max(0, Math.round(numberOrZero(input.settings.creditDays?.[tier])));
+  const bufferDays = Math.max(0, Math.round(numberOrZero(input.settings.paymentBuffers?.[tier])));
   const starterCap = Math.max(0, numberOrZero(input.settings.creditPolicy?.starterLimitCap ?? 25000));
   const graceDays = Math.max(0, Math.round(numberOrZero(input.settings.creditPolicy?.overdueGraceDays ?? 3)));
-  const configuredLookbackDays = numberOrZero(input.lookbackDays ?? input.settings.creditPolicy?.lookbackDays);
-  const lookbackDays: 60 | 90 = configuredLookbackDays === 60 ? 60 : 90;
   const paymentsByInvoice = new Map<string, DocumentData[]>();
 
   input.payments.forEach(({ data }) => {
@@ -107,7 +108,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     const paid = payments.reduce((sum, payment) => sum + paymentEffect(payment), 0);
     const outstanding = roundMoney(Math.max(0, total - paid));
     const invoiceDate = String(data.date || data.invoiceDate || '');
-    const dueDate = String(data.dueDate || '') || addDays(invoiceDate, creditDays);
+    const dueDate = String(data.dueDate || '') || addDays(invoiceDate, creditDays + bufferDays);
     const paidOnTime = payments
       .filter((payment) => String(payment.date || payment.paymentDate || '') <= dueDate)
       .reduce((sum, payment) => sum + paymentEffect(payment), 0);
@@ -125,24 +126,32 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     };
   });
 
-  const lookbackStart = new Date(now);
-  lookbackStart.setUTCDate(lookbackStart.getUTCDate() - lookbackDays);
-  const lookbackStartString = lookbackStart.toISOString().slice(0, 10);
   const historyInvoices = invoiceRows.filter((invoice) =>
     !invoice.openingBalance
     && invoice.completed
     && creditDays > 0
-    && invoice.invoiceDate >= lookbackStartString
+    && /^\d{4}-\d{2}-\d{2}$/.test(invoice.invoiceDate)
     && invoice.invoiceDate <= today
   );
+  const firstHistoryDate = [...historyInvoices]
+    .map((invoice) => invoice.invoiceDate)
+    .filter(Boolean)
+    .sort()[0];
+  const firstHistoryTimestamp = firstHistoryDate
+    ? new Date(`${firstHistoryDate}T00:00:00.000Z`).getTime()
+    : now.getTime();
+  const creditHistoryDays = historyInvoices.length > 0
+    ? Math.max(1, Math.floor((now.getTime() - firstHistoryTimestamp) / 86_400_000) + 1)
+    : 0;
+  const historyMonths = Math.max(3, creditHistoryDays / 30);
   const completedCreditInvoices = historyInvoices.length;
   const onTimeDenominator = historyInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
   const onTimeNumerator = historyInvoices.reduce((sum, invoice) => sum + invoice.onTimeAmount, 0);
   const onTimePaymentPercentage = roundPercent(onTimeDenominator > 0 ? (onTimeNumerator / onTimeDenominator) * 100 : 0);
   const paymentFactor = getPaymentFactor(onTimePaymentPercentage);
   const historyFactor = getHistoryFactor(completedCreditInvoices);
-  const totalCreditInvoiceAmountInLookback = roundMoney(historyInvoices.reduce((sum, invoice) => sum + invoice.total, 0));
-  const averageMonthlyCreditSales = roundMoney(totalCreditInvoiceAmountInLookback / (lookbackDays / 30));
+  const totalHistoricalCreditSales = roundMoney(historyInvoices.reduce((sum, invoice) => sum + invoice.total, 0));
+  const averageMonthlyCreditSales = roundMoney(totalHistoricalCreditSales / historyMonths);
   const baseCreditLimit = roundMoney(averageMonthlyCreditSales * (creditDays / 30));
   const rawEstablishedLimit = roundMoney(baseCreditLimit * paymentFactor * historyFactor);
   const firstPaidInvoices = [...historyInvoices].sort((left, right) => left.invoiceDate.localeCompare(right.invoiceDate)).slice(0, 3);
@@ -163,8 +172,8 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const override = input.existingProfile?.creditOverride;
   const overrideExpiresAt = String(override?.expiresAt || '');
   const hasActiveOverride = Boolean(override && overrideExpiresAt >= today && numberOrZero(override.amount) >= 0);
-  let approvedCreditLimit = existingApproved;
-  let approvalStatus: ApprovalStatus = isStarter ? 'pending_starter' : 'pending_calculated';
+  let approvedCreditLimit = calculatedCreditLimit;
+  let approvalStatus: ApprovalStatus = 'approved';
 
   if (creditDays <= 0) {
     calculatedCreditLimit = 0;
@@ -173,13 +182,6 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   } else if (hasActiveOverride) {
     approvedCreditLimit = roundMoney(numberOrZero(override.amount));
     approvalStatus = 'approved';
-  } else if (existingApproved > 0 && calculatedCreditLimit < existingApproved) {
-    approvedCreditLimit = calculatedCreditLimit;
-    approvalStatus = 'approved';
-  } else if (existingApproved > 0 && Math.abs(calculatedCreditLimit - existingApproved) <= 0.01) {
-    approvalStatus = 'approved';
-  } else if (input.existingProfile?.creditLimitApprovalStatus === 'rejected') {
-    approvalStatus = 'rejected';
   }
 
   const currentOutstanding = roundMoney(invoiceRows.reduce((sum, invoice) => sum + invoice.outstanding, 0));
@@ -205,9 +207,15 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     creditDays,
     currentOutstanding,
     confirmedUninvoicedCreditOrders,
-    creditHistoryDays: lookbackDays,
-    totalCreditInvoiceAmountInLookback,
-    totalCreditInvoiceAmountLast90Days: totalCreditInvoiceAmountInLookback,
+    creditHistoryDays: 90,
+    totalCreditInvoiceAmountInLookback: totalHistoricalCreditSales,
+    totalCreditInvoiceAmountLast90Days: roundMoney(historyInvoices
+      .filter((invoice) => {
+        const ninetyDaysAgo = new Date(now);
+        ninetyDaysAgo.setUTCDate(ninetyDaysAgo.getUTCDate() - 90);
+        return invoice.invoiceDate >= ninetyDaysAgo.toISOString().slice(0, 10);
+      })
+      .reduce((sum, invoice) => sum + invoice.total, 0)),
     averageMonthlyCreditSales,
     baseCreditLimit,
     calculatedCreditLimit,

@@ -2,25 +2,20 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   Ban,
-  Calculator,
   Check,
-  ChevronRight,
   CircleDollarSign,
   Eye,
-  Gauge,
-  PauseCircle,
   PlayCircle,
   RefreshCw,
   Save,
   Settings2,
-  ShieldAlert,
   X
 } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { getAppSettings } from '../services/firestoreService';
 import {
   type CreditPageCursor,
-  getCreditDashboardMetrics,
+  autoApproveCalculatedProfiles,
   getCreditProfilesPage,
   manageCustomerCredit,
   recalculateAllCustomerCredit,
@@ -71,19 +66,12 @@ const buttonStyle: CSSProperties = {
 
 const Credit = () => {
   const [profiles, setProfiles] = useState<CustomerCreditProfile[]>([]);
-  const [cursor, setCursor] = useState<CreditPageCursor>();
-  const [hasMore, setHasMore] = useState(false);
   const [metrics, setMetrics] = useState({
-    eligibleCustomers: 0,
     totalOutstanding: 0,
-    totalAvailableCredit: 0,
-    customersOnHold: 0,
-    pendingStarterApprovals: 0,
-    pendingCalculatedApprovals: 0
+    totalAvailableCredit: 0
   });
   const [starterLimitCap, setStarterLimitCap] = useState(25000);
   const [overdueGraceDays, setOverdueGraceDays] = useState(3);
-  const [lookbackDays, setLookbackDays] = useState<60 | 90>(90);
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<'all' | CustomerTier>('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -93,30 +81,33 @@ const Credit = () => {
   const [actionReason, setActionReason] = useState('');
   const [overrideExpiry, setOverrideExpiry] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [recordsVisible, setRecordsVisible] = useState(false);
+  const [recordsLoaded, setRecordsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  const loadPage = async (nextCursor?: CreditPageCursor, append = false) => {
-    const page = await getCreditProfilesPage(nextCursor);
-    setProfiles((current) => append ? [...current, ...page.rows] : page.rows);
-    setCursor(page.cursor);
-    setHasMore(page.hasMore);
+  const loadAllProfiles = async () => {
+    const rows: CustomerCreditProfile[] = [];
+    let nextCursor: CreditPageCursor | undefined;
+    let hasNextPage = true;
+    while (hasNextPage) {
+      const page = await getCreditProfilesPage(nextCursor);
+      rows.push(...page.rows);
+      nextCursor = page.cursor;
+      hasNextPage = page.hasMore && Boolean(nextCursor);
+    }
+    return rows;
   };
 
-  const loadData = async () => {
+  const loadSettings = async () => {
     try {
       setLoading(true);
       setError('');
-      const [dashboardMetrics, settings] = await Promise.all([
-        getCreditDashboardMetrics(),
-        getAppSettings()
-      ]);
-      await loadPage();
-      setMetrics(dashboardMetrics);
+      const settings = await getAppSettings();
       setStarterLimitCap(settings.creditPolicy.starterLimitCap);
       setOverdueGraceDays(settings.creditPolicy.overdueGraceDays);
-      setLookbackDays(settings.creditPolicy.lookbackDays);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load customer credit.');
     } finally {
@@ -125,8 +116,35 @@ const Credit = () => {
   };
 
   useEffect(() => {
-    void loadData();
+    void loadSettings();
   }, []);
+
+  const loadRecords = async () => {
+    try {
+      setLoadingRecords(true);
+      setError('');
+      const rows = await autoApproveCalculatedProfiles(await loadAllProfiles());
+      setProfiles(rows);
+      setMetrics({
+        totalOutstanding: rows.reduce((sum, profile) => sum + profile.currentOutstanding, 0),
+        totalAvailableCredit: rows.reduce((sum, profile) => sum + profile.availableCredit, 0)
+      });
+      setRecordsLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load customer credit records.');
+    } finally {
+      setLoadingRecords(false);
+    }
+  };
+
+  const handleViewAll = async () => {
+    if (recordsVisible) {
+      setRecordsVisible(false);
+      return;
+    }
+    setRecordsVisible(true);
+    if (!recordsLoaded) await loadRecords();
+  };
 
   const visibleProfiles = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -162,11 +180,11 @@ const Credit = () => {
         reason: actionReason,
         amount: ['approve', 'manual_starter', 'override'].includes(dialog.action) ? actionAmount : undefined,
         expiresAt: dialog.action === 'override' ? overrideExpiry : undefined,
-        lookbackDays
+        lookbackDays: 90
       });
       setDialog(undefined);
       setMessage('Customer credit updated.');
-      await loadData();
+      await loadRecords();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update customer credit.');
     } finally {
@@ -178,8 +196,8 @@ const Credit = () => {
     try {
       setSaving(true);
       setError('');
-      await saveCreditPolicy(starterLimitCap, overdueGraceDays, lookbackDays);
-      setMessage('Credit policy saved. Use Recalculate all to apply it to every customer.');
+      await saveCreditPolicy(starterLimitCap, overdueGraceDays, 90);
+      setMessage('Credit policy saved. Calculations use complete customer history.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save credit policy.');
     } finally {
@@ -191,9 +209,9 @@ const Credit = () => {
     try {
       setSaving(true);
       setError('');
-      const result = await recalculateAllCustomerCredit(lookbackDays);
-      setMessage(`${result.count} customer credit profiles recalculated.`);
-      await loadData();
+      const result = await recalculateAllCustomerCredit(90);
+      setMessage(`${result.count} customer credit profiles recalculated and automatically approved.`);
+      if (recordsVisible) await loadRecords();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to recalculate customer credit.');
     } finally {
@@ -202,12 +220,8 @@ const Credit = () => {
   };
 
   const metricCards = [
-    { label: 'Eligible customers', value: metrics.eligibleCustomers.toLocaleString(), icon: Gauge },
     { label: 'Current outstanding', value: formatMoney(metrics.totalOutstanding), icon: CircleDollarSign },
-    { label: 'Available credit', value: formatMoney(metrics.totalAvailableCredit), icon: Check },
-    { label: 'Credit hold', value: metrics.customersOnHold.toLocaleString(), icon: PauseCircle },
-    { label: 'Starter approvals', value: metrics.pendingStarterApprovals.toLocaleString(), icon: ShieldAlert },
-    { label: 'Calculated approvals', value: metrics.pendingCalculatedApprovals.toLocaleString(), icon: Calculator }
+    { label: 'Available credit', value: formatMoney(metrics.totalAvailableCredit), icon: Check }
   ];
 
   if (loading) return <SectionHeader title="Credit" description="Loading customer credit controls..." />;
@@ -219,7 +233,7 @@ const Credit = () => {
       {error ? <div className="admin-alert admin-alert-error" role="alert">{error}</div> : null}
       {message ? <div className="admin-alert admin-alert-success" role="status">{message}</div> : null}
 
-      <div className="credit-metric-grid">
+      {recordsVisible && !loadingRecords ? <div className="credit-metric-grid">
         {metricCards.map(({ label, value, icon: Icon }) => (
           <div key={label} style={panelStyle}>
             <Icon size={20} color="#D4AF37" />
@@ -227,7 +241,7 @@ const Credit = () => {
             <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>{label}</div>
           </div>
         ))}
-      </div>
+      </div> : null}
 
       <section style={{ ...panelStyle, marginTop: 16 }} aria-labelledby="credit-policy-title">
         <div className="credit-section-row">
@@ -237,26 +251,8 @@ const Credit = () => {
           </div>
           <div className="credit-policy-controls">
             <div>
-              <span style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>Calculation period</span>
-              <div style={{ display: 'inline-flex', border: '1px solid #D8DEE9', borderRadius: 6, overflow: 'hidden' }}>
-                {([60, 90] as const).map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    aria-pressed={lookbackDays === days}
-                    onClick={() => setLookbackDays(days)}
-                    style={{
-                      ...buttonStyle,
-                      borderRadius: 0,
-                      minWidth: 88,
-                      background: lookbackDays === days ? '#D4AF37' : '#FFFFFF',
-                      color: '#11185A'
-                    }}
-                  >
-                    {days === 60 ? '2 Month' : '3 Month'}
-                  </button>
-                ))}
-              </div>
+              <span style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>Calculation basis</span>
+              <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', fontWeight: 850 }}>Complete customer history</div>
             </div>
             <label>
               <span>Starter cap</span>
@@ -270,7 +266,7 @@ const Credit = () => {
               <Save size={16} /> Save
             </button>
             <button type="button" disabled={saving} onClick={handleBulkReview} style={{ ...buttonStyle, background: '#FFFFFF', color: '#11185A', alignSelf: 'end' }}>
-              <RefreshCw size={16} /> Recalculate all
+              <RefreshCw size={16} /> Recalculate and approve all
             </button>
           </div>
         </div>
@@ -279,7 +275,16 @@ const Credit = () => {
       <section style={{ marginTop: 16 }} aria-labelledby="credit-table-title">
         <div className="credit-toolbar">
           <div id="credit-table-title" style={{ color: '#FFFFFF', fontWeight: 900 }}>Customer credit</div>
-          <input aria-label="Search customers" style={inputStyle} placeholder="Search customer" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <button
+            type="button"
+            disabled={loadingRecords}
+            onClick={handleViewAll}
+            style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }}
+          >
+            {loadingRecords ? <RefreshCw size={16} /> : <Eye size={16} />}
+            {loadingRecords ? 'Loading...' : recordsVisible ? 'Hide all' : 'View all'}
+          </button>
+          <input aria-label="Customer name" style={inputStyle} placeholder="Customer name" value={search} onChange={(event) => setSearch(event.target.value)} />
           <select aria-label="Filter by tier" style={inputStyle} value={tierFilter} onChange={(event) => setTierFilter(event.target.value as 'all' | CustomerTier)}>
             <option value="all">All tiers</option>
             {['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'].map((tier) => <option key={tier} value={tier}>{tier}</option>)}
@@ -298,7 +303,7 @@ const Credit = () => {
           </select>
         </div>
 
-        <div className="credit-table-wrap">
+        {recordsVisible && !loadingRecords ? <div className="credit-table-wrap">
           <table className="credit-table">
             <thead>
               <tr>
@@ -326,8 +331,6 @@ const Credit = () => {
                     <div className="credit-actions">
                       <button title="View calculation breakdown" type="button" onClick={() => openAction(profile, 'breakdown')}><Eye size={16} /></button>
                       <button title="Recalculate" type="button" onClick={() => openAction(profile, 'recalculate')}><RefreshCw size={16} /></button>
-                      <button title="Approve calculated limit" type="button" onClick={() => openAction(profile, profile.creditStatus === 'starter' ? 'manual_starter' : 'approve')}><Check size={16} /></button>
-                      <button title="Reject calculated limit" type="button" onClick={() => openAction(profile, 'reject')}><X size={16} /></button>
                       <button title={profile.creditStatus === 'hold' ? 'Remove manual hold' : 'Place hold'} type="button" onClick={() => openAction(profile, profile.creditStatus === 'hold' ? 'remove_hold' : 'hold')}>
                         {profile.creditStatus === 'hold' ? <PlayCircle size={16} /> : <Ban size={16} />}
                       </button>
@@ -338,13 +341,8 @@ const Credit = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </div> : null}
 
-        {hasMore ? (
-          <button type="button" disabled={saving || !cursor} onClick={() => cursor && loadPage(cursor, true)} style={{ ...buttonStyle, marginTop: 12, background: '#FFFFFF', color: '#11185A' }}>
-            Load next 50 <ChevronRight size={16} />
-          </button>
-        ) : null}
       </section>
 
       {dialog ? (
@@ -360,7 +358,7 @@ const Credit = () => {
 
             {dialog.action === 'breakdown' ? (
               <div className="credit-breakdown">
-                <div><span>{dialog.profile.creditHistoryDays}-day completed credit sales</span><strong>{formatMoney(dialog.profile.totalCreditInvoiceAmountInLookback)}</strong></div>
+                <div><span>Lifetime completed credit sales</span><strong>{formatMoney(dialog.profile.totalCreditInvoiceAmountInLookback)}</strong></div>
                 <div><span>Average monthly credit sales</span><strong>{formatMoney(dialog.profile.averageMonthlyCreditSales)}</strong></div>
                 <div><span>Base credit limit</span><strong>{formatMoney(dialog.profile.baseCreditLimit)}</strong></div>
                 <div><span>Payment factor</span><strong>{dialog.profile.paymentFactor.toFixed(2)}</strong></div>
@@ -379,7 +377,7 @@ const Credit = () => {
                   <label>Expiry date<input required style={inputStyle} type="date" min={new Date().toISOString().slice(0, 10)} value={overrideExpiry} onChange={(event) => setOverrideExpiry(event.target.value)} /></label>
                 ) : null}
                 {dialog.action !== 'recalculate' ? (
-                  <label>Reason<textarea required style={{ ...inputStyle, minHeight: 88, resize: 'vertical' }} maxLength={500} value={actionReason} onChange={(event) => setActionReason(event.target.value)} /></label>
+                  <label>Reason (optional)<textarea style={{ ...inputStyle, minHeight: 88, resize: 'vertical' }} maxLength={500} value={actionReason} onChange={(event) => setActionReason(event.target.value)} /></label>
                 ) : null}
                 <button disabled={saving} type="submit" style={{ ...buttonStyle, background: '#11185A', color: '#FFFFFF' }}>
                   {saving ? <RefreshCw size={16} /> : <Check size={16} />} Confirm

@@ -107,6 +107,7 @@ export interface CustomerCreditProfile {
   nextInvoiceDueAmount?: number;
   lastCreditReviewAt: string;
   lastCreditReviewReason?: string;
+  manualHold?: boolean;
   creditOverride?: CreditOverride;
 }
 

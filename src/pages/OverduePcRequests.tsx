@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequests, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequests, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoices, getInvoicesByCustomerId, getLoyaltyLedgerEntries, getMonthlyCustomerStatsRecords, getOverduePcRequests, getPayments, getPaymentsByCustomerId, getPcBalanceRecords, getRedemptionRequests, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest, syncProtectedCustomerInvoicePc } from '../services/firestoreService';
+import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
 import type { AppSettings, BonusPcRequest, Customer, Invoice, LoyaltyLedgerEntry, OverduePcRequest, Payment, RedemptionRequest } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
@@ -39,14 +39,6 @@ interface PcHistorySources {
   overdueRequests: OverduePcRequest[];
   redemptions: RedemptionRequest[];
   performanceBonus: number;
-}
-
-interface PcRecoveryRow {
-  customer: Customer;
-  calculatedPc: number;
-  ledgerPc: number;
-  recommendedPc: number;
-  protected: boolean;
 }
 
 const ledgerHistoryTitle = (entry: LoyaltyLedgerEntry) => {
@@ -95,9 +87,6 @@ const OverduePcRequests = () => {
   const [adjustmentDirection, setAdjustmentDirection] = useState<'add' | 'deduct'>('add');
   const [adjustmentPoints, setAdjustmentPoints] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
-  const [showRecovery, setShowRecovery] = useState(false);
-  const [recoveryRows, setRecoveryRows] = useState<PcRecoveryRow[]>([]);
-  const [loadingRecovery, setLoadingRecovery] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -372,22 +361,6 @@ const OverduePcRequests = () => {
     }
   };
 
-  const handleSyncPc = async () => {
-    if (!customerPcView) return;
-    try {
-      setSavingId('sync-pc');
-      setError('');
-      setMessage('');
-      const result = await syncProtectedCustomerInvoicePc(customerPcView.customer.id, auditUser);
-      setMessage(result.credited > 0 ? `${formatPc(result.credited)} newly earned invoice PC added.` : 'No new eligible invoice PC found.');
-      await handlePcCustomerChange(customerPcView.customer.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sync earned PC.');
-    } finally {
-      setSavingId('');
-    }
-  };
-
   const handleManualAdjustment = async () => {
     if (!adjustmentCustomerId) {
       setError('Select a customer for the PC adjustment.');
@@ -404,92 +377,6 @@ const OverduePcRequests = () => {
       if (selectedPcCustomerId === adjustmentCustomerId) await handlePcCustomerChange(adjustmentCustomerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to adjust PC.');
-    } finally {
-      setSavingId('');
-    }
-  };
-
-  const handlePreviewRecovery = async () => {
-    try {
-      setLoadingRecovery(true);
-      setError('');
-      setMessage('');
-      const rows: PcRecoveryRow[] = [];
-      const [recoveryCustomers, allInvoices, allPayments, allBonusRows, allOverdueRows, allRedemptions, allLedgerEntries, allMonthlyStats, allProtectedBalances] = await Promise.all([
-        getCustomers({ limitCount: 5000 }),
-        getInvoices({ limitCount: 5000 }),
-        getPayments({ limitCount: 5000 }),
-        getApprovedBonusPcRequests(5000),
-        getApprovedOverduePcRequests(5000),
-        getRedemptionRequests(5000),
-        getLoyaltyLedgerEntries(5000),
-        getMonthlyCustomerStatsRecords(5000),
-        getPcBalanceRecords(5000)
-      ]);
-
-      for (const customer of recoveryCustomers) {
-        const invoiceRows = allInvoices.filter((invoice) => invoice.customerId === customer.id || invoice.customerName === customer.name);
-        const paymentRows = allPayments.filter((payment) => payment.customerId === customer.id || payment.customerName === customer.name);
-        const approvedBonusRows = allBonusRows.filter((request) => request.customerId === customer.id);
-        const approvedOverdueRows = allOverdueRows.filter((request) => request.customerId === customer.id);
-        const redemptionRows = allRedemptions.filter((request) => request.customerId === customer.id);
-        const ledgerEntries = allLedgerEntries.filter((entry) => entry.customerId === customer.id);
-        const monthlyStatsPc = Math.max(0, Math.round(allMonthlyStats
-          .filter((stats) => stats.customerId === customer.id)
-          .reduce((sum, stats) => sum + stats.pointsEarned, 0)));
-        const protectedBalance = allProtectedBalances.find((balance) => balance.customerId === customer.id);
-        const businessInvoices = getBusinessInvoices(invoiceRows);
-        const intelligenceResult = buildCustomerScores([customer], businessInvoices, paymentRows, new Date(), settings)[0];
-        const portalCustomer = intelligenceResult ? { ...customer, tier: intelligenceResult.tier } : customer;
-        const preProtectionBalance = buildCustomerPortalPcBalance(
-          portalCustomer,
-          businessInvoices,
-          paymentRows,
-          settings,
-          redemptionRows.filter((request) => request.status === 'Gifted'),
-          approvedOverdueRows,
-          approvedBonusRows
-        );
-        const ledgerPc = Math.max(monthlyStatsPc, Math.max(0, Math.round(ledgerEntries.reduce((sum, entry) => sum + entry.points, 0))));
-
-        rows.push({
-          customer: portalCustomer,
-          calculatedPc: preProtectionBalance.availablePc,
-          ledgerPc,
-          recommendedPc: protectedBalance?.availablePc ?? Math.max(preProtectionBalance.availablePc, ledgerPc),
-          protected: Boolean(protectedBalance)
-        });
-      }
-
-      setRecoveryRows(rows.sort((left, right) => right.recommendedPc - left.recommendedPc));
-      setMessage('Recovery preview ready. Review the values before protecting balances.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to prepare the PC recovery preview.');
-    } finally {
-      setLoadingRecovery(false);
-    }
-  };
-
-  const handleApplyRecovery = async () => {
-    const pendingRows = recoveryRows.filter((row) => !row.protected);
-    if (pendingRows.length === 0) {
-      setMessage('All listed customer PC balances are already protected.');
-      return;
-    }
-
-    try {
-      setSavingId('recover-all-pc');
-      setError('');
-      setMessage('');
-      let protectedCount = 0;
-      for (const row of pendingRows) {
-        await protectCustomerPcBalance(row.customer.id, row.recommendedPc, auditUser);
-        protectedCount += 1;
-      }
-      setRecoveryRows((current) => current.map((row) => ({ ...row, protected: true })));
-      setMessage(`${protectedCount} customer PC balance(s) recovered and protected.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'PC recovery stopped before all balances were protected. Run the preview again to verify progress.');
     } finally {
       setSavingId('');
     }
@@ -559,9 +446,6 @@ const OverduePcRequests = () => {
           <button type="button" onClick={() => setShowAdjustment((current) => !current)} style={primaryActionStyle}>
             Adjust PC
           </button>
-          <button type="button" onClick={() => setShowRecovery((current) => !current)} style={primaryActionStyle}>
-            PC Recovery
-          </button>
         </div>
       </div>
 
@@ -598,17 +482,13 @@ const OverduePcRequests = () => {
                     <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Total Incoming</div><div style={{ fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.incomingPc)}</div></div>
                     <div><div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Total Redeemed</div><div style={{ color: '#B42318', fontSize: 20, fontWeight: 900 }}>{formatPc(customerPcView.redeemedPc)}</div></div>
                   </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
-                    {customerPcView.protected ? (
-                      <button type="button" disabled={Boolean(savingId)} onClick={handleSyncPc} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
-                        {savingId === 'sync-pc' ? 'Syncing...' : 'Sync Earned PC'}
-                      </button>
-                    ) : (
+                  {!customerPcView.protected ? (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
                       <button type="button" disabled={Boolean(savingId)} onClick={handleProtectPc} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }}>
                         {savingId === 'protect-pc' ? 'Protecting...' : 'Protect Current PC'}
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -683,41 +563,6 @@ const OverduePcRequests = () => {
               {savingId === 'adjust-pc' ? 'Saving...' : adjustmentDirection === 'add' ? 'Add and Record' : 'Deduct and Record'}
             </button>
           </div>
-        </div>
-      ) : null}
-      {showRecovery ? (
-        <div style={{ ...cardStyle, display: 'grid', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="button" disabled={loadingRecovery || Boolean(savingId)} onClick={handlePreviewRecovery} style={primaryActionStyle}>
-              {loadingRecovery ? 'Calculating...' : 'Preview Recovery'}
-            </button>
-            {recoveryRows.length > 0 ? (
-              <button type="button" disabled={Boolean(savingId) || loadingRecovery} onClick={handleApplyRecovery} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
-                {savingId === 'recover-all-pc' ? 'Protecting...' : 'Recover and Protect All'}
-              </button>
-            ) : null}
-          </div>
-          {recoveryRows.length > 0 ? (
-            <div style={{ ...latestFiveScrollStyle, maxHeight: 480, overflow: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>{['Customer', 'Area', 'Invoice Calculation', 'Saved Records', 'Recommended', 'Status'].map((header) => <th key={header} style={thStyle}>{header}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {recoveryRows.map((row) => (
-                    <tr key={row.customer.id}>
-                      <td style={tdStyle}>{row.customer.name}</td>
-                      <td style={tdStyle}>{row.customer.area || '-'}</td>
-                      <td style={tdStyle}>{formatPc(row.calculatedPc)}</td>
-                      <td style={tdStyle}>{formatPc(row.ledgerPc)}</td>
-                      <td style={{ ...tdStyle, color: '#4ADE80', fontWeight: 900 }}>{formatPc(row.recommendedPc)}</td>
-                      <td style={{ ...tdStyle, color: row.protected ? '#4ADE80' : '#FACC15', fontWeight: 900 }}>{row.protected ? 'Protected' : 'Ready'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
         </div>
       ) : null}
       {showReferral ? (
