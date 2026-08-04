@@ -219,6 +219,7 @@ service cloud.firestore {
           'incomingPc',
           'redeemedPc',
           'protectedAt',
+          'lastAwardReferenceId',
           'updatedAt'
         ])
         && data.customerId == customerDocId
@@ -230,7 +231,66 @@ service cloud.firestore {
         && data.redeemedPc >= 0
         && data.availablePc == data.incomingPc - data.redeemedPc
         && data.protectedAt is string
+        && validOptionalString(data, 'lastAwardReferenceId', 160)
         && data.updatedAt is string;
+    }
+
+    function invoicePcLedgerPath(customerDocId, invoiceId) {
+      return /databases/$(database)/documents/loyaltyLedger/$(customerDocId + "_" + invoiceId + "_invoice_pc");
+    }
+
+    function pcBalancePath(customerDocId) {
+      return /databases/$(database)/documents/pcBalances/$(customerDocId);
+    }
+
+    function invoicePath(invoiceId) {
+      return /databases/$(database)/documents/invoices/$(invoiceId);
+    }
+
+    function validTeamInvoicePcLedger(entryId, data) {
+      let balancePath = pcBalancePath(data.customerId);
+      let linkedInvoicePath = invoicePath(data.referenceId);
+      return isTeam()
+        && validLoyaltyLedgerEntry(data)
+        && data.type == 'on_time_payment'
+        && data.points > 0
+        && data.points <= 1000000
+        && entryId == data.customerId + "_" + data.referenceId + "_invoice_pc"
+        && exists(linkedInvoicePath)
+        && get(linkedInvoicePath).data.customerId == data.customerId
+        && existsAfter(balancePath)
+        && getAfter(balancePath).data.lastAwardReferenceId == data.referenceId
+        && getAfter(balancePath).data.updatedAt == data.createdAt
+        && (
+          (
+            exists(balancePath)
+            && getAfter(balancePath).data.availablePc == get(balancePath).data.availablePc + data.points
+            && getAfter(balancePath).data.incomingPc == get(balancePath).data.incomingPc + data.points
+            && getAfter(balancePath).data.redeemedPc == get(balancePath).data.redeemedPc
+            && getAfter(balancePath).data.protectedAt == get(balancePath).data.protectedAt
+          )
+          || (
+            !exists(balancePath)
+            && getAfter(balancePath).data.availablePc == data.points
+            && getAfter(balancePath).data.incomingPc == data.points
+            && getAfter(balancePath).data.redeemedPc == 0
+            && getAfter(balancePath).data.protectedAt == data.createdAt
+          )
+        );
+    }
+
+    function validTeamInvoicePcBalance(customerDocId) {
+      let invoiceId = request.resource.data.lastAwardReferenceId;
+      let ledgerPath = invoicePcLedgerPath(customerDocId, invoiceId);
+      return isTeam()
+        && validPcBalance(request.resource.data, customerDocId)
+        && invoiceId is string
+        && !exists(ledgerPath)
+        && existsAfter(ledgerPath)
+        && getAfter(ledgerPath).data.customerId == customerDocId
+        && getAfter(ledgerPath).data.referenceId == invoiceId
+        && getAfter(ledgerPath).data.type == 'on_time_payment'
+        && request.resource.data.updatedAt == getAfter(ledgerPath).data.createdAt;
     }
 
     function validRewardItem(data) {
@@ -683,13 +743,15 @@ service cloud.firestore {
 
     match /loyaltyLedger/{entryId} {
       allow read: if isTeam() || ownsCustomerRecord(resource.data);
-      allow create: if isAdmin() && validLoyaltyLedgerEntry(request.resource.data);
+      allow create: if (isAdmin() && validLoyaltyLedgerEntry(request.resource.data))
+        || validTeamInvoicePcLedger(entryId, request.resource.data);
       allow update, delete: if false;
     }
 
     match /pcBalances/{customerDocId} {
       allow read: if isTeam() || (isCustomer() && customerId() == customerDocId);
-      allow create, update: if isAdmin() && validPcBalance(request.resource.data, customerDocId);
+      allow create, update: if (isAdmin() && validPcBalance(request.resource.data, customerDocId))
+        || validTeamInvoicePcBalance(customerDocId);
       allow delete: if false;
     }
 

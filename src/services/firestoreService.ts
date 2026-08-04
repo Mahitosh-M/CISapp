@@ -1291,6 +1291,70 @@ const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstand
   };
 };
 
+const creditProtectedPcForPaidInvoice = async (invoiceId: string) => {
+  if (!invoiceId) return;
+
+  const invoiceSnapshot = await getDoc(doc(db, INVOICES, invoiceId));
+  if (!invoiceSnapshot.exists()) return;
+
+  const invoice = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data());
+  if (!invoice.customerId || isOpeningBalanceInvoice(invoice)) return;
+
+  const [customer, payments, settings] = await Promise.all([
+    getCustomerById(invoice.customerId),
+    getPaymentsByInvoiceId(invoice.id),
+    getAppSettings()
+  ]);
+  if (!customer) return;
+
+  const award = calculateInvoiceApcInfo(invoice, payments, customer.tier, settings);
+  const points = Math.max(0, Math.round(award.earnedApc));
+  const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
+  if (points <= 0 || !fullPaymentDate) return;
+
+  const timestamp = nowIso();
+  const balanceRef = doc(db, PC_BALANCES, customer.id);
+  const ledgerRef = doc(db, LOYALTY_LEDGER, `${customer.id}_${invoice.id}_invoice_pc`);
+
+  await runTransaction(db, async (transaction) => {
+    const [ledgerSnapshot, balanceSnapshot] = await Promise.all([
+      transaction.get(ledgerRef),
+      transaction.get(balanceRef)
+    ]);
+    if (ledgerSnapshot.exists()) return;
+
+    if (balanceSnapshot.exists()) {
+      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+      transaction.update(balanceRef, {
+        availablePc: balance.availablePc + points,
+        incomingPc: balance.incomingPc + points,
+        lastAwardReferenceId: invoice.id,
+        updatedAt: timestamp
+      });
+    } else {
+      transaction.set(balanceRef, {
+        customerId: customer.id,
+        availablePc: points,
+        incomingPc: points,
+        redeemedPc: 0,
+        protectedAt: timestamp,
+        lastAwardReferenceId: invoice.id,
+        updatedAt: timestamp
+      });
+    }
+
+    transaction.set(ledgerRef, {
+      customerId: customer.id,
+      type: 'on_time_payment',
+      points,
+      reason: `Invoice ${invoice.invoiceNumber || invoice.id} paid on time`,
+      referenceId: invoice.id,
+      month: fullPaymentDate.slice(0, 7),
+      createdAt: timestamp
+    });
+  });
+};
+
 export const createPayment = async (payment: PaymentFormData, auditUser?: AuditUser) => {
   const paymentRef = doc(collection(db, PAYMENTS));
   const timestamp = nowIso();
@@ -1319,6 +1383,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
   });
 
   await syncCustomerFinancialSummary(payment.customerId);
+  await creditProtectedPcForPaidInvoice(allocatedPayment.invoiceId);
   clearFirestoreSessionCache();
   return paymentRef;
 };
@@ -1408,6 +1473,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   });
 
   await Promise.all(affectedCustomerIds.map((customerId) => syncCustomerFinancialSummary(customerId)));
+  await creditProtectedPcForPaidInvoice(allocatedPayment.invoiceId);
   clearFirestoreSessionCache();
 };
 
@@ -1839,49 +1905,6 @@ export const getCustomerPcLedgerEntries = async (customerId: string, limitCount 
   return snapshot.docs
     .map((entryDoc) => mapLoyaltyLedgerEntry(entryDoc.id, entryDoc.data()))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-};
-
-export const reconcileCustomerPcBalance = async (
-  customerId: string,
-  entries: LoyaltyLedgerEntry[],
-  expectedUpdatedAt: string,
-  auditUser?: AuditUser
-) => {
-  requireAdminAudit(auditUser);
-  const balanceRef = doc(db, PC_BALANCES, customerId);
-  let reconciled: PcBalanceRecord | undefined;
-
-  await runTransaction(db, async (transaction) => {
-    const balanceSnapshot = await transaction.get(balanceRef);
-    if (!balanceSnapshot.exists()) return;
-    const current = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
-
-    // A concurrent award or redemption wins; the next view will reconcile from fresh history.
-    if (current.updatedAt !== expectedUpdatedAt) {
-      reconciled = current;
-      return;
-    }
-
-    const protectedEntries = entries.filter((entry) => !current.protectedAt || entry.createdAt >= current.protectedAt);
-    const incomingPc = protectedEntries.reduce((sum, entry) => sum + Math.max(0, entry.points), 0);
-    const redeemedPc = protectedEntries.reduce((sum, entry) => sum + Math.max(0, -entry.points), 0);
-    if (redeemedPc > incomingPc) {
-      reconciled = current;
-      return;
-    }
-    const availablePc = Math.max(0, incomingPc - redeemedPc);
-
-    if (incomingPc !== current.incomingPc || redeemedPc !== current.redeemedPc || availablePc !== current.availablePc) {
-      const updatedAt = nowIso();
-      transaction.update(balanceRef, { incomingPc, redeemedPc, availablePc, updatedAt });
-      reconciled = { ...current, incomingPc, redeemedPc, availablePc, updatedAt };
-    } else {
-      reconciled = current;
-    }
-  });
-
-  clearFirestoreSessionCache();
-  return reconciled;
 };
 
 const requireAdminAudit = (auditUser?: AuditUser) => {
