@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Award, Wallet } from 'lucide-react';
 import ExternalImage from '../../components/ExternalImage';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
@@ -27,7 +27,7 @@ const customerPromoImageStyle = {
 };
 
 const CustomerPartnerPoints = () => {
-  const { customer, apcSummary, availableRewards, redemptionRequests, refreshData } = useCustomerPortalContext();
+  const { customer, apcSummary, availableRewards, redemptionRequests, refreshData, refreshPcBalance } = useCustomerPortalContext();
   const [redemptionMessage, setRedemptionMessage] = useState('');
   const [redemptionError, setRedemptionError] = useState('');
   const [requestingRewardId, setRequestingRewardId] = useState('');
@@ -37,6 +37,10 @@ const CustomerPartnerPoints = () => {
     }
     return requestMap;
   }, new Map<string, (typeof redemptionRequests)[number]>());
+
+  useEffect(() => {
+    void refreshPcBalance();
+  }, [refreshPcBalance]);
 
   const handleRewardRequest = async (rewardId: string) => {
     if (!customer) return;

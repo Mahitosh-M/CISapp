@@ -20,7 +20,7 @@ interface PcHistoryItem {
 }
 
 const CustomerDashboard = () => {
-  const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests } = useCustomerPortalContext();
+  const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests, refreshPcBalance } = useCustomerPortalContext();
   const navigate = useNavigate();
   const previousPcBalanceRef = useRef<number | null>(null);
   const bonusNoticeKeyRef = useRef('');
@@ -90,6 +90,10 @@ const CustomerDashboard = () => {
     { key: 'bonus', label: 'Bonus' },
     { key: 'overdue', label: 'Overdue' }
   ];
+
+  useEffect(() => {
+    void refreshPcBalance();
+  }, [refreshPcBalance]);
 
   useEffect(() => {
     if (previousPcBalanceRef.current === null) {

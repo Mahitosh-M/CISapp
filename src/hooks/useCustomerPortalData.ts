@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   getActiveOffers,
@@ -21,6 +21,8 @@ import { canViewRewardAtLevel, getNextPartnerLevel, getPartnerLevelForTier, getP
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { buildCustomerPortalPcBalance } from '../utils/pcBalance';
 import { DEFAULT_SETTINGS } from '../utils/settings';
+
+const PC_BALANCE_READ_DEDUP_MS = 1000;
 
 const isPermissionError = (err: unknown) => {
   return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === 'permission-denied';
@@ -53,6 +55,27 @@ export const useCustomerPortalData = () => {
   const [creditSummary, setCreditSummary] = useState<CustomerCreditSummary>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const pcBalanceReadAtRef = useRef(0);
+
+  const applyAvailablePcBalance = useCallback((availablePc: number) => {
+    setApcSummary((current) => {
+      if (!current) return current;
+
+      const pcProgress = getPcThresholdProgress(availablePc, current.currentLevel, settings);
+      const nextReward = availableRewards.find(
+        (reward) => reward.requiredPoints > availablePc && canViewRewardAtLevel(current.currentLevel, reward.levelRequired)
+      );
+
+      return {
+        ...current,
+        apcBalance: availablePc,
+        progressPercent: pcProgress.progressPercent,
+        pointsNeededForNextLevel: pcProgress.pointsNeededForNextLevel,
+        pointsNeededForNextReward: nextReward ? Math.max(0, Math.round(nextReward.requiredPoints - availablePc)) : 0,
+        rewardAvailable: availableRewards.some((reward) => reward.requiredPoints <= availablePc)
+      };
+    });
+  }, [availableRewards, settings]);
 
   const refreshData = useCallback(async () => {
     if (!userProfile || !['customer', 'Medical'].includes(userProfile.role)) {
@@ -85,6 +108,7 @@ export const useCustomerPortalData = () => {
         customerId ? optionalCustomerRead(() => getCustomerCreditSummary(customerId), undefined) : Promise.resolve(undefined),
         customerId ? optionalCustomerRead(() => getCustomerPcBalanceRecord(customerId), undefined) : Promise.resolve(undefined)
       ]);
+      pcBalanceReadAtRef.current = Date.now();
 
       const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
       const scopedPayments = filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
@@ -155,6 +179,20 @@ export const useCustomerPortalData = () => {
     refreshData();
   }, [refreshData]);
 
+  const refreshPcBalance = useCallback(async () => {
+    const customerId = customer?.id ?? userProfile?.customerId;
+    if (!customerId || !userProfile || !['customer', 'Medical'].includes(userProfile.role)) return;
+    if (Date.now() - pcBalanceReadAtRef.current < PC_BALANCE_READ_DEDUP_MS) return;
+
+    try {
+      const balance = await optionalCustomerRead(() => getCustomerPcBalanceRecord(customerId), undefined);
+      pcBalanceReadAtRef.current = Date.now();
+      if (balance) applyAvailablePcBalance(balance.availablePc);
+    } catch (err) {
+      if (!isPermissionError(err)) setError(err instanceof Error ? err.message : 'Unable to refresh available PC.');
+    }
+  }, [applyAvailablePcBalance, customer?.id, userProfile]);
+
   const invoiceViews = useMemo(
     () => invoices.map((invoice) => calculateDueStatus(invoice, payments, undefined, customer?.tier, settings)),
     [customer?.tier, invoices, payments, settings]
@@ -176,7 +214,8 @@ export const useCustomerPortalData = () => {
     creditSummary,
     loading,
     error,
-    refreshData
+    refreshData,
+    refreshPcBalance
   };
 };
 

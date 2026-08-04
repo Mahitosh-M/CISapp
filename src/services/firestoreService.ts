@@ -1084,6 +1084,7 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
 
   const affectedCustomerIds = [existingInvoice?.customerId, invoice.customerId].filter((customerId): customerId is string => Boolean(customerId));
   await Promise.all([...new Set(affectedCustomerIds)].map((customerId) => syncCustomerFinancialSummary(customerId)));
+  await recalculateProtectedPcForInvoice(invoiceId);
   clearFirestoreSessionCache();
 };
 
@@ -1291,7 +1292,17 @@ const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstand
   };
 };
 
-const creditProtectedPcForPaidInvoice = async (invoiceId: string) => {
+const getLatestInvoicePcChangeAt = (invoice: Invoice, payments: Payment[]) => {
+  return [
+    invoice.updatedAt,
+    invoice.createdAt,
+    ...payments.flatMap((payment) => [payment.updatedAt, payment.createdAt])
+  ]
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => right.localeCompare(left))[0] ?? '';
+};
+
+const recalculateProtectedPcForInvoice = async (invoiceId: string) => {
   if (!invoiceId) return;
 
   const invoiceSnapshot = await getDoc(doc(db, INVOICES, invoiceId));
@@ -1308,9 +1319,9 @@ const creditProtectedPcForPaidInvoice = async (invoiceId: string) => {
   if (!customer) return;
 
   const award = calculateInvoiceApcInfo(invoice, payments, customer.tier, settings);
-  const points = Math.max(0, Math.round(award.earnedApc));
   const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
-  if (points <= 0 || !fullPaymentDate) return;
+  const recalculatedPoints = fullPaymentDate ? Math.max(0, Math.round(award.earnedApc)) : 0;
+  const latestInvoiceChangeAt = getLatestInvoicePcChangeAt(invoice, payments);
 
   const timestamp = nowIso();
   const balanceRef = doc(db, PC_BALANCES, customer.id);
@@ -1321,21 +1332,58 @@ const creditProtectedPcForPaidInvoice = async (invoiceId: string) => {
       transaction.get(ledgerRef),
       transaction.get(balanceRef)
     ]);
-    if (ledgerSnapshot.exists()) return;
 
-    if (balanceSnapshot.exists()) {
-      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+    const balance = balanceSnapshot.exists()
+      ? mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data())
+      : undefined;
+    const previousPoints = ledgerSnapshot.exists()
+      ? Math.max(0, Math.round(numberOrZero(ledgerSnapshot.data().points)))
+      : 0;
+    const ledgerCreatedAt = ledgerSnapshot.exists() ? String(ledgerSnapshot.data().createdAt || '') : '';
+
+    // Any invoice award that existed when protection was saved is part of the
+    // opening recovery amount and must not reduce or duplicate that baseline.
+    if (ledgerCreatedAt && balance?.protectedAt && ledgerCreatedAt <= balance.protectedAt) return;
+
+    // The protected amount is a one-time opening balance. Old invoices without
+    // their own ledger entry are already represented by that opening amount.
+    if (
+      !ledgerSnapshot.exists()
+      && balance?.protectedAt
+      && latestInvoiceChangeAt
+      && latestInvoiceChangeAt <= balance.protectedAt
+    ) {
+      return;
+    }
+
+    if (!ledgerSnapshot.exists() && recalculatedPoints <= 0) return;
+    if (ledgerSnapshot.exists() && previousPoints === recalculatedPoints) return;
+
+    const pointsDelta = recalculatedPoints - previousPoints;
+
+    if (balance) {
+      const nextAvailablePc = balance.availablePc + pointsDelta;
+      const nextIncomingPc = balance.incomingPc + pointsDelta;
+
+      if (nextAvailablePc < 0 || nextIncomingPc < 0) {
+        throw new Error('Invoice PC cannot be reduced below the customer\'s already redeemed or available balance.');
+      }
+
       transaction.update(balanceRef, {
-        availablePc: balance.availablePc + points,
-        incomingPc: balance.incomingPc + points,
+        availablePc: nextAvailablePc,
+        incomingPc: nextIncomingPc,
         lastAwardReferenceId: invoice.id,
         updatedAt: timestamp
       });
     } else {
+      if (ledgerSnapshot.exists()) {
+        throw new Error('The invoice PC ledger exists, but the customer protected PC balance is missing.');
+      }
+
       transaction.set(balanceRef, {
         customerId: customer.id,
-        availablePc: points,
-        incomingPc: points,
+        availablePc: recalculatedPoints,
+        incomingPc: recalculatedPoints,
         redeemedPc: 0,
         protectedAt: timestamp,
         lastAwardReferenceId: invoice.id,
@@ -1343,15 +1391,25 @@ const creditProtectedPcForPaidInvoice = async (invoiceId: string) => {
       });
     }
 
-    transaction.set(ledgerRef, {
-      customerId: customer.id,
-      type: 'on_time_payment',
-      points,
-      reason: `Invoice ${invoice.invoiceNumber || invoice.id} paid on time`,
-      referenceId: invoice.id,
-      month: fullPaymentDate.slice(0, 7),
+    const ledgerPayload = {
+      points: recalculatedPoints,
+      reason: recalculatedPoints > 0
+        ? `Invoice ${invoice.invoiceNumber || invoice.id} paid on time`
+        : `Invoice ${invoice.invoiceNumber || invoice.id} PC recalculated to zero`,
+      month: (fullPaymentDate || timestamp).slice(0, 7),
       createdAt: timestamp
-    });
+    };
+
+    if (ledgerSnapshot.exists()) {
+      transaction.update(ledgerRef, ledgerPayload);
+    } else {
+      transaction.set(ledgerRef, {
+        customerId: customer.id,
+        type: 'on_time_payment',
+        ...ledgerPayload,
+        referenceId: invoice.id
+      });
+    }
   });
 };
 
@@ -1383,7 +1441,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
   });
 
   await syncCustomerFinancialSummary(payment.customerId);
-  await creditProtectedPcForPaidInvoice(allocatedPayment.invoiceId);
+  await recalculateProtectedPcForInvoice(allocatedPayment.invoiceId);
   clearFirestoreSessionCache();
   return paymentRef;
 };
@@ -1393,6 +1451,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
   let affectedCustomerIds: string[] = [payment.customerId];
+  let affectedInvoiceIds: string[] = [payment.invoiceId];
 
   await runTransaction(db, async (transaction) => {
     const paymentSnapshot = await transaction.get(paymentRef);
@@ -1404,6 +1463,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
 
     const oldCustomerId = existingPayment?.customerId || payment.customerId;
     affectedCustomerIds = [...new Set([oldCustomerId, payment.customerId].filter(Boolean))];
+    affectedInvoiceIds = [...new Set([existingPayment?.invoiceId, payment.invoiceId].filter((invoiceId): invoiceId is string => Boolean(invoiceId)))];
     const oldCustomerRef = oldCustomerId ? doc(db, CUSTOMERS, oldCustomerId) : undefined;
     const newCustomerRef = doc(db, CUSTOMERS, payment.customerId);
     const oldCustomerSnapshot = oldCustomerRef ? await transaction.get(oldCustomerRef) : undefined;
@@ -1473,7 +1533,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   });
 
   await Promise.all(affectedCustomerIds.map((customerId) => syncCustomerFinancialSummary(customerId)));
-  await creditProtectedPcForPaidInvoice(allocatedPayment.invoiceId);
+  await Promise.all(affectedInvoiceIds.map((invoiceId) => recalculateProtectedPcForInvoice(invoiceId)));
   clearFirestoreSessionCache();
 };
 
@@ -1524,6 +1584,7 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
   }
 
   await syncCustomerFinancialSummary(deletedPayment?.customerId ?? '');
+  await recalculateProtectedPcForInvoice(deletedPayment?.invoiceId ?? '');
   clearFirestoreSessionCache();
 };
 

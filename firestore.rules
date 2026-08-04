@@ -202,7 +202,8 @@ service cloud.firestore {
         && ((data.type == 'manual_adjustment' && data.points != 0)
           || (data.type == 'redemption' && data.points < 0)
           || (data.type == 'opening_balance' && data.points >= 0)
-          || (!(data.type in ['manual_adjustment', 'redemption', 'opening_balance']) && data.points > 0))
+          || (data.type == 'on_time_payment' && data.points >= 0)
+          || (!(data.type in ['manual_adjustment', 'redemption', 'opening_balance', 'on_time_payment']) && data.points > 0))
         && data.reason is string
         && data.reason.size() <= 160
         && data.referenceId is string
@@ -279,18 +280,60 @@ service cloud.firestore {
         );
     }
 
+    function validTeamInvoicePcLedgerUpdate(entryId, data) {
+      let balancePath = pcBalancePath(data.customerId);
+      let linkedInvoicePath = invoicePath(data.referenceId);
+      let pointsDelta = data.points - resource.data.points;
+      return isTeam()
+        && validLoyaltyLedgerEntry(data)
+        && data.type == 'on_time_payment'
+        && data.points >= 0
+        && data.points <= 1000000
+        && pointsDelta != 0
+        && entryId == data.customerId + "_" + data.referenceId + "_invoice_pc"
+        && data.customerId == resource.data.customerId
+        && data.type == resource.data.type
+        && data.referenceId == resource.data.referenceId
+        && exists(linkedInvoicePath)
+        && get(linkedInvoicePath).data.customerId == data.customerId
+        && exists(balancePath)
+        && existsAfter(balancePath)
+        && getAfter(balancePath).data.availablePc == get(balancePath).data.availablePc + pointsDelta
+        && getAfter(balancePath).data.incomingPc == get(balancePath).data.incomingPc + pointsDelta
+        && getAfter(balancePath).data.redeemedPc == get(balancePath).data.redeemedPc
+        && getAfter(balancePath).data.protectedAt == get(balancePath).data.protectedAt
+        && getAfter(balancePath).data.lastAwardReferenceId == data.referenceId
+        && getAfter(balancePath).data.updatedAt == data.createdAt;
+    }
+
     function validTeamInvoicePcBalance(customerDocId) {
       let invoiceId = request.resource.data.lastAwardReferenceId;
       let ledgerPath = invoicePcLedgerPath(customerDocId, invoiceId);
+      let ledgerPointsDelta = exists(ledgerPath)
+        ? getAfter(ledgerPath).data.points - get(ledgerPath).data.points
+        : getAfter(ledgerPath).data.points;
       return isTeam()
         && validPcBalance(request.resource.data, customerDocId)
         && invoiceId is string
-        && !exists(ledgerPath)
         && existsAfter(ledgerPath)
         && getAfter(ledgerPath).data.customerId == customerDocId
         && getAfter(ledgerPath).data.referenceId == invoiceId
         && getAfter(ledgerPath).data.type == 'on_time_payment'
-        && request.resource.data.updatedAt == getAfter(ledgerPath).data.createdAt;
+        && request.resource.data.updatedAt == getAfter(ledgerPath).data.createdAt
+        && (
+          (
+            !exists(ledgerPath)
+            && getAfter(ledgerPath).data.points > 0
+          )
+          || (
+            exists(ledgerPath)
+            && getAfter(ledgerPath).data.points >= 0
+            && request.resource.data.availablePc == resource.data.availablePc + ledgerPointsDelta
+            && request.resource.data.incomingPc == resource.data.incomingPc + ledgerPointsDelta
+            && request.resource.data.redeemedPc == resource.data.redeemedPc
+            && request.resource.data.protectedAt == resource.data.protectedAt
+          )
+        );
     }
 
     function validRewardItem(data) {
@@ -743,9 +786,12 @@ service cloud.firestore {
 
     match /loyaltyLedger/{entryId} {
       allow read: if isTeam() || ownsCustomerRecord(resource.data);
-      allow create: if (isAdmin() && validLoyaltyLedgerEntry(request.resource.data))
+      allow create: if (isAdmin()
+          && validLoyaltyLedgerEntry(request.resource.data)
+          && (request.resource.data.type != 'on_time_payment' || request.resource.data.points > 0))
         || validTeamInvoicePcLedger(entryId, request.resource.data);
-      allow update, delete: if false;
+      allow update: if validTeamInvoicePcLedgerUpdate(entryId, request.resource.data);
+      allow delete: if false;
     }
 
     match /pcBalances/{customerDocId} {
