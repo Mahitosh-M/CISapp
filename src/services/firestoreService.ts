@@ -1841,6 +1841,49 @@ export const getCustomerPcLedgerEntries = async (customerId: string, limitCount 
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 };
 
+export const reconcileCustomerPcBalance = async (
+  customerId: string,
+  entries: LoyaltyLedgerEntry[],
+  expectedUpdatedAt: string,
+  auditUser?: AuditUser
+) => {
+  requireAdminAudit(auditUser);
+  const balanceRef = doc(db, PC_BALANCES, customerId);
+  let reconciled: PcBalanceRecord | undefined;
+
+  await runTransaction(db, async (transaction) => {
+    const balanceSnapshot = await transaction.get(balanceRef);
+    if (!balanceSnapshot.exists()) return;
+    const current = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+
+    // A concurrent award or redemption wins; the next view will reconcile from fresh history.
+    if (current.updatedAt !== expectedUpdatedAt) {
+      reconciled = current;
+      return;
+    }
+
+    const protectedEntries = entries.filter((entry) => !current.protectedAt || entry.createdAt >= current.protectedAt);
+    const incomingPc = protectedEntries.reduce((sum, entry) => sum + Math.max(0, entry.points), 0);
+    const redeemedPc = protectedEntries.reduce((sum, entry) => sum + Math.max(0, -entry.points), 0);
+    if (redeemedPc > incomingPc) {
+      reconciled = current;
+      return;
+    }
+    const availablePc = Math.max(0, incomingPc - redeemedPc);
+
+    if (incomingPc !== current.incomingPc || redeemedPc !== current.redeemedPc || availablePc !== current.availablePc) {
+      const updatedAt = nowIso();
+      transaction.update(balanceRef, { incomingPc, redeemedPc, availablePc, updatedAt });
+      reconciled = { ...current, incomingPc, redeemedPc, availablePc, updatedAt };
+    } else {
+      reconciled = current;
+    }
+  });
+
+  clearFirestoreSessionCache();
+  return reconciled;
+};
+
 const requireAdminAudit = (auditUser?: AuditUser) => {
   if (auditUser?.role !== 'Admin') throw new Error('Only Admin users can change protected PC balances.');
 };

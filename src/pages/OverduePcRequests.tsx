@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
+import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reconcileCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
 import type { AppSettings, BonusPcRequest, Customer, Invoice, LoyaltyLedgerEntry, OverduePcRequest, Payment, RedemptionRequest } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
@@ -238,15 +238,18 @@ const OverduePcRequests = () => {
     try {
       setLoadingPcView(true);
       setError('');
-      const [invoiceRows, paymentRows, approvedBonusRows, approvedOverdueRows, redemptionRows, protectedBalance, ledgerEntries] = await Promise.all([
+      const [invoiceRows, paymentRows, approvedBonusRows, approvedOverdueRows, redemptionRows, initialProtectedBalance, ledgerEntries] = await Promise.all([
         getInvoicesByCustomerId(customerId),
         getPaymentsByCustomerId(customerId),
         getApprovedBonusPcRequestsForCustomer(customerId, 200),
         getApprovedOverduePcRequestsForCustomer(customerId, 200),
         getRedemptionRequestsForCustomer(customerId, 200),
         getCustomerPcBalanceRecord(customerId),
-        getCustomerPcLedgerEntries(customerId)
+        getCustomerPcLedgerEntries(customerId, 5000)
       ]);
+      const protectedBalance = initialProtectedBalance && auditUser.role === 'Admin'
+        ? await reconcileCustomerPcBalance(customerId, ledgerEntries, initialProtectedBalance.updatedAt, auditUser)
+        : initialProtectedBalance;
       const businessInvoices = getBusinessInvoices(invoiceRows);
       const intelligenceResult = buildCustomerScores([customer], businessInvoices, paymentRows, new Date(), settings)[0];
       const portalCustomer = intelligenceResult ? { ...customer, tier: intelligenceResult.tier } : customer;
@@ -374,7 +377,7 @@ const OverduePcRequests = () => {
       setMessage(`PC ${adjustmentDirection === 'add' ? 'added' : 'deducted'} and recorded in permanent history.`);
       setAdjustmentPoints('');
       setAdjustmentReason('');
-      if (selectedPcCustomerId === adjustmentCustomerId) await handlePcCustomerChange(adjustmentCustomerId);
+      await handlePcCustomerChange(adjustmentCustomerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to adjust PC.');
     } finally {
