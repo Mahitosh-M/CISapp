@@ -58,7 +58,7 @@ export const SCORE_WEIGHTS = {
 };
 
 const ONBOARDING_MIN_TARGET = 4000;
-const EXPECTED_MARGIN_PERCENT = 10;
+export const HEALTHY_INVOICE_MARGIN_PERCENT = 20;
 
 // Tier credit rules are stored with the intelligence result for later Phase 2 due-date work.
 export const TIER_CREDIT_POLICIES: Record<CustomerTier, TierCreditPolicy> = {
@@ -300,13 +300,23 @@ const getSuggestedMonthlySalesTarget = (
   return roundMoney(guidedTarget);
 };
 
-const calculateProfitScore = (actualProfit: number, monthlySalesTarget: number, fallbackScore: number) => {
-  if (actualProfit <= 0) {
+export const calculateInvoiceMarginProfitScore = (
+  invoices: Pick<Invoice, 'totalSales' | 'totalProfit'>[]
+) => {
+  const scoredInvoices = invoices.filter((invoice) => Number.isFinite(invoice.totalSales) && invoice.totalSales > 0);
+  const totalSales = scoredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+
+  if (totalSales <= 0) {
     return 0;
   }
 
-  const targetRollingProfit = Math.max(1, monthlySalesTarget * 2 * (EXPECTED_MARGIN_PERCENT / 100));
-  return capScore((actualProfit / targetRollingProfit) * 100 || fallbackScore);
+  const weightedScore = scoredInvoices.reduce((sum, invoice) => {
+    const marginPercent = (invoice.totalProfit / invoice.totalSales) * 100;
+    const invoiceScore = clamp((marginPercent / HEALTHY_INVOICE_MARGIN_PERCENT) * 100, 0, 100);
+    return sum + invoiceScore * invoice.totalSales;
+  }, 0);
+
+  return capScore(weightedScore / totalSales);
 };
 
 const hasOverdueBeyondAllowed = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
@@ -349,7 +359,7 @@ const applyTierGates = (
     reasons.push('Payment risk caps automatic upgrade at Silver.');
   }
 
-  if (finalTier === 'Tier 1' && (customerMonthlySales < 30000 || paymentDisciplineScore < 90)) {
+  if (finalTier === 'Tier 1' && (customerMonthlySales < 25000 || paymentDisciplineScore < 90)) {
     finalTier = 'Tier 2';
     reasons.push('Score qualifies for Platinum, but sales/payment gate allows Gold.');
   }
@@ -569,9 +579,7 @@ const buildScoreBreakdown = (
     score: profitScore,
     weight: breakdownWeights.profit,
     weightedScore: profitScore * breakdownWeights.profit,
-    description: breakdownWeights.profit > 0
-      ? 'Weighted contribution from target-based profit performance.'
-      : 'Not weighted during onboarding.'
+    description: `Weighted contribution from invoice margins against the ${HEALTHY_INVOICE_MARGIN_PERCENT}% healthy-margin benchmark.`
   },
   {
     key: 'paymentDiscipline',
@@ -653,7 +661,6 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
   });
 
   const highestSales = Math.max(...scoreInputs.map((entry) => entry.totalSales), 1);
-  const highestProfit = Math.max(...scoreInputs.map((entry) => entry.totalProfit), 1);
   const highestAverageOrderValue = Math.max(...scoreInputs.map((entry) => entry.averageOrderValue), 1);
   const segmentRankByCustomerId = new Map(
     [...scoreInputs]
@@ -667,9 +674,7 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
     const activeMonthCount = getActiveMonthCount(entry.allCustomerInvoices);
     const onboardingStage = getOnboardingStage(entry.customer, entry.allCustomerInvoices, activeMonthCount, window.end);
     const isOnboarding = onboardingStage !== 'Stage D';
-    const activeBreakdownWeights = isOnboarding
-      ? { profit: 0, paymentDiscipline: 0.4, frequency: 0.1, sales: 0.2, loyalty: 0.3 }
-      : weights;
+    const activeBreakdownWeights = weights;
     const confidenceFactor = getConfidenceFactor(entry.allCustomerInvoices.length, activeMonthCount);
     const monthlySalesTarget = getSuggestedMonthlySalesTarget(
       entry,
@@ -682,11 +687,7 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
     const fallbackSalesScore = entry.totalSales > 0 ? clamp(Math.round((entry.totalSales / highestSales) * 100), 10, 100) : 0;
     const fallbackFrequencyScore = rateFrequencyScore(entry.invoiceCount, entry.averageOrderValue, highestAverageOrderValue, window);
     const salesScore = calculateSalesPerformanceScore(entry.customerMonthlySales, monthlySalesTarget, fallbackSalesScore);
-    const profitScore = calculateProfitScore(
-      entry.totalProfit,
-      monthlySalesTarget,
-      entry.totalProfit > 0 ? clamp(Math.round((entry.totalProfit / highestProfit) * 100), 10, 100) : 0
-    );
+    const profitScore = calculateInvoiceMarginProfitScore(entry.customerInvoices);
     const baseFrequencyScore = calculateOrderPerformanceScore(
       entry.customerMonthlyOrders,
       monthlyOrderTarget,
@@ -712,7 +713,12 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
         outstandingPenalty
     );
     const onboardingScore = capScore(
-      (paymentDisciplineScore * 0.4 + loyaltyScore * 0.3 + salesScore * 0.2 + frequencyScore * 0.1 - outstandingPenalty) * confidenceFactor
+      (profitScore * weights.profit +
+        paymentDisciplineScore * weights.paymentDiscipline +
+        frequencyScore * weights.frequency +
+        salesScore * weights.sales +
+        loyaltyScore * weights.loyalty -
+        outstandingPenalty) * confidenceFactor
     );
     const intelligenceScore = isOnboarding ? onboardingScore : normalScore;
     const scoreTier = assignTier(intelligenceScore);
