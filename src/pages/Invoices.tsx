@@ -202,27 +202,6 @@ const Invoices = () => {
     return sortByLatestInvoiceNumber(rows);
   }, [customerFilter, customers, invoices, payments, searchText, settings, statusFilter]);
 
-  const editingInvoice = editingInvoiceId ? invoices.find((invoice) => invoice.id === editingInvoiceId) : undefined;
-  const editingCreationPayment = editingInvoice ? getInvoiceCreationPayment(editingInvoice.id) : undefined;
-  const editingOtherPaymentEffect = editingInvoice
-    ? Math.max(0, getPaidAmount(editingInvoice.id) - (editingCreationPayment ? getInvoicePaymentEffect(editingCreationPayment) : 0))
-    : 0;
-  const currentInvoiceOutstanding = editingInvoice
-    ? getPendingAmount(editingInvoice.totalSales, getPaidAmount(editingInvoice.id))
-    : 0;
-  const newInvoiceOutstanding = getPendingAmount(
-    formData.totalSales,
-    editingOtherPaymentEffect + Math.max(0, sameDayPaymentAmount) + Math.max(0, sameDayCashDiscount)
-  );
-  const projectedUsedCredit = Math.max(
-    0,
-    (selectedCreditSummary?.usedCredit ?? 0) - currentInvoiceOutstanding + newInvoiceOutstanding
-  );
-  const suggestedCreditLimit = selectedCreditSummary?.suggestedCreditLimit
-    ?? selectedCreditSummary?.approvedCreditLimit
-    ?? 0;
-  const projectedOverLimit = Math.max(0, projectedUsedCredit - suggestedCreditLimit);
-
   const recalculateTotals = (nextFormData: InvoiceFormData): InvoiceFormData => {
     const totalSales = Number(nextFormData.salesAmount) || 0;
     const costAmount = Number(nextFormData.costAmount) || 0;
@@ -658,25 +637,23 @@ const Invoices = () => {
             <input style={inputStyle} type="number" min="0" value={formData.transportAmount} onChange={(event) => handleFieldChange('transportAmount', event.target.value)} />
           </label>
 
-          <div style={{ ...labelStyle, gridColumn: isMobile ? 'auto' : 'span 2' }}>
-            Credit Advisory
-            <div style={{ ...inputStyle, height: 'auto', display: 'grid', gap: 7, background: projectedOverLimit > 0 ? '#FDECEC' : '#ECFDF3' }}>
-              {loadingCreditLimit ? 'Loading...' : !formData.customerId ? 'Select customer' : (
-                <>
-                  <div>Suggested: <strong>{formatMoney(suggestedCreditLimit)}</strong></div>
-                  <div>Used: <strong>{formatMoney(selectedCreditSummary?.usedCredit ?? 0)}</strong></div>
-                  <div>Available: <strong>{formatMoney(selectedCreditSummary?.availableCredit ?? 0)}</strong></div>
-                  <div>New invoice exposure: <strong>{formatMoney(newInvoiceOutstanding)}</strong></div>
-                  <div>Projected over limit: <strong>{formatMoney(projectedOverLimit)}</strong></div>
-                  <div>Status: <strong>{selectedCreditSummary?.creditStatus ?? 'starter'}</strong></div>
-                  {selectedCreditSummary?.oldestOverdueInvoice ? (
-                    <div>Oldest overdue: <strong>{selectedCreditSummary.oldestOverdueInvoice}</strong></div>
-                  ) : null}
-                  {projectedOverLimit > 0 ? (
-                    <div style={{ color: '#B42318', fontWeight: 900 }}>This invoice exceeds the advisory limit. Staff/Admin may still continue.</div>
-                  ) : null}
-                </>
-              )}
+          <div style={labelStyle}>
+            Credit Limit
+            <div style={{
+              ...inputStyle,
+              minHeight: 42,
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: 17,
+              fontWeight: 900,
+              color: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#B42318' : '#166534',
+              background: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#FDECEC' : '#ECFDF3'
+            }}>
+              {loadingCreditLimit
+                ? 'Loading...'
+                : formData.customerId
+                  ? formatMoney(selectedCreditSummary?.availableCredit ?? 0)
+                  : 'Select customer'}
             </div>
           </div>
 
