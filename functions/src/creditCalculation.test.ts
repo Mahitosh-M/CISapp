@@ -5,7 +5,8 @@ import { calculateCustomerCredit } from './creditCalculation';
 const settings = {
   creditDays: { 'Tier 1': 30, 'Tier 2': 15, 'Tier 3': 0, 'Tier 4': 0 },
   paymentBuffers: { 'Tier 1': 3, 'Tier 2': 0, 'Tier 3': 0, 'Tier 4': 0 },
-  creditPolicy: { starterLimitCap: 600, overdueGraceDays: 3 }
+  creditPolicy: { starterLimitCap: 10000, overdueGraceDays: 0 },
+  overduePolicy: { seriousSalesRatioPercent: 15, seriousInvoiceCount: 2, seriousDays: 30 }
 };
 
 const invoice = (id: string, total: number, date: string, dueDate: string, extra = {}) => ({
@@ -55,7 +56,7 @@ test('calculates established limit and caps an increase at 20 percent', () => {
   assert.equal(result.profile.creditLimitApprovalStatus, 'approved');
 });
 
-test('uses the starter formula and configured cap with fewer than three paid invoices', () => {
+test('uses the two-completed-credit-invoice starter step', () => {
   const invoices = [
     invoice('i1', 1000, '2026-07-01', '2026-07-20'),
     invoice('i2', 2000, '2026-06-01', '2026-07-01')
@@ -66,8 +67,8 @@ test('uses the starter formula and configured cap with fewer than three paid inv
   ];
   const result = calculate(invoices, payments);
 
-  assert.equal(result.profile.calculatedCreditLimit, 600);
-  assert.equal(result.profile.approvedCreditLimit, 600);
+  assert.equal(result.profile.calculatedCreditLimit, 1125);
+  assert.equal(result.profile.approvedCreditLimit, 1125);
   assert.equal(result.profile.creditStatus, 'starter');
   assert.equal(result.profile.creditLimitApprovalStatus, 'approved');
 });
@@ -97,7 +98,7 @@ test('keeps an approved manual starter limit when payment history is unavailable
   assert.equal(result.profile.availableCredit, 500);
 });
 
-test('uses complete history and ignores the legacy rolling-window option', () => {
+test('uses recent capacity while retaining lifetime invoice confidence', () => {
   const invoices = [
     invoice('i1', 1000, '2026-07-01', '2026-07-20'),
     invoice('i2', 1000, '2026-06-15', '2026-07-15'),
@@ -110,11 +111,11 @@ test('uses complete history and ignores the legacy rolling-window option', () =>
   const threeMonthResult = calculate(invoices, payments, {}, 90);
 
   assert.equal(ignoredTwoMonthResult.profile.creditHistoryDays, 90);
-  assert.equal(ignoredTwoMonthResult.profile.totalCreditInvoiceAmountInLookback, 6000);
+  assert.equal(ignoredTwoMonthResult.profile.totalCreditInvoiceAmountInLookback, 3000);
   assert.equal(ignoredTwoMonthResult.profile.completedCreditInvoices, 4);
   assert.equal(ignoredTwoMonthResult.profile.creditStatus, 'active');
   assert.equal(threeMonthResult.profile.creditHistoryDays, ignoredTwoMonthResult.profile.creditHistoryDays);
-  assert.equal(threeMonthResult.profile.totalCreditInvoiceAmountInLookback, 6000);
+  assert.equal(threeMonthResult.profile.totalCreditInvoiceAmountInLookback, 3000);
   assert.equal(threeMonthResult.profile.averageMonthlyCreditSales, ignoredTwoMonthResult.profile.averageMonthlyCreditSales);
 });
 
@@ -130,11 +131,11 @@ test('rewards deeper completed-invoice history with bounded history factors', ()
   assert.equal(buildHistory(36).profile.historyFactor, 1.15);
 });
 
-test('applies grace only after the tier buffer for invoices without a stored due date', () => {
+test('does not add buffer or overdue grace to an invoice due date', () => {
   const result = calculate([
     invoice('buffered', 500, '2026-06-26', '')
   ], []);
 
-  assert.equal(result.profile.hasOverdueBeyondGrace, false);
-  assert.notEqual(result.profile.creditStatus, 'hold');
+  assert.equal(result.profile.hasOverdueBeyondGrace, true);
+  assert.equal(result.profile.creditStatus, 'hold');
 });

@@ -97,13 +97,11 @@ export const buildMonthlyCustomerStats = (
     .filter((view) => view.outstandingAmount > 0 && view.daysRemaining < 0)
     .reduce((sum, view) => sum + view.outstandingAmount, 0);
   const apcEligibleInvoices = monthlyInvoices.filter((invoice) => calculateInvoiceApcInfo(invoice, payments, customer.tier, activeSettings).earnedApc > 0);
-  const apcEligibleSales = apcEligibleInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
   const invoiceApc = apcEligibleInvoices.reduce((sum, invoice) => sum + calculateInvoiceApcInfo(invoice, payments, customer.tier, activeSettings).earnedApc, 0);
-  const targetBonus = apcEligibleSales >= targetSettings.monthlySalesTarget && targetSettings.monthlySalesTarget > 0 ? activeSettings.loyaltySettings.monthlyTargetBonus : 0;
-  const frequencyBonus = apcEligibleInvoices.length >= targetSettings.monthlyOrderTarget && targetSettings.monthlyOrderTarget > 0 ? activeSettings.loyaltySettings.orderFrequencyBonus : 0;
   const basePcEarned = Math.round(Math.max(0, invoiceApc));
-  const bonusPcEarned = Math.round(Math.max(0, targetBonus + frequencyBonus));
-  const pointsEarned = Math.round(Math.max(0, invoiceApc + targetBonus + frequencyBonus));
+  // Automatic bonuses are posted only through idempotent bonus requests.
+  const bonusPcEarned = 0;
+  const pointsEarned = basePcEarned;
   const currentLevel = getPartnerLevelForTier(customer.tier);
 
   return {

@@ -1,5 +1,5 @@
 // Dates are stored as yyyy-mm-dd strings so Firestore filtering and form inputs stay simple.
-export const getTodayDateString = () => new Date().toISOString().slice(0, 10);
+export const getTodayDateString = () => formatDateInputValue(new Date());
 
 const formatDateInputValue = (date: Date) => {
   const year = date.getFullYear();
@@ -34,7 +34,7 @@ export const addDaysToDateString = (dateString: string, days: number) => {
   }
 
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  return formatDateInputValue(date);
 };
 
 export const getPrevious30DaysRange = () => {
@@ -43,8 +43,8 @@ export const getPrevious30DaysRange = () => {
   fromDate.setDate(today.getDate() - 30);
 
   return {
-    fromDate: fromDate.toISOString().slice(0, 10),
-    toDate: today.toISOString().slice(0, 10)
+    fromDate: formatDateInputValue(fromDate),
+    toDate: formatDateInputValue(today)
   };
 };
 
@@ -142,7 +142,7 @@ export const getDateRangeForReportPeriod = (period: 'current_month' | 'last_mont
 export const getMonthsAgoDateString = (monthsAgo: number) => {
   const today = new Date();
   const date = new Date(today.getFullYear(), today.getMonth() - monthsAgo, today.getDate());
-  return date.toISOString().slice(0, 10);
+  return formatDateInputValue(date);
 };
 
 export const isDateInRange = (dateString: string, fromDate: string, toDate: string) => {

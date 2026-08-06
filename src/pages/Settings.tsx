@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
+import { RefreshCw } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import {
   getAppSettings,
@@ -9,6 +10,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import type { AppSettings, TargetTierKey } from '../types';
 import type { AppSettingsToggleField } from '../services/firestoreService';
+import { getDerivedDataMigrationStatus, runDerivedDataMigration } from '../services/migrationService';
+import type { DerivedDataMigrationStatus } from '../services/migrationService';
 import { DEFAULT_SETTINGS, isScoringWeightTotalValid, mergeWithDefaultSettings, validateAppSettings } from '../utils/settings';
 import { CUSTOMER_TIERS, getTierDisplayName } from '../utils/tiers';
 
@@ -99,6 +102,8 @@ const Settings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingToggle, setSavingToggle] = useState<AppSettingsToggleField | null>(null);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState<DerivedDataMigrationStatus>();
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const { userProfile } = useAuth();
@@ -124,6 +129,13 @@ const Settings = () => {
   useEffect(() => {
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (userProfile?.role !== 'Admin') return;
+    void getDerivedDataMigrationStatus()
+      .then(setMigrationStatus)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load migration status.'));
+  }, [userProfile?.role]);
 
   const settingsValidation = useMemo(() => validateAppSettings(settings), [settings]);
   const hasValidScoringTotal = isScoringWeightTotalValid(settingsValidation.scoringWeightTotal);
@@ -156,7 +168,7 @@ const Settings = () => {
       setSaving(true);
       setError('');
       await updateAppSettings(settings, auditUser);
-      setMessage('Settings saved successfully. New invoices, intelligence, reports, gifts, and overdue checks will use the updated rules.');
+      setMessage('Settings saved successfully. New invoices, intelligence, gifts, and overdue checks will use the updated rules.');
       await loadSettings();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save settings.');
@@ -198,16 +210,6 @@ const Settings = () => {
     }));
   };
 
-  const handleStaffPermissionChange = (field: keyof AppSettings['staffPermissions'], value: boolean) => {
-    setSettings((current) => ({
-      ...current,
-      staffPermissions: {
-        ...current.staffPermissions,
-        [field]: value
-      }
-    }));
-  };
-
   const handleTargetSettingChange = (
     tierKey: TargetTierKey,
     field: keyof AppSettings['targetSettings'][TargetTierKey],
@@ -230,6 +232,31 @@ const Settings = () => {
     setSettings((current) => ({
       ...current,
       targetSettings: DEFAULT_SETTINGS.targetSettings
+    }));
+  };
+
+  const handleDerivedDataMigration = async () => {
+    try {
+      setMigrating(true);
+      setError('');
+      setMessage('');
+      const completed = await runDerivedDataMigration(auditUser, setMigrationStatus);
+      setMigrationStatus(completed);
+      setMessage(`Historical migration completed: ${completed.updatedInvoices} invoice terms, ${completed.processedCustomers} customer summaries, and ${completed.processedBusinessMonths} business months processed.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to run historical migration. Run it again to resume.');
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const handleOverduePolicyChange = (field: keyof AppSettings['overduePolicy'], value: string) => {
+    setSettings((current) => ({
+      ...current,
+      overduePolicy: {
+        ...current.overduePolicy,
+        [field]: Math.max(0, Number(value) || 0)
+      }
     }));
   };
 
@@ -330,8 +357,8 @@ const Settings = () => {
                 type="number"
                 min="0"
                 step="0.1"
+                readOnly
                 value={settings.giftPercentages[tier]}
-                onChange={(event) => updateNestedNumber('giftPercentages', tier, event.target.value)}
               />
             </label>
           ))}
@@ -376,23 +403,23 @@ const Settings = () => {
           <div style={gridStyle}>
           <label style={labelStyle}>
             Profit Weight %
-            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.profit} onChange={(event) => updateNestedNumber('scoringWeights', 'profit', event.target.value)} />
+            <input style={inputStyle} type="number" readOnly value={settings.scoringWeights.profit} />
           </label>
           <label style={labelStyle}>
             Payment Discipline %
-            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.paymentDiscipline} onChange={(event) => updateNestedNumber('scoringWeights', 'paymentDiscipline', event.target.value)} />
+            <input style={inputStyle} type="number" readOnly value={settings.scoringWeights.paymentDiscipline} />
           </label>
           <label style={labelStyle}>
             Frequency %
-            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.frequency} onChange={(event) => updateNestedNumber('scoringWeights', 'frequency', event.target.value)} />
+            <input style={inputStyle} type="number" readOnly value={settings.scoringWeights.frequency} />
           </label>
           <label style={labelStyle}>
             Sales %
-            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.sales} onChange={(event) => updateNestedNumber('scoringWeights', 'sales', event.target.value)} />
+            <input style={inputStyle} type="number" readOnly value={settings.scoringWeights.sales} />
           </label>
           <label style={labelStyle}>
             Loyalty %
-            <input style={inputStyle} type="number" min="0" step="0.1" value={settings.scoringWeights.loyalty} onChange={(event) => updateNestedNumber('scoringWeights', 'loyalty', event.target.value)} />
+            <input style={inputStyle} type="number" readOnly value={settings.scoringWeights.loyalty} />
           </label>
           </div>
 
@@ -417,6 +444,31 @@ const Settings = () => {
             ))}
           </div>
         ) : null}
+        </SettingsSection>
+
+        <SettingsSection title="Overdue Risk Thresholds">
+          <div style={gridStyle}>
+            {([
+              ['minorSalesRatioPercent', 'Minor sales ratio %'],
+              ['seriousSalesRatioPercent', 'Serious sales ratio %'],
+              ['materialDays', 'Material overdue days'],
+              ['seriousDays', 'Serious overdue days'],
+              ['seriousInvoiceCount', 'Serious invoice count'],
+              ['repeatedEventCount', 'Repeated event count']
+            ] as [keyof AppSettings['overduePolicy'], string][]).map(([field, label]) => (
+              <label key={field} style={labelStyle}>
+                {label}
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="0"
+                  step={field.includes('Percent') ? '0.1' : '1'}
+                  value={settings.overduePolicy[field]}
+                  onChange={(event) => handleOverduePolicyChange(field, event.target.value)}
+                />
+              </label>
+            ))}
+          </div>
         </SettingsSection>
 
         <SettingsSection title="Partner Level Monthly Targets">
@@ -530,18 +582,25 @@ const Settings = () => {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="Staff Permissions">
-          <div style={gridStyle}>
-          <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input
-              type="checkbox"
-              checked={settings.staffPermissions.canViewReports}
-              onChange={(event) => handleStaffPermissionChange('canViewReports', event.target.checked)}
-            />
-            Staff can view reports
-          </label>
-          </div>
-        </SettingsSection>
+        {userProfile?.role === 'Admin' ? (
+          <SettingsSection title="Data Maintenance">
+            <div style={{ display: 'grid', gap: 8, color: '#D7DEEA', fontSize: 13 }}>
+              <div>Migration: <strong style={{ color: '#FFFFFF' }}>{migrationStatus?.phase ?? 'not_started'}</strong></div>
+              <div>Invoices checked: <strong style={{ color: '#FFFFFF' }}>{migrationStatus?.processedInvoices ?? 0}</strong></div>
+              <div>Customers rebuilt: <strong style={{ color: '#FFFFFF' }}>{migrationStatus?.processedCustomers ?? 0}</strong></div>
+              <div>Business months rebuilt: <strong style={{ color: '#FFFFFF' }}>{migrationStatus?.processedBusinessMonths ?? 0}</strong></div>
+            </div>
+            <button
+              type="button"
+              disabled={migrating || migrationStatus?.phase === 'complete'}
+              onClick={handleDerivedDataMigration}
+              style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+            >
+              <RefreshCw size={16} />
+              {migrating ? 'Rebuilding stored data...' : migrationStatus?.phase === 'complete' ? 'Migration Complete' : migrationStatus ? 'Resume Migration' : 'Run Migration'}
+            </button>
+          </SettingsSection>
+        ) : null}
 
         <button type="submit" disabled={saving || !settingsValidation.isValid} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 18 }}>
           {saving ? 'Saving...' : 'Save Settings'}

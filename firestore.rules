@@ -275,7 +275,7 @@ service cloud.firestore {
             && getAfter(balancePath).data.availablePc == data.points
             && getAfter(balancePath).data.incomingPc == data.points
             && getAfter(balancePath).data.redeemedPc == 0
-            && getAfter(balancePath).data.protectedAt == data.createdAt
+            && getAfter(balancePath).data.protectedAt == ''
           )
         );
     }
@@ -463,7 +463,17 @@ service cloud.firestore {
     }
 
     function isBonusPcType(type) {
-      return type in ['new_customer', 'payment', 'purchase_target', 'referral'];
+      return type in ['monthly_target', 'clean_payment_month', 'new_customer', 'referral'];
+    }
+
+    function fixedBonusPc(type) {
+      return type == 'monthly_target' || type == 'clean_payment_month'
+        ? 5
+        : type == 'new_customer'
+          ? 20
+          : type == 'referral'
+            ? 50
+            : -1;
     }
 
     function validBonusPcRequest(data) {
@@ -494,9 +504,9 @@ service cloud.firestore {
         && data.referenceId is string
         && data.referenceId.size() <= 160
         && data.suggestedCoins is number
-        && data.suggestedCoins >= 0
+        && data.suggestedCoins == fixedBonusPc(data.bonusType)
         && data.approvedCoins is number
-        && data.approvedCoins >= 0
+        && data.approvedCoins in [0, fixedBonusPc(data.bonusType)]
         && data.status in ['Pending', 'Approved', 'Rejected']
         && data.generatedAt is string
         && validOptionalString(data, 'reviewedAt', 40)
@@ -560,20 +570,28 @@ service cloud.firestore {
           'tier',
           'creditDays',
           'currentOutstanding',
-          'confirmedUninvoicedCreditOrders',
           'creditHistoryDays',
           'totalCreditInvoiceAmountInLookback',
           'totalCreditInvoiceAmountLast90Days',
           'averageMonthlyCreditSales',
+          'recentMonthlyCompletedCreditSales',
+          'representativeInvoiceValue',
+          'effectiveCycleDays',
           'baseCreditLimit',
           'calculatedCreditLimit',
           'approvedCreditLimit',
           'availableCredit',
+          'overLimitAmount',
           'paymentFactor',
           'historyFactor',
+          'creditPaymentScore',
+          'weightedLateDays',
           'onTimePaymentPercentage',
           'completedCreditInvoices',
           'overdueAmount',
+          'oldestOverdueInvoice',
+          'oldestOverdueDate',
+          'oldestOverdueDays',
           'hasOverdueBeyondGrace',
           'creditStatus',
           'creditLimitApprovalStatus',
@@ -583,6 +601,7 @@ service cloud.firestore {
           'lastCreditReviewReason',
           'manualHold',
           'manualStarterLimit',
+          'limitSource',
           'creditOverride',
           'updatedAt'
         ])
@@ -596,14 +615,19 @@ service cloud.firestore {
         && data.creditHistoryDays in [60, 90]
         && data.currentOutstanding is number
         && data.currentOutstanding >= 0
-        && data.confirmedUninvoicedCreditOrders is number
-        && data.confirmedUninvoicedCreditOrders >= 0
         && data.totalCreditInvoiceAmountInLookback is number
         && data.totalCreditInvoiceAmountInLookback >= 0
         && data.totalCreditInvoiceAmountLast90Days is number
         && data.totalCreditInvoiceAmountLast90Days >= 0
         && data.averageMonthlyCreditSales is number
         && data.averageMonthlyCreditSales >= 0
+        && data.recentMonthlyCompletedCreditSales is number
+        && data.recentMonthlyCompletedCreditSales >= 0
+        && data.representativeInvoiceValue is number
+        && data.representativeInvoiceValue >= 0
+        && data.effectiveCycleDays is number
+        && data.effectiveCycleDays >= 3
+        && data.effectiveCycleDays <= 20
         && data.baseCreditLimit is number
         && data.baseCreditLimit >= 0
         && data.calculatedCreditLimit is number
@@ -612,10 +636,17 @@ service cloud.firestore {
         && data.approvedCreditLimit >= 0
         && data.availableCredit is number
         && data.availableCredit >= 0
+        && data.overLimitAmount is number
+        && data.overLimitAmount >= 0
         && data.paymentFactor is number
         && data.paymentFactor >= 0
         && data.historyFactor is number
         && data.historyFactor >= 0
+        && data.creditPaymentScore is number
+        && data.creditPaymentScore >= 0
+        && data.creditPaymentScore <= 100
+        && data.weightedLateDays is number
+        && data.weightedLateDays >= 0
         && data.onTimePaymentPercentage is number
         && data.onTimePaymentPercentage >= 0
         && data.onTimePaymentPercentage <= 100
@@ -623,6 +654,11 @@ service cloud.firestore {
         && data.completedCreditInvoices >= 0
         && data.overdueAmount is number
         && data.overdueAmount >= 0
+        && data.oldestOverdueInvoice is string
+        && data.oldestOverdueInvoice.size() <= 80
+        && (data.oldestOverdueDate == null || (data.oldestOverdueDate is string && data.oldestOverdueDate.size() == 10))
+        && data.oldestOverdueDays is number
+        && data.oldestOverdueDays >= 0
         && data.hasOverdueBeyondGrace is bool
         && data.creditStatus in ['starter', 'active', 'hold', 'disabled']
         && data.creditLimitApprovalStatus in ['pending_starter', 'pending_calculated', 'approved', 'rejected']
@@ -634,19 +670,45 @@ service cloud.firestore {
         && data.lastCreditReviewReason.size() > 0
         && data.lastCreditReviewReason.size() <= 500
         && data.manualHold is bool
+        && data.limitSource is string
+        && data.limitSource.size() > 0
+        && data.limitSource.size() <= 80
         && data.updatedAt is string
         && data.updatedAt.size() <= 40
-        && (!('manualStarterLimit' in data) || (data.manualStarterLimit is number && data.manualStarterLimit >= 0))
+        && (!('manualStarterLimit' in data) || (data.manualStarterLimit is number && data.manualStarterLimit >= 0 && data.manualStarterLimit <= 10000))
         && (!('creditOverride' in data) || validCreditOverride(data.creditOverride));
+    }
+
+    function staffPreservesCreditControls(data) {
+      return (
+          (!('manualStarterLimit' in resource.data) && !('manualStarterLimit' in data))
+          || ('manualStarterLimit' in resource.data && 'manualStarterLimit' in data && data.manualStarterLimit == resource.data.manualStarterLimit)
+          || ('manualStarterLimit' in resource.data && resource.data.manualStarterLimit > 10000 && data.manualStarterLimit == 10000)
+        )
+        && (
+          (!('creditOverride' in resource.data) && !('creditOverride' in data))
+          || ('creditOverride' in resource.data && 'creditOverride' in data && data.creditOverride == resource.data.creditOverride)
+        )
+        && (
+          (('manualHold' in resource.data) && data.manualHold == resource.data.manualHold)
+          || (!('manualHold' in resource.data) && data.manualHold == false)
+        );
     }
 
     function validCreditSummary(data, customerDocId) {
       return data.keys().hasOnly([
           'customerId',
+          'suggestedCreditLimit',
+          'calculatedCreditLimit',
           'approvedCreditLimit',
           'availableCredit',
           'usedCredit',
+          'overLimitAmount',
           'creditDays',
+          'limitSource',
+          'oldestOverdueInvoice',
+          'oldestOverdueDate',
+          'oldestOverdueDays',
           'nextInvoiceDueDate',
           'nextInvoiceDueAmount',
           'creditStatus',
@@ -654,13 +716,26 @@ service cloud.firestore {
           'updatedAt'
         ])
         && data.customerId == customerDocId
+        && data.suggestedCreditLimit is number
+        && data.suggestedCreditLimit >= 0
+        && data.calculatedCreditLimit is number
+        && data.calculatedCreditLimit >= 0
         && (!('approvedCreditLimit' in data) || (data.approvedCreditLimit is number && data.approvedCreditLimit >= 0))
         && data.availableCredit is number
         && data.availableCredit >= 0
         && data.usedCredit is number
         && data.usedCredit >= 0
+        && data.overLimitAmount is number
+        && data.overLimitAmount >= 0
         && data.creditDays is int
         && data.creditDays >= 0
+        && data.limitSource is string
+        && data.limitSource.size() <= 80
+        && data.oldestOverdueInvoice is string
+        && data.oldestOverdueInvoice.size() <= 80
+        && (data.oldestOverdueDate == null || (data.oldestOverdueDate is string && data.oldestOverdueDate.size() == 10))
+        && data.oldestOverdueDays is number
+        && data.oldestOverdueDays >= 0
         && (data.nextInvoiceDueDate == null || (data.nextInvoiceDueDate is string && data.nextInvoiceDueDate.size() == 10))
         && (data.nextInvoiceDueAmount == null || (data.nextInvoiceDueAmount is number && data.nextInvoiceDueAmount >= 0))
         && data.creditStatus in ['starter', 'active', 'hold', 'disabled']
@@ -694,6 +769,147 @@ service cloud.firestore {
         && data.reason is string
         && data.reason.size() > 0
         && data.reason.size() <= 500;
+    }
+
+    function validInvoiceCounter(data) {
+      return data.keys().hasOnly(['kind', 'prefix', 'scope', 'sequence', 'updatedAt'])
+        && data.kind == 'invoice'
+        && data.prefix is string
+        && data.prefix.size() > 0
+        && data.prefix.size() <= 40
+        && data.scope is string
+        && data.scope.size() > 0
+        && data.scope.size() <= 40
+        && data.sequence is int
+        && data.sequence > 0
+        && data.updatedAt is string
+        && data.updatedAt.size() <= 40;
+    }
+
+    function validIntelligenceSummary(data, customerDocId) {
+      return data.keys().hasOnly([
+          'customerId', 'customerName', 'customerArea', 'customerMobile',
+          'tier', 'storedTier', 'creditDays', 'creditBufferDays', 'creditPolicyLabel',
+          'totalSales', 'totalProfit', 'totalPayments', 'outstanding', 'invoiceCount',
+          'averageOrderValue', 'monthlySalesTarget', 'customerMonthlySales', 'salesTargetAchievement',
+          'monthlyOrderTarget', 'customerMonthlyOrders', 'orderTargetAchievement', 'insights',
+          'frequencyScore', 'paymentDisciplineScore', 'salesScore', 'profitScore', 'loyaltyScore',
+          'intelligenceScore', 'giftBudget', 'rank', 'previousRank', 'previousScore', 'previousTier',
+          'movement', 'movementReason', 'riskLevel', 'recommendedAction', 'overdueStatus',
+          'tierCapReason', 'isOnboarding', 'onboardingStage', 'confidenceFactor',
+          'scoreBreakdown', 'calculatedAt'
+        ])
+        && data.customerId == customerDocId
+        && data.customerName is string
+        && data.customerName.size() > 0
+        && data.customerName.size() <= 140
+        && data.customerArea is string
+        && data.customerArea.size() <= 140
+        && data.customerMobile is string
+        && data.customerMobile.size() <= 30
+        && isCustomerTier(data.tier)
+        && isCustomerTier(data.storedTier)
+        && data.creditDays is number
+        && data.creditDays >= 0
+        && data.creditBufferDays is number
+        && data.creditBufferDays >= 0
+        && data.creditPolicyLabel is string
+        && data.creditPolicyLabel.size() <= 100
+        && data.totalSales is number
+        && data.totalProfit is number
+        && data.totalPayments is number
+        && data.outstanding is number
+        && data.outstanding >= 0
+        && data.invoiceCount is number
+        && data.invoiceCount >= 0
+        && data.averageOrderValue is number
+        && data.monthlySalesTarget is number
+        && data.customerMonthlySales is number
+        && data.salesTargetAchievement is number
+        && data.monthlyOrderTarget is number
+        && data.customerMonthlyOrders is number
+        && data.orderTargetAchievement is number
+        && data.insights is list
+        && data.insights.size() <= 12
+        && data.frequencyScore is number
+        && data.frequencyScore >= 0 && data.frequencyScore <= 100
+        && data.paymentDisciplineScore is number
+        && data.paymentDisciplineScore >= 0 && data.paymentDisciplineScore <= 100
+        && data.salesScore is number
+        && data.salesScore >= 0 && data.salesScore <= 100
+        && data.profitScore is number
+        && data.profitScore >= 0 && data.profitScore <= 100
+        && data.loyaltyScore is number
+        && data.loyaltyScore >= 0 && data.loyaltyScore <= 100
+        && data.intelligenceScore is number
+        && data.intelligenceScore >= 0 && data.intelligenceScore <= 100
+        && data.giftBudget is number
+        && data.giftBudget >= 0
+        && data.rank is number
+        && data.rank >= 0
+        && (!('previousRank' in data) || data.previousRank is number)
+        && (!('previousScore' in data) || data.previousScore is number)
+        && (!('previousTier' in data) || isCustomerTier(data.previousTier))
+        && data.movement in ['Promoted', 'Demoted', 'Stable', 'New']
+        && data.movementReason is string
+        && data.movementReason.size() <= 500
+        && data.riskLevel in ['Low', 'Medium', 'High']
+        && data.recommendedAction is string
+        && data.recommendedAction.size() <= 500
+        && data.overdueStatus is string
+        && data.overdueStatus.size() <= 160
+        && validOptionalString(data, 'tierCapReason', 500)
+        && data.isOnboarding is bool
+        && data.onboardingStage in ['None', 'Stage A', 'Stage B', 'Stage C', 'Stage D']
+        && data.confidenceFactor is number
+        && data.confidenceFactor >= 0 && data.confidenceFactor <= 1
+        && data.scoreBreakdown is list
+        && data.scoreBreakdown.size() == 5
+        && data.calculatedAt is string
+        && data.calculatedAt.size() <= 40;
+    }
+
+    function validCustomerMonthlySnapshot(data, snapshotId) {
+      return data.keys().hasOnly([
+          'customerId', 'month', 'totalSales', 'totalProfit', 'invoiceCount',
+          'paymentsReceived', 'needsBackfill', 'updatedAt'
+        ])
+        && snapshotId == data.customerId + '_' + data.month
+        && data.customerId is string
+        && data.customerId.size() > 0
+        && data.customerId.size() <= 160
+        && data.month is string
+        && data.month.size() == 7
+        && data.totalSales is number
+        && data.totalSales >= 0
+        && data.totalProfit is number
+        && data.invoiceCount is number
+        && data.invoiceCount >= 0
+        && data.paymentsReceived is number
+        && data.paymentsReceived >= 0
+        && data.needsBackfill is bool
+        && data.updatedAt is string
+        && data.updatedAt.size() <= 40;
+    }
+
+    function validBusinessMonthlySnapshot(data, snapshotId) {
+      return data.keys().hasOnly([
+          'month', 'totalSales', 'totalProfit', 'invoiceCount',
+          'paymentsReceived', 'needsBackfill', 'updatedAt'
+        ])
+        && snapshotId == data.month
+        && data.month is string
+        && data.month.size() == 7
+        && data.totalSales is number
+        && data.totalSales >= 0
+        && data.totalProfit is number
+        && data.invoiceCount is number
+        && data.invoiceCount >= 0
+        && data.paymentsReceived is number
+        && data.paymentsReceived >= 0
+        && data.needsBackfill is bool
+        && data.updatedAt is string
+        && data.updatedAt.size() <= 40;
     }
 
     match /users/{userId} {
@@ -743,17 +959,64 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /counters/{counterId} {
+      allow get: if isTeam();
+      allow list: if false;
+      allow create: if isTeam()
+        && validInvoiceCounter(request.resource.data);
+      allow update: if isTeam()
+        && validInvoiceCounter(request.resource.data)
+        && request.resource.data.kind == resource.data.kind
+        && request.resource.data.prefix == resource.data.prefix
+        && request.resource.data.scope == resource.data.scope
+        && request.resource.data.sequence == resource.data.sequence + 1;
+      allow delete: if false;
+    }
+
     match /customerCreditProfiles/{customerDocId} {
-      allow read: if isAdmin();
-      allow create, update: if isAdmin() && validCreditProfile(request.resource.data, customerDocId);
+      allow get: if isTeam();
+      allow list: if isAdmin();
+      allow create: if validCreditProfile(request.resource.data, customerDocId)
+        && (
+          isAdmin()
+          || (isStaff()
+            && request.resource.data.manualHold == false
+            && !('manualStarterLimit' in request.resource.data)
+            && !('creditOverride' in request.resource.data))
+        );
+      allow update: if validCreditProfile(request.resource.data, customerDocId)
+        && (isAdmin() || (isStaff() && staffPreservesCreditControls(request.resource.data)));
       allow delete: if isAdmin();
     }
 
     match /customerCreditSummaries/{customerDocId} {
       allow get: if isTeam() || (isCustomer() && customerDocId == customerId());
       allow list: if isTeam();
-      allow create, update: if isAdmin() && validCreditSummary(request.resource.data, customerDocId);
+      allow create, update: if isTeam() && validCreditSummary(request.resource.data, customerDocId);
       allow delete: if isAdmin();
+    }
+
+    match /customerIntelligenceSummaries/{customerDocId} {
+      allow get: if isTeam() || (isCustomer() && customerDocId == customerId());
+      allow list: if isTeam();
+      allow create, update: if isTeam() && validIntelligenceSummary(request.resource.data, customerDocId);
+      allow delete: if isAdmin();
+    }
+
+    match /customerMonthlySnapshots/{snapshotId} {
+      allow read: if isTeam() || ownsCustomerRecord(resource.data);
+      allow create, update: if isTeam() && validCustomerMonthlySnapshot(request.resource.data, snapshotId);
+      allow delete: if isAdmin();
+    }
+
+    match /businessMonthlySnapshots/{snapshotId} {
+      allow read: if isTeam();
+      allow create, update: if isTeam() && validBusinessMonthlySnapshot(request.resource.data, snapshotId);
+      allow delete: if isAdmin();
+    }
+
+    match /migrationStatus/{migrationId} {
+      allow read, write: if isAdmin();
     }
 
     match /creditAuditLogs/{logId} {

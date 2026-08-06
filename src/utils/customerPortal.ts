@@ -1,8 +1,13 @@
 import type { AppSettings, Customer, CustomerTier, Invoice, Payment, UserProfile } from '../types';
-import { addDaysToDateString, getCurrentMonthRange } from './dateUtils';
+import { getCurrentMonthRange, getTodayDateString } from './dateUtils';
 import { getPreviousOutstandingFallback } from './openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
-import { getEffectiveInvoiceDueDate, getGiftPercentageForTier, getPaymentBufferForTier } from './settings';
+import {
+  getGiftPercentageForTier,
+  getInvoiceBufferDays,
+  getInvoiceFinalPcCutoffDate,
+  getInvoiceSavedDueDate
+} from './settings';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const PAID_GREEN = '#166534';
@@ -70,8 +75,7 @@ export const calculateInvoiceOutstanding = (invoice: Invoice, payments: Payment[
 
 export const getInvoiceApcDeadline = (invoice: Invoice, tier?: CustomerTier, settings?: AppSettings) => {
   if (!tier) return invoice.dueDate;
-  if (invoice.dueDate) return addDaysToDateString(invoice.dueDate, getPaymentBufferForTier(tier, settings));
-  return getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);
+  return getInvoiceFinalPcCutoffDate(invoice, invoice.tierAtInvoice ?? tier, settings);
 };
 
 export const getInvoiceFullPaymentDate = (invoice: Invoice, payments: Payment[]) => {
@@ -96,23 +100,53 @@ export const calculateInvoiceApcInfo = (
   payments: Payment[],
   tier?: CustomerTier,
   settings?: AppSettings,
-  todayString = new Date().toISOString().slice(0, 10)
+  todayString = getTodayDateString()
 ) => {
-  const deadline = getInvoiceApcDeadline(invoice, tier, settings);
+  const invoiceTier = invoice.tierAtInvoice ?? tier;
+  const deadline = invoiceTier ? getInvoiceApcDeadline(invoice, invoiceTier, settings) : invoice.finalPcCutoffDate || invoice.dueDate;
+  const savedDueDate = invoiceTier ? getInvoiceSavedDueDate(invoice, invoiceTier, settings) : invoice.savedDueDate || invoice.dueDate;
+  const bufferDays = invoiceTier ? getInvoiceBufferDays(invoice, invoiceTier, settings) : 0;
   const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
-  const expectedApc = tier
-    ? Math.round(Math.max(0, invoice.totalProfit) * (getGiftPercentageForTier(tier, settings) / 100)) + Math.max(0, Number(settings?.loyaltySettings.onTimePaymentBonus ?? 0))
-    : 0;
+  const pcPercentage = invoice.pcPercentageAtInvoice
+    ?? (invoiceTier ? getGiftPercentageForTier(invoiceTier, settings) : 0);
+  const fullInvoicePc = Math.max(0, invoice.totalProfit) * (Math.max(0, pcPercentage) / 100);
+  const expectedApc = Math.max(0, Math.round(fullInvoicePc));
   const isFullyPaid = Boolean(fullPaymentDate);
   const isDeadlineValid = Boolean(deadline);
-  const isPaidOnTime = isFullyPaid && isDeadlineValid && fullPaymentDate <= deadline;
-  const isExpired = isDeadlineValid && !isPaidOnTime && todayString > deadline;
+  const invoicePayments = payments
+    .filter((payment) => payment.invoiceId === invoice.id)
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const approvedCashDiscount = invoicePayments.reduce((sum, payment) => sum + Math.max(0, payment.cashDiscount), 0);
+  const netCollectibleAmount = Math.max(0, (invoice.totalSales || invoice.salesAmount) - approvedCashDiscount);
+  let remainingCollectible = netCollectibleAmount;
+  let weightedRetainedAmount = 0;
+
+  invoicePayments.forEach((payment) => {
+    if (remainingCollectible <= 0) return;
+    const allocatedAmount = Math.min(remainingCollectible, Math.max(0, payment.amountAppliedToInvoice ?? payment.amount));
+    if (allocatedAmount <= 0) return;
+    const paymentDate = parseDate(payment.date);
+    const dueDate = parseDate(savedDueDate);
+    const daysLate = paymentDate && dueDate ? Math.max(0, daysBetween(dueDate, paymentDate)) : 0;
+    const retentionFactor = daysLate <= 0 ? 1 : bufferDays > 0 ? Math.max(0, 1 - daysLate / bufferDays) : 0;
+    weightedRetainedAmount += allocatedAmount * retentionFactor;
+    remainingCollectible -= allocatedAmount;
+  });
+
+  const weightedRetention = netCollectibleAmount > 0
+    ? Math.min(1, Math.max(0, weightedRetainedAmount / netCollectibleAmount))
+    : 0;
+  const proportionalPc = fullInvoicePc * 0.9 * weightedRetention;
+  const settledByDueDate = isFullyPaid && Boolean(savedDueDate) && fullPaymentDate <= savedDueDate;
+  const settlementPc = settledByDueDate ? fullInvoicePc * 0.1 : 0;
+  const earnedApc = isFullyPaid ? Math.max(0, Math.round(proportionalPc + settlementPc)) : 0;
+  const isExpired = isDeadlineValid && !isFullyPaid && todayString > deadline;
 
   return {
-    expectedApc: Math.max(0, Math.round(expectedApc)),
-    earnedApc: isPaidOnTime ? Math.max(0, Math.round(expectedApc)) : 0,
+    expectedApc,
+    earnedApc,
     apcDeadline: deadline || '',
-    apcStatus: isPaidOnTime ? 'Earned' as const : isExpired ? 'Expired' as const : isDeadlineValid ? 'Available' as const : 'Not available' as const
+    apcStatus: isFullyPaid ? 'Earned' as const : isExpired ? 'Expired' as const : isDeadlineValid ? 'Available' as const : 'Not available' as const
   };
 };
 
@@ -142,13 +176,13 @@ export const calculatePaidPendingPercentages = (invoiceAmount: number, paidAmoun
 export const calculateDueStatus = (
   invoice: Invoice,
   payments: Payment[],
-  todayString = new Date().toISOString().slice(0, 10),
+  todayString = getTodayDateString(),
   tier?: CustomerTier,
   settings?: AppSettings
 ): CustomerInvoiceView => {
   const { invoiceAmount, paidAmount, outstandingAmount } = calculateInvoiceOutstanding(invoice, payments);
   const invoiceDate = parseDate(invoice.date);
-  const effectiveDueDate = tier ? getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings) : invoice.dueDate;
+  const effectiveDueDate = tier ? getInvoiceSavedDueDate(invoice, invoice.tierAtInvoice ?? tier, settings) : invoice.savedDueDate || invoice.dueDate;
   const invoiceWithEffectiveDueDate = effectiveDueDate && effectiveDueDate !== invoice.dueDate ? { ...invoice, dueDate: effectiveDueDate } : invoice;
   const apcInfo = calculateInvoiceApcInfo(invoice, payments, tier, settings, todayString);
   const dueDate = parseDate(effectiveDueDate);

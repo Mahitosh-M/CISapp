@@ -16,7 +16,7 @@ import type {
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
 import {
-  getEffectiveInvoiceDueDate,
+  getInvoiceSavedDueDate,
   getCreditDaysForTierFromSettings,
   getGiftPercentageForTier,
   getPaymentBufferForTier,
@@ -52,8 +52,8 @@ interface ScoreInput {
 export const SCORE_WEIGHTS = {
   profit: 0.3,
   paymentDiscipline: 0.3,
-  frequency: 0.2,
-  sales: 0.15,
+  frequency: 0.15,
+  sales: 0.2,
   loyalty: 0.05
 };
 
@@ -153,21 +153,6 @@ const getPaymentsForInvoice = (invoiceId: string, payments: Payment[], asOfDate:
 
 const getPaidAmountForInvoice = (invoiceId: string, payments: Payment[], asOfDate: Date) => {
   return getPaymentsForInvoice(invoiceId, payments, asOfDate).reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-};
-
-const getInvoicePaidDate = (invoice: Invoice, payments: Payment[], asOfDate: Date) => {
-  const invoicePayments = getPaymentsForInvoice(invoice.id, payments, asOfDate);
-  let paidTotal = 0;
-
-  for (const payment of invoicePayments) {
-    paidTotal += getInvoicePaymentEffect(payment);
-
-    if (paidTotal >= invoice.totalSales) {
-      return parseDate(payment.date);
-    }
-  }
-
-  return null;
 };
 
 const getActiveMonthCount = (invoices: Invoice[]) => {
@@ -312,25 +297,138 @@ export const calculateInvoiceMarginProfitScore = (
 
   const weightedScore = scoredInvoices.reduce((sum, invoice) => {
     const marginPercent = (invoice.totalProfit / invoice.totalSales) * 100;
-    const invoiceScore = clamp((marginPercent / HEALTHY_INVOICE_MARGIN_PERCENT) * 100, 0, 100);
+    const invoiceScore = calculateProfitScore(marginPercent);
     return sum + invoiceScore * invoice.totalSales;
   }, 0);
 
   return capScore(weightedScore / totalSales);
 };
 
-const hasOverdueBeyondAllowed = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
-  return customerInvoices.some((invoice) => {
-    const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-    return getPendingAmount(invoice.totalSales, paidAmount) > 0 && parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings)) < startOfDay(asOfDate);
+export const calculateProfitScore = (marginPercent: number) => {
+  if (!Number.isFinite(marginPercent) || marginPercent <= 0) return 0;
+  if (marginPercent <= 20) return (marginPercent / 20) * 80;
+  if (marginPercent < 30) return 80 + ((marginPercent - 20) / 10) * 20;
+  return 100;
+};
+
+interface OverdueExposure {
+  amount: number;
+  salesRatioPercent: number;
+  oldestDays: number;
+  invoiceCount: number;
+  repeatedEvents: number;
+  severity: 'none' | 'minor' | 'material' | 'serious';
+}
+
+const getInvoiceAllocations = (
+  invoice: Invoice,
+  payments: Payment[],
+  asOfDate: Date,
+  fallbackTier: CustomerTier,
+  settings?: AppSettings
+) => {
+  const dueDate = parseDate(getInvoiceSavedDueDate(invoice, invoice.tierAtInvoice ?? fallbackTier, settings));
+  const rows = getPaymentsForInvoice(invoice.id, payments, asOfDate);
+  const totalDiscount = rows.reduce((sum, payment) => sum + Math.max(0, payment.cashDiscount), 0);
+  const collectibleAmount = Math.max(0, invoice.totalSales - totalDiscount);
+  let remainingCollectible = collectibleAmount;
+
+  const allocations = rows.map((payment) => {
+    const allocatedAmount = Math.min(remainingCollectible, Math.max(0, payment.amountAppliedToInvoice ?? payment.amount));
+    remainingCollectible -= allocatedAmount;
+    return {
+      amount: allocatedAmount,
+      daysLate: Math.max(0, daysBetween(dueDate, parseDate(payment.date)))
+    };
   });
+
+  return { dueDate, collectibleAmount, remainingCollectible, allocations };
+};
+
+export const calculateWeightedPaymentDisciplineScore = (
+  customerInvoices: Invoice[],
+  payments: Payment[],
+  asOfDate: Date,
+  fallbackTier: CustomerTier = 'Tier 4',
+  settings?: AppSettings
+) => {
+  if (customerInvoices.length === 0) return 0;
+
+  let lateAmountDays = 0;
+  let paymentExposure = 0;
+
+  customerInvoices.forEach((invoice) => {
+    const { dueDate, remainingCollectible, allocations } = getInvoiceAllocations(invoice, payments, asOfDate, fallbackTier, settings);
+    allocations.forEach((allocation) => {
+      paymentExposure += allocation.amount;
+      lateAmountDays += allocation.amount * allocation.daysLate;
+    });
+
+    if (remainingCollectible > 0 && asOfDate > dueDate) {
+      const overdueDays = Math.max(0, daysBetween(dueDate, asOfDate));
+      paymentExposure += remainingCollectible;
+      lateAmountDays += remainingCollectible * overdueDays;
+    }
+  });
+
+  if (paymentExposure <= 0) return 100;
+  const weightedAverageLateDays = lateAmountDays / paymentExposure;
+  return clamp(Math.round(100 - weightedAverageLateDays * 4), 20, 100);
+};
+
+const getOverdueExposure = (
+  customerInvoices: Invoice[],
+  payments: Payment[],
+  asOfDate: Date,
+  recentMonthlySales: number,
+  tier: CustomerTier,
+  settings?: AppSettings
+): OverdueExposure => {
+  const policy = settings?.overduePolicy;
+  let amount = 0;
+  let oldestDays = 0;
+  let invoiceCount = 0;
+  let repeatedEvents = 0;
+
+  customerInvoices.forEach((invoice) => {
+    const { dueDate, remainingCollectible, allocations } = getInvoiceAllocations(invoice, payments, asOfDate, tier, settings);
+    const hasLateAllocation = allocations.some((allocation) => allocation.amount > 0 && allocation.daysLate > 0);
+    const isCurrentlyOverdue = remainingCollectible > 0 && asOfDate > dueDate;
+
+    if (hasLateAllocation || isCurrentlyOverdue) repeatedEvents += 1;
+    if (!isCurrentlyOverdue) return;
+
+    amount += remainingCollectible;
+    invoiceCount += 1;
+    oldestDays = Math.max(oldestDays, daysBetween(dueDate, asOfDate));
+  });
+
+  const salesRatioPercent = recentMonthlySales > 0 ? (amount / recentMonthlySales) * 100 : amount > 0 ? 100 : 0;
+  const seriousRatio = policy?.seriousSalesRatioPercent ?? 15;
+  const minorRatio = policy?.minorSalesRatioPercent ?? 5;
+  const materialDays = policy?.materialDays ?? 7;
+  const seriousDays = policy?.seriousDays ?? 30;
+  const seriousInvoiceCount = policy?.seriousInvoiceCount ?? 2;
+  const repeatedEventCount = policy?.repeatedEventCount ?? 3;
+  const severity: OverdueExposure['severity'] = amount <= 0
+    ? 'none'
+    : salesRatioPercent > seriousRatio
+      || oldestDays > seriousDays
+      || invoiceCount >= seriousInvoiceCount
+      || repeatedEvents >= repeatedEventCount
+      ? 'serious'
+      : salesRatioPercent > minorRatio || oldestDays > materialDays || repeatedEvents > 1
+        ? 'material'
+        : 'minor';
+
+  return { amount, salesRatioPercent, oldestDays, invoiceCount, repeatedEvents, severity };
 };
 
 const applyTierGates = (
   scoreTier: CustomerTier,
   customerMonthlySales: number,
   paymentDisciplineScore: number,
-  hasOverdue: boolean,
+  overdueSeverity: OverdueExposure['severity'],
   outstandingRatio: number,
   onboardingStage: OnboardingStage,
   isOnboarding: boolean
@@ -351,9 +449,12 @@ const applyTierGates = (
     }
   }
 
-  if (hasOverdue) {
+  if (overdueSeverity === 'serious') {
     finalTier = capTier(finalTier, 'Tier 4');
-    reasons.push('Overdue beyond allowed credit days caps the level at Active.');
+    reasons.push('Serious or repeated overdue exposure caps the level at Active.');
+  } else if (overdueSeverity === 'material') {
+    finalTier = capTier(finalTier, 'Tier 3');
+    reasons.push('Material overdue exposure caps the level at Silver.');
   } else if (paymentDisciplineScore < 55 || outstandingRatio > 0.5) {
     finalTier = capTier(finalTier, 'Tier 3');
     reasons.push('Payment risk caps automatic upgrade at Silver.');
@@ -426,31 +527,7 @@ const rateFrequencyScore = (invoiceCount: number, averageOrderValue: number, hig
 };
 
 const ratePaymentDiscipline = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
-  if (customerInvoices.length === 0) {
-    return 0;
-  }
-
-  const delayMeasures = customerInvoices.map((invoice) => {
-    const dueDate = parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings));
-    const paidDate = getInvoicePaidDate(invoice, payments, asOfDate);
-
-    if (paidDate) {
-      return Math.max(0, daysBetween(dueDate, paidDate));
-    }
-
-    const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-    const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
-
-    if (outstanding <= 0 || asOfDate <= dueDate) {
-      return 0;
-    }
-
-    return Math.max(0, daysBetween(dueDate, asOfDate));
-  });
-
-  const averageDelay = delayMeasures.reduce((sum, value) => sum + value, 0) / delayMeasures.length;
-
-  return clamp(Math.round(100 - averageDelay * 4), 20, 100);
+  return calculateWeightedPaymentDisciplineScore(customerInvoices, payments, asOfDate, tier, settings);
 };
 
 const rateLoyaltyConsistency = (customerInvoices: Invoice[], window: DateWindow) => {
@@ -515,7 +592,8 @@ const getRecommendedAction = (riskLevel: RiskLevel, tier: CustomerTier, outstand
 const getOverdueStatus = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
   const hasOverdueInvoice = customerInvoices.some((invoice) => {
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-    return getPendingAmount(invoice.totalSales, paidAmount) > 0 && parseDate(getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings)) < startOfDay(asOfDate);
+    return getPendingAmount(invoice.totalSales, paidAmount) > 0
+      && parseDate(getInvoiceSavedDueDate(invoice, invoice.tierAtInvoice ?? tier, settings)) < startOfDay(asOfDate);
   });
 
   return hasOverdueInvoice ? 'Overdue' : 'Clear';
@@ -579,7 +657,7 @@ const buildScoreBreakdown = (
     score: profitScore,
     weight: breakdownWeights.profit,
     weightedScore: profitScore * breakdownWeights.profit,
-    description: `Weighted contribution from invoice margins against the ${HEALTHY_INVOICE_MARGIN_PERCENT}% healthy-margin benchmark.`
+    description: 'Invoice-value-weighted margin score: 20% margin earns 80 points and 30% margin earns 100.'
   },
   {
     key: 'paymentDiscipline',
@@ -621,7 +699,14 @@ const buildScoreBreakdown = (
   }
 ];
 
-const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], payments: Payment[], window: DateWindow, settings?: AppSettings): CustomerScore[] => {
+const buildScoresForWindow = (
+  customers: Customer[],
+  invoices: Invoice[],
+  payments: Payment[],
+  window: DateWindow,
+  settings?: AppSettings,
+  segmentRankOverrides?: ReadonlyMap<string, number>
+): CustomerScore[] => {
   const activeInvoices = invoices.filter((invoice) => isDateInsideWindow(invoice.date, window));
 
   const scoreInputs: ScoreInput[] = customers.map((customer) => {
@@ -679,7 +764,7 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
     const monthlySalesTarget = getSuggestedMonthlySalesTarget(
       entry,
       targetSettings.monthlySalesTarget,
-      segmentRankByCustomerId.get(entry.customer.id) ?? scoreInputs.length,
+      segmentRankOverrides?.get(entry.customer.id) ?? segmentRankByCustomerId.get(entry.customer.id) ?? scoreInputs.length,
       onboardingStage,
       window.end
     );
@@ -722,12 +807,19 @@ const buildScoresForWindow = (customers: Customer[], invoices: Invoice[], paymen
     );
     const intelligenceScore = isOnboarding ? onboardingScore : normalScore;
     const scoreTier = assignTier(intelligenceScore);
-    const hasOverdue = hasOverdueBeyondAllowed(entry.customerInvoices, payments, window.end, entry.customer.tier, settings);
+    const overdueExposure = getOverdueExposure(
+      entry.customerInvoices,
+      payments,
+      window.end,
+      entry.customerMonthlySales,
+      entry.customer.tier,
+      settings
+    );
     const gatedTier = applyTierGates(
       scoreTier,
       entry.customerMonthlySales,
       paymentDisciplineScore,
-      hasOverdue,
+      overdueExposure.severity,
       outstandingRatio,
       onboardingStage,
       isOnboarding
@@ -843,6 +935,45 @@ export const buildCustomerScores = (
       ...movementDetails
     };
   });
+};
+
+export const buildSingleCustomerScore = (
+  customer: Customer,
+  invoices: Invoice[],
+  payments: Payment[],
+  referenceDate = new Date(),
+  settings?: AppSettings,
+  previousStoredScore?: Pick<CustomerScore, 'rank'>
+) => {
+  const businessInvoices = getBusinessInvoices(invoices);
+  const stableRank = Math.max(1, Math.round(previousStoredScore?.rank || 16));
+  const rankOverride = new Map([[customer.id, stableRank]]);
+  const currentScore = buildScoresForWindow(
+    [customer],
+    businessInvoices,
+    payments,
+    getCurrentRollingWindow(referenceDate),
+    settings,
+    rankOverride
+  )[0];
+  const previousScore = buildScoresForWindow(
+    [customer],
+    businessInvoices,
+    payments,
+    getPreviousRollingWindow(referenceDate),
+    settings,
+    rankOverride
+  )[0];
+
+  if (!currentScore) return undefined;
+  return {
+    ...currentScore,
+    rank: stableRank,
+    previousRank: previousStoredScore?.rank,
+    previousScore: previousScore?.intelligenceScore,
+    previousTier: previousScore?.tier,
+    ...getMovementDetails(currentScore, previousScore)
+  };
 };
 
 export const buildCustomerScoresForDateRange = (

@@ -3,25 +3,30 @@ import type { CSSProperties } from 'react';
 import ExternalImage from './ExternalImage';
 import TierBadge from './TierBadge';
 import { useAuth } from '../contexts/AuthContext';
-import { useErpData } from '../hooks/useErpData';
-import { createGiftHistoryRecord, deleteGiftHistoryRecord, getApprovedBonusPcRequests, getApprovedOverduePcRequests, getGiftHistory, getRewardItems, updateGiftHistoryRecord } from '../services/firestoreService';
-import type { BonusPcRequest, GiftHistory, GiftItem, GiftPeriod, OverduePcRequest, RewardItem } from '../types';
+import { createGiftHistoryRecord, deleteGiftHistoryRecord, getAppSettings, getGiftHistoryByCustomerId, getRewardItems, updateGiftHistoryRecord } from '../services/firestoreService';
+import { getIntelligenceSummariesPage, type IntelligencePageCursor } from '../services/derivedDataService';
+import type { AppSettings, Customer, CustomerIntelligenceSummary, GiftHistory, GiftItem, GiftPeriod, RewardItem } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatters';
-import { buildSuggestedGiftRows, calculateGiftDifference } from '../utils/giftUtils';
+import { calculateGiftDifference } from '../utils/giftUtils';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
+import { DEFAULT_SETTINGS } from '../utils/settings';
 
 const REWARD_LEDGER_PERIOD_TYPE: GiftPeriod = 'custom';
 const REWARD_LEDGER_PERIOD_START = '2000-01-01';
 
 const SuggestedGiftManager = () => {
-  const { customers, invoices, payments, settings, loading, error } = useErpData();
   const { userProfile, canApproveGifts } = useAuth();
+  const [summaries, setSummaries] = useState<CustomerIntelligenceSummary[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [giftHistory, setGiftHistory] = useState<GiftHistory[]>([]);
   const [giftItems, setGiftItems] = useState<GiftItem[]>([]);
-  const [approvedOverduePcRequests, setApprovedOverduePcRequests] = useState<OverduePcRequest[]>([]);
-  const [approvedBonusPcRequests, setApprovedBonusPcRequests] = useState<BonusPcRequest[]>([]);
+  const [pageCursor, setPageCursor] = useState<IntelligencePageCursor>();
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingCustomer, setLoadingCustomer] = useState(false);
+  const [error, setError] = useState('');
   const [selectedGiftByCustomer, setSelectedGiftByCustomer] = useState<Record<string, string>>({});
   const [notesByCustomer, setNotesByCustomer] = useState<Record<string, string>>({});
   const [customerSearchText, setCustomerSearchText] = useState('');
@@ -51,16 +56,24 @@ const SuggestedGiftManager = () => {
     role: userProfile?.role
   };
 
-  const loadGiftData = async () => {
+  const loadGiftData = async (append = false) => {
     try {
+      setLoading(true);
       setGiftError('');
-      const [historyRows, rewardRows, overduePcRows, bonusPcRows] = await Promise.all([getGiftHistory(), getRewardItems(), getApprovedOverduePcRequests(100), getApprovedBonusPcRequests(100)]);
-      setGiftHistory(historyRows);
+      const [summaryPage, rewardRows, appSettings] = await Promise.all([
+        getIntelligenceSummariesPage(append ? pageCursor : undefined),
+        getRewardItems(),
+        getAppSettings()
+      ]);
+      setSummaries((current) => append ? [...current, ...summaryPage.rows] : summaryPage.rows);
+      setPageCursor(summaryPage.cursor);
+      setHasMore(summaryPage.hasMore);
       setGiftItems(rewardRows.map(mapRewardToGiftItem));
-      setApprovedOverduePcRequests(overduePcRows);
-      setApprovedBonusPcRequests(bonusPcRows);
+      setSettings(appSettings);
     } catch (err) {
       setGiftError(err instanceof Error ? err.message : 'Unable to load reward suggestions.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -68,9 +81,66 @@ const SuggestedGiftManager = () => {
     loadGiftData();
   }, []);
 
-  const suggestedRows = useMemo(() => {
-    return buildSuggestedGiftRows(customers, invoices, giftHistory, giftItems, settings, payments, approvedOverduePcRequests, approvedBonusPcRequests);
-  }, [approvedBonusPcRequests, approvedOverduePcRequests, customers, giftHistory, giftItems, invoices, payments, settings]);
+  const refreshSelectedGiftHistory = async () => {
+    if (!selectedCustomerId) return;
+    setGiftHistory(await getGiftHistoryByCustomerId(selectedCustomerId));
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedCustomerId) {
+      setGiftHistory([]);
+      return undefined;
+    }
+    setGiftHistory([]);
+    setLoadingCustomer(true);
+    getGiftHistoryByCustomerId(selectedCustomerId)
+      .then((rows) => active && setGiftHistory(rows))
+      .catch((err) => active && setGiftError(err instanceof Error ? err.message : 'Unable to load customer reward history.'))
+      .finally(() => active && setLoadingCustomer(false));
+    return () => { active = false; };
+  }, [selectedCustomerId]);
+
+  const suggestedRows = useMemo(() => summaries.map((summary) => {
+    const customer: Customer = {
+      id: summary.customerId,
+      name: summary.customerName,
+      mobile: summary.customerMobile,
+      area: summary.customerArea,
+      tier: summary.tier,
+      previousOutstandingAmount: 0,
+      advanceBalance: 0,
+      paymentTerms: summary.creditPolicyLabel,
+      notes: '',
+      createdAt: summary.calculatedAt
+    };
+    const customerHistory = summary.customerId === selectedCustomerId ? giftHistory : [];
+    const pendingApproval = customerHistory.find((gift) => gift.status === 'Approved');
+    const alreadyGiftedAmount = customerHistory
+      .filter((gift) => gift.status === 'Given')
+      .reduce((sum, gift) => sum + gift.actualGiftAmount, 0);
+    const giftBudget = Math.max(0, summary.giftBudget);
+    const matchedGiftItems = giftItems
+      .filter((item) => item.isActive && item.targetValue <= giftBudget)
+      .sort((left, right) => right.targetValue - left.targetValue);
+    const status = pendingApproval ? 'Approved' : matchedGiftItems.length > 0 ? 'Eligible' : 'Not Eligible';
+    return {
+      customer,
+      salesAmount: summary.totalSales,
+      profitConsidered: summary.totalProfit,
+      giftBudget,
+      alreadyGiftedAmount,
+      pendingApproval,
+      matchedGiftItems,
+      suggestedGiftNames: matchedGiftItems.map((item) => item.giftItemName),
+      status,
+      eligibilityReason: pendingApproval
+        ? 'A reward is approved and waiting to be given.'
+        : matchedGiftItems.length > 0
+          ? 'Available PC is enough for one or more active rewards.'
+          : 'Available PC is below the active reward thresholds.'
+    };
+  }), [giftHistory, giftItems, selectedCustomerId, summaries]);
 
   const sortedSuggestedRows = useMemo(() => {
     return [...suggestedRows].sort((a, b) => b.giftBudget - a.giftBudget || a.customer.name.localeCompare(b.customer.name));
@@ -173,7 +243,7 @@ const SuggestedGiftManager = () => {
     await createGiftHistoryRecord(buildGiftPayload(row, 'Approved'), auditUser);
     setMessage('Suggested reward approved.');
     setSelectedGiftByCustomer((current) => ({ ...current, [row.customer.id]: '' }));
-    await loadGiftData();
+    await refreshSelectedGiftHistory();
   };
 
   const handleUpdateApprovedGift = async (row: (typeof suggestedRows)[number]) => {
@@ -195,7 +265,7 @@ const SuggestedGiftManager = () => {
     await updateGiftHistoryRecord(row.pendingApproval.id, buildGiftPayload(row, 'Approved'), auditUser);
     setMessage('Approved reward changed.');
     setSelectedGiftByCustomer((current) => ({ ...current, [row.customer.id]: '' }));
-    await loadGiftData();
+    await refreshSelectedGiftHistory();
   };
 
   const handleMarkGiven = async (row: (typeof suggestedRows)[number]) => {
@@ -211,7 +281,7 @@ const SuggestedGiftManager = () => {
 
     await updateGiftHistoryRecord(row.pendingApproval.id, buildGiftPayload(row, 'Given'), auditUser);
     setMessage('Reward marked as redeemed.');
-    await loadGiftData();
+    await refreshSelectedGiftHistory();
   };
 
   const handleRemoveApproval = async (row: (typeof suggestedRows)[number]) => {
@@ -231,7 +301,7 @@ const SuggestedGiftManager = () => {
     await deleteGiftHistoryRecord(row.pendingApproval.id, auditUser);
     setSelectedGiftByCustomer((current) => ({ ...current, [row.customer.id]: '' }));
     setMessage('Reward approval removed.');
-    await loadGiftData();
+    await refreshSelectedGiftHistory();
   };
 
   const cardStyle: CSSProperties = {
@@ -358,11 +428,21 @@ const SuggestedGiftManager = () => {
             >
               Clear
             </button>
+            {hasMore ? (
+              <button
+                type="button"
+                style={{ ...buttonStyle, background: '#FFFFFF', color: '#11185A' }}
+                onClick={() => loadGiftData(true)}
+              >
+                Load more customers
+              </button>
+            ) : null}
           </div>
         </div>
         {customerSearchText && searchedCustomerRows.length === 0 ? (
           <div style={{ color: '#FCA5A5', fontWeight: 800, marginBottom: 12 }}>No customer matches your search.</div>
         ) : null}
+        {loadingCustomer ? <div style={{ color: '#D7DEEA', marginBottom: 10 }}>Loading customer rewards...</div> : null}
         <div style={{ ...latestFiveScrollStyle, maxHeight: 520, paddingRight: 6 }}>
           {!selectedCustomerId ? (
             <div style={{ color: '#D7DEEA', border: '1px solid #E8EDF4', borderRadius: 14, padding: 16 }}>

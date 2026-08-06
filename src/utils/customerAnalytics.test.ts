@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { AppSettings, Customer, Invoice, Payment } from '../types';
 import {
   buildCustomerScores,
-  calculateInvoiceMarginProfitScore
+  calculateInvoiceMarginProfitScore,
+  calculateProfitScore,
+  calculateWeightedPaymentDisciplineScore
 } from './customerAnalytics';
 import { DEFAULT_SETTINGS, mergeWithDefaultSettings } from './settings';
 
@@ -94,13 +96,27 @@ const createEstablishedInvoices = (totalSales: number, marginPercent = 20) => {
 };
 
 describe('invoice margin profit scoring', () => {
+  it.each([
+    [-10, 0],
+    [0, 0],
+    [5, 20],
+    [10, 40],
+    [15, 60],
+    [20, 80],
+    [25, 90],
+    [30, 100],
+    [40, 100]
+  ])('scores %s%% margin as %s', (margin, expected) => {
+    expect(calculateProfitScore(margin)).toBe(expected);
+  });
+
   it('weights mixed invoice margins by invoice sales and caps each invoice at 100', () => {
     const invoices = [
       createInvoice('INV-1', '2026-08-01', 40000, 10),
       createInvoice('INV-2', '2026-08-02', 10000, 60)
     ];
 
-    expect(calculateInvoiceMarginProfitScore(invoices)).toBe(60);
+    expect(calculateInvoiceMarginProfitScore(invoices)).toBe(52);
   });
 
   it('gives losses zero points without allowing them to be hidden by excess margin', () => {
@@ -114,7 +130,7 @@ describe('invoice margin profit scoring', () => {
 });
 
 describe('customer scoring integration', () => {
-  it('uses Firebase scoring weights for profit during onboarding', () => {
+  it('keeps the fixed production scoring weights during onboarding', () => {
     const settings: AppSettings = mergeWithDefaultSettings({
       scoringWeights: {
         profit: 50,
@@ -139,7 +155,9 @@ describe('customer scoring integration', () => {
     const lossScore = buildCustomerScores([customer], lossInvoices, lossInvoices.map(createPayment), REFERENCE_DATE, settings)[0];
 
     expect(profitableScore.onboardingStage).toBe('Stage B');
-    expect(profitableScore.scoreBreakdown.find((item) => item.key === 'profit')?.weight).toBe(0.5);
+    expect(profitableScore.scoreBreakdown.find((item) => item.key === 'profit')?.weight).toBe(0.3);
+    expect(profitableScore.scoreBreakdown.find((item) => item.key === 'sales')?.weight).toBe(0.2);
+    expect(profitableScore.scoreBreakdown.find((item) => item.key === 'frequency')?.weight).toBe(0.15);
     expect(profitableScore.intelligenceScore).toBeGreaterThan(lossScore.intelligenceScore);
     expect(lossScore.profitScore).toBe(0);
   });
@@ -171,5 +189,39 @@ describe('customer scoring integration', () => {
     expect(score.intelligenceScore).toBeGreaterThanOrEqual(81);
     expect(score.overdueStatus).toBe('Overdue');
     expect(score.tier).toBe('Tier 4');
+  });
+
+  it('does not force Tier 4 for one small isolated overdue amount', () => {
+    const invoices = [
+      ...createEstablishedInvoices(50000),
+      createInvoice('INV-SMALL-LATE', '2026-08-01', 100, 30)
+    ];
+    const payments = invoices
+      .filter((invoice) => invoice.id !== 'INV-SMALL-LATE')
+      .map(createPayment);
+    const score = buildCustomerScores([createCustomer()], invoices, payments, REFERENCE_DATE, liveScoringSettings)[0];
+
+    expect(score.overdueStatus).toBe('Overdue');
+    expect(score.tier).not.toBe('Tier 4');
+  });
+});
+
+describe('rupee-weighted payment scoring', () => {
+  it('gives a small late balance only a proportionately small effect', () => {
+    const largeInvoice = createInvoice('INV-LARGE', '2026-08-01', 10000, 20);
+    const smallInvoice = createInvoice('INV-SMALL', '2026-07-20', 100, 20);
+    const payments = [
+      createPayment(largeInvoice),
+      { ...createPayment(smallInvoice), date: '2026-07-30' }
+    ];
+
+    expect(calculateWeightedPaymentDisciplineScore([largeInvoice, smallInvoice], payments, REFERENCE_DATE)).toBe(100);
+  });
+
+  it('applies four score points per weighted late day with a floor of 20', () => {
+    const invoice = createInvoice('INV-LATE', '2026-07-20', 1000, 20);
+    const latePayment = { ...createPayment(invoice), date: '2026-07-25' };
+
+    expect(calculateWeightedPaymentDisciplineScore([invoice], [latePayment], REFERENCE_DATE)).toBe(80);
   });
 });

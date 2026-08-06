@@ -1,19 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { BarChart3, CircleDollarSign, Lightbulb, PieChart as PieChartIcon, Scale } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
 import SectionTileNav from '../components/SectionTileNav';
-import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { getAppSettings, getBusinessMonthlySnapshots, getCustomerCount, getInvoices, getPayments } from '../services/firestoreService';
 import { buildCustomerContributionRows, buildTopFivePieRows } from '../utils/contribution';
-import { getCurrentMonthRange, isDateInRange } from '../utils/dateUtils';
+import { getCurrentMonthRange, getTodayDateString, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
+import type { AppSettings, BusinessMonthlySnapshot, Invoice, Payment } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { DEFAULT_SETTINGS } from '../utils/settings';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
 type AnalyticsSection = 'overview' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
@@ -83,6 +85,13 @@ const formatMonthLabel = (monthKey: string) => {
   return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
 };
 
+const isCompleteMonthRange = (fromDate: string, toDate: string) => {
+  const end = parseDateKey(toDate);
+  if (!end || !fromDate.endsWith('-01')) return false;
+  const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate();
+  return end.getDate() === monthEnd;
+};
+
 const getSignalColor = (tone: 'good' | 'watch' | 'risk') => {
   if (tone === 'good') return '#1B7F3A';
   if (tone === 'watch') return '#B7791F';
@@ -97,15 +106,73 @@ const Analytics = () => {
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
   const [contributionGroup, setContributionGroup] = useState<ContributionGroup>('top5');
   const [activeSection, setActiveSection] = useState<AnalyticsSection | null>(null);
-  const { customers, invoices, payments, settings, loading, error } = useErpData({
-    fromDate: activeFromDate,
-    toDate: activeToDate,
-    includeScores: false
-  });
+  const [customerCount, setCustomerCount] = useState(0);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [monthlySnapshots, setMonthlySnapshots] = useState<BusinessMonthlySnapshot[]>([]);
+  const [snapshotRangeLoaded, setSnapshotRangeLoaded] = useState('');
+  const [loadedDetailRange, setLoadedDetailRange] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const isMobile = useIsMobile();
 
   const selectedDateKeys = useMemo(() => getDateKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
   const selectedMonthKeys = useMemo(() => getMonthKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
+  const activeRangeKey = `${activeFromDate}:${activeToDate}`;
+  const detailedDataLoaded = loadedDetailRange === activeRangeKey;
+  const completeMonthRange = isCompleteMonthRange(activeFromDate, activeToDate)
+    || (activeFromDate.endsWith('-01') && activeToDate === getTodayDateString());
+  const monthlySnapshotsReady = snapshotRangeLoaded === activeRangeKey
+    && selectedMonthKeys.every((month) => monthlySnapshots.some((snapshot) => snapshot.month === month && !snapshot.needsBackfill));
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    setInvoices([]);
+    setPayments([]);
+    setCustomerCount(0);
+    setSnapshotRangeLoaded('');
+    setLoadedDetailRange('');
+    const fromMonth = activeFromDate.slice(0, 7);
+    const toMonth = activeToDate.slice(0, 7);
+    Promise.all([getBusinessMonthlySnapshots(fromMonth, toMonth), getAppSettings()])
+      .then(([snapshots, appSettings]) => {
+        if (!active) return;
+        setMonthlySnapshots(snapshots);
+        setSettings(appSettings);
+        setSnapshotRangeLoaded(activeRangeKey);
+      })
+      .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load monthly analytics.'))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [activeFromDate, activeRangeKey, activeToDate]);
+
+  useEffect(() => {
+    if (snapshotRangeLoaded !== activeRangeKey) return;
+    const needsDetailedData = !completeMonthRange
+      || !monthlySnapshotsReady
+      || Boolean(activeSection && ['contribution', 'insights', 'briefing'].includes(activeSection));
+    if (!needsDetailedData || detailedDataLoaded) return;
+    let active = true;
+    setLoading(true);
+    Promise.all([
+      getCustomerCount(),
+      getInvoices({ fromDate: activeFromDate, toDate: activeToDate }),
+      getPayments({ fromDate: activeFromDate, toDate: activeToDate })
+    ])
+      .then(([totalCustomers, invoiceRows, paymentRows]) => {
+        if (!active) return;
+        setCustomerCount(totalCustomers);
+        setInvoices(invoiceRows);
+        setPayments(paymentRows);
+        setLoadedDetailRange(activeRangeKey);
+      })
+      .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load detailed analytics.'))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [activeFromDate, activeRangeKey, activeSection, activeToDate, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
   const allocatedFixedCost = useMemo(
     () => selectedDateKeys.reduce((sum, date) => sum + getDailyFixedCost(settings.fixedMonthlyCosts, date), 0),
     [selectedDateKeys, settings.fixedMonthlyCosts]
@@ -122,6 +189,37 @@ const Analytics = () => {
   const invoiceIds = useMemo(() => new Set(filteredInvoices.map((invoice) => invoice.id)), [filteredInvoices]);
 
   const analysis = useMemo(() => {
+    if (!detailedDataLoaded && completeMonthRange) {
+      const sales = monthlySnapshots.reduce((sum, row) => sum + row.totalSales, 0);
+      const profit = monthlySnapshots.reduce((sum, row) => sum + row.totalProfit, 0);
+      const collected = monthlySnapshots.reduce((sum, row) => sum + row.paymentsReceived, 0);
+      const invoiceCount = monthlySnapshots.reduce((sum, row) => sum + row.invoiceCount, 0);
+      const margin = sales > 0 ? (profit / sales) * 100 : 0;
+      const netProfit = profit - allocatedFixedCost;
+      const breakEvenProgress = allocatedFixedCost > 0 ? Math.min(100, Math.max(0, (profit / allocatedFixedCost) * 100)) : profit > 0 ? 100 : 0;
+      const breakEvenSales = margin > 0 && allocatedFixedCost > 0 ? allocatedFixedCost / (margin / 100) : 0;
+      return {
+        sales,
+        profit,
+        collected,
+        outstanding: Math.max(0, sales - collected),
+        invoiceCount,
+        paymentCount: 0,
+        activeCustomers: 0,
+        avgInvoiceValue: invoiceCount > 0 ? Math.round(sales / invoiceCount) : 0,
+        margin,
+        fixedCost: allocatedFixedCost,
+        netProfit,
+        breakEvenProgress,
+        breakEvenSales,
+        breakEvenSalesGap: breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : 0,
+        collectionRate: sales > 0 ? (collected / sales) * 100 : 0,
+        activeCustomerRate: 0,
+        negativeProfitCount: 0,
+        negativeProfitAmount: 0
+      };
+    }
+
     const sales = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
     const profit = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
     const collected = filteredPayments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -138,7 +236,7 @@ const Analytics = () => {
     const breakEvenSales = margin > 0 && allocatedFixedCost > 0 ? allocatedFixedCost / (margin / 100) : 0;
     const breakEvenSalesGap = breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : 0;
     const collectionRate = sales > 0 ? (collected / sales) * 100 : 0;
-    const activeCustomerRate = customers.length > 0 ? (activeCustomerIds.size / customers.length) * 100 : 0;
+    const activeCustomerRate = customerCount > 0 ? (activeCustomerIds.size / customerCount) * 100 : 0;
 
     return {
       sales,
@@ -160,13 +258,13 @@ const Analytics = () => {
       negativeProfitCount: negativeProfitInvoices.length,
       negativeProfitAmount: negativeProfitInvoices.reduce((sum, invoice) => sum + Math.abs(invoice.totalProfit), 0)
     };
-  }, [allocatedFixedCost, customers.length, filteredInvoices, filteredPayments, invoiceIds]);
+  }, [allocatedFixedCost, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots]);
 
   const customerAnalysis = useMemo(() => {
     const rows = new Map<string, { customer: string; sales: number; profit: number; invoices: number }>();
 
     filteredInvoices.forEach((invoice) => {
-      const customerName = customers.find((customer) => customer.id === invoice.customerId)?.name || invoice.customerName;
+      const customerName = invoice.customerName;
       const current = rows.get(invoice.customerId) || { customer: customerName, sales: 0, profit: 0, invoices: 0 };
       rows.set(invoice.customerId, {
         customer: current.customer,
@@ -177,11 +275,11 @@ const Analytics = () => {
     });
 
     return [...rows.values()].sort((a, b) => b.sales - a.sales);
-  }, [customers, filteredInvoices]);
+  }, [filteredInvoices]);
 
   const contributionRows = useMemo(() => {
-    return buildCustomerContributionRows(customers, filteredInvoices).sort((left, right) => right.sales - left.sales);
-  }, [customers, filteredInvoices]);
+    return buildCustomerContributionRows([], filteredInvoices).sort((left, right) => right.sales - left.sales);
+  }, [filteredInvoices]);
   const salesPieRows = useMemo(() => buildTopFivePieRows(contributionRows, 'sales'), [contributionRows]);
   const profitPieRows = useMemo(() => buildTopFivePieRows(contributionRows, 'profit'), [contributionRows]);
 
@@ -229,9 +327,14 @@ const Analytics = () => {
 
   const monthlyBreakevenRows = useMemo(() => {
     return selectedMonthKeys.map((month) => {
+      const monthSnapshot = monthlySnapshots.find((snapshot) => snapshot.month === month);
       const monthInvoices = filteredInvoices.filter((invoice) => invoice.date.startsWith(`${month}-`));
-      const sales = monthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-      const grossProfit = monthInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+      const sales = detailedDataLoaded
+        ? monthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0)
+        : monthSnapshot?.totalSales ?? 0;
+      const grossProfit = detailedDataLoaded
+        ? monthInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0)
+        : monthSnapshot?.totalProfit ?? 0;
       const fixedCost = Math.max(0, settings.fixedMonthlyCosts);
       const netProfit = grossProfit - fixedCost;
       const margin = sales > 0 ? (grossProfit / sales) * 100 : 0;
@@ -247,7 +350,7 @@ const Analytics = () => {
         status: fixedCost <= 0 ? 'Fixed cost not set' : netProfit >= 0 ? 'Profitable' : 'Below breakeven'
       };
     });
-  }, [filteredInvoices, selectedMonthKeys, settings.fixedMonthlyCosts]);
+  }, [detailedDataLoaded, filteredInvoices, monthlySnapshots, selectedMonthKeys, settings.fixedMonthlyCosts]);
 
   const insightCards = useMemo(() => {
     const concentration = analysis.sales > 0 && customerAnalysis.length > 0 ? (customerAnalysis[0].sales / analysis.sales) * 100 : 0;
@@ -268,7 +371,7 @@ const Analytics = () => {
       {
         title: 'Customer Activity',
         value: formatPercent(analysis.activeCustomerRate),
-        detail: `${analysis.activeCustomers} of ${customers.length} customers bought in this period.`,
+        detail: `${analysis.activeCustomers} of ${customerCount} customers bought in this period.`,
         tone: analysis.activeCustomerRate >= 45 ? 'good' : analysis.activeCustomerRate >= 20 ? 'watch' : 'risk'
       },
       {
@@ -278,7 +381,7 @@ const Analytics = () => {
         tone: concentration <= 25 ? 'good' : concentration <= 45 ? 'watch' : 'risk'
       }
     ] as { title: string; value: string; detail: string; tone: 'good' | 'watch' | 'risk' }[];
-  }, [analysis, customerAnalysis, customers.length]);
+  }, [analysis, customerAnalysis, customerCount]);
 
   const businessBriefing = useMemo(() => {
     const lines: string[] = [];
@@ -303,7 +406,7 @@ const Analytics = () => {
     const collectionChange = firstCollected > 0 ? ((secondCollected - firstCollected) / firstCollected) * 100 : secondCollected > 0 ? 100 : 0;
     const topFiveSalesPercent = contributionRows.slice(0, 5).reduce((sum, row) => sum + row.salesPercent, 0);
     const topFiveProfitPercent = contributionRows.slice(0, 5).reduce((sum, row) => sum + row.profitPercent, 0);
-    const inactiveCustomers = Math.max(0, customers.length - analysis.activeCustomers);
+    const inactiveCustomers = Math.max(0, customerCount - analysis.activeCustomers);
     const avgProfitPerInvoice = analysis.invoiceCount > 0 ? analysis.profit / analysis.invoiceCount : 0;
     const avgSalesPerActiveCustomer = analysis.activeCustomers > 0 ? analysis.sales / analysis.activeCustomers : 0;
     const lossMakingCustomers = contributionRows.filter((row) => row.profit < 0);
@@ -329,9 +432,9 @@ const Analytics = () => {
     add(analysis.fixedCost > 0 && analysis.netProfit < 0, `The selected period is ${formatMoney(Math.abs(analysis.netProfit))} short of breakeven after fixed costs.`);
     add(analysis.fixedCost > 0 && analysis.breakEvenSalesGap > 0, `At the current gross margin, about ${formatMoney(analysis.breakEvenSalesGap)} more sales are needed to reach breakeven.`);
     add(zeroCollection, 'Sales exist but no matching collection is recorded in this period; this is a cash-flow warning, not just a reporting gap.');
-    add(analysis.outstanding > analysis.sales * 0.75 && analysis.sales > 0, 'Outstanding is very high compared with period sales, so collection risk is the biggest operating concern.');
-    add(analysis.outstanding > analysis.sales * 0.4 && analysis.outstanding <= analysis.sales * 0.75 && analysis.sales > 0, 'Outstanding is meaningful and should be reviewed customer-wise before approving larger orders.');
-    add(analysis.outstanding <= analysis.sales * 0.15 && analysis.sales > 0, 'Outstanding is controlled relative to sales, which indicates healthier collection conversion.');
+    add(analysis.outstanding > analysis.sales * 0.75 && analysis.sales > 0, 'Receipts trail selected-period sales substantially, so collection follow-up should be prioritised.');
+    add(analysis.outstanding > analysis.sales * 0.4 && analysis.outstanding <= analysis.sales * 0.75 && analysis.sales > 0, 'The selected-period collection gap is meaningful and should be reviewed customer-wise.');
+    add(analysis.outstanding <= analysis.sales * 0.15 && analysis.sales > 0, 'Selected-period receipts are close to sales, indicating healthier cash conversion.');
     add(inactiveCustomers > 0, `${inactiveCustomers} customer(s) had no invoice activity in this range; reactivation calls can be planned from this list.`);
     add(topFiveSalesPercent >= 75, `Top 5 customers contribute ${formatPercent(topFiveSalesPercent)} of sales, so the business is concentrated and should not ignore smaller buyers.`);
     add(topFiveSalesPercent >= 50 && topFiveSalesPercent < 75, `Top 5 customers contribute ${formatPercent(topFiveSalesPercent)} of sales, which is normal but still worth tracking.`);
@@ -376,11 +479,11 @@ const Analytics = () => {
     add(analysis.margin < 8 && analysis.collectionRate < 50 && analysis.sales > 0, 'This is a pressure period: low margin and weak collection are happening together.');
     add(contributionRows.length >= 20, 'The customer base has enough activity for segmentation; separate high-profit, high-volume, and dormant customers.');
     add(contributionRows.length > 0 && contributionRows.length < 5, 'Very few customers drove this period; customer acquisition or reactivation should be considered.');
-    add(analysis.sales > 0 && analysis.activeCustomers === customers.length && customers.length > 0, 'Every customer bought in this period, which is excellent breadth if the date range is not too wide.');
+    add(analysis.sales > 0 && analysis.activeCustomers === customerCount && customerCount > 0, 'Every customer bought in this period, which is excellent breadth if the date range is not too wide.');
     add(analysis.sales > 0 && analysis.activeCustomers === 1, 'Only one customer bought in this period, making the business highly exposed to a single account.');
 
     return lines.length > 0 ? lines : ['No significant business signal was detected for this period. Try widening the date range for a stronger read.'];
-  }, [analysis, contributionRows, customerAnalysis, customers.length, dailyAnalysis]);
+  }, [analysis, contributionRows, customerAnalysis, customerCount, dailyAnalysis]);
 
   const applyDateRange = (range: DateRange) => {
     setFromDate(range.fromDate);
@@ -524,9 +627,9 @@ const Analytics = () => {
               <div style={{ color: '#D7DEEA', marginTop: 6 }}>{formatPercent(analysis.collectionRate)} of sales</div>
             </div>
             <div style={cardStyle}>
-              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Outstanding</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Collection Gap</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
-              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Selected range balance</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Sales less receipts in range</div>
             </div>
           </div> : null}
 

@@ -132,17 +132,6 @@ const Loyalty = () => {
   const sortedRequests = useMemo(() => sortNewestFirst(requests.filter((request) => request.status !== 'Gifted'), ['requestedAt']), [requests]);
   const sortedGiftHistory = useMemo(() => sortNewestFirst(giftHistory, ['giftGivenDate', 'giftedDate', 'updatedAt', 'createdAt']), [giftHistory]);
 
-  const updateLoyaltyNumber = (field: keyof AppSettings['loyaltySettings'], value: string) => {
-    if (field === 'partnerLevelThresholds') return;
-    setSettings((current) => ({
-      ...current,
-      loyaltySettings: {
-        ...current.loyaltySettings,
-        [field]: Number(value) || 0
-      }
-    }));
-  };
-
   const saveSettings = async (event: FormEvent) => {
     event.preventDefault();
     if (!isAdmin) return;
@@ -481,14 +470,11 @@ const Loyalty = () => {
         <form style={cardStyle} onSubmit={saveSettings}>
           <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Loyalty Settings</div>
           <div style={gridStyle}>
-            <label style={{ fontWeight: 800 }}>New customer bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.newCustomerBonus} onChange={(event) => updateLoyaltyNumber('newCustomerBonus', event.target.value)} /></label>
-            <label style={{ fontWeight: 800 }}>Payment bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.paymentBonus} onChange={(event) => updateLoyaltyNumber('paymentBonus', event.target.value)} /></label>
-            <label style={{ fontWeight: 800 }}>Purchase target bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.purchaseTargetBonus} onChange={(event) => updateLoyaltyNumber('purchaseTargetBonus', event.target.value)} /></label>
-            <label style={{ fontWeight: 800 }}>Referral bonus<input style={inputStyle} type="number" min="0" value={settings.loyaltySettings.referralBonus} onChange={(event) => updateLoyaltyNumber('referralBonus', event.target.value)} /></label>
+            <label style={{ fontWeight: 800 }}>Monthly sales target<input style={inputStyle} type="number" readOnly value={settings.loyaltySettings.monthlyTargetBonus} /></label>
+            <label style={{ fontWeight: 800 }}>Clean payment month<input style={inputStyle} type="number" readOnly value={settings.loyaltySettings.cleanPaymentMonthBonus} /></label>
+            <label style={{ fontWeight: 800 }}>New customer welcome<input style={inputStyle} type="number" readOnly value={settings.loyaltySettings.newCustomerBonus} /></label>
+            <label style={{ fontWeight: 800 }}>Referral<input style={inputStyle} type="number" readOnly value={settings.loyaltySettings.referralBonus} /></label>
           </div>
-          <button type="submit" disabled={saving} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginTop: 16 }}>
-            {saving ? 'Saving...' : 'Save Loyalty Settings'}
-          </button>
         </form>
       ) : null}
 

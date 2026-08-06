@@ -30,7 +30,7 @@ export type OverduePcRequestStatus = 'Pending' | 'Approved' | 'Rejected';
 
 export type BonusPcRequestStatus = 'Pending' | 'Approved' | 'Rejected';
 
-export type BonusPcType = 'new_customer' | 'payment' | 'purchase_target' | 'referral';
+export type BonusPcType = 'monthly_target' | 'clean_payment_month' | 'new_customer' | 'referral';
 
 export type TargetTierKey = 'tier1' | 'tier2' | 'tier3' | 'tier4';
 
@@ -41,13 +41,15 @@ export interface TierTargetSetting {
 
 export interface LoyaltySettings {
   pointsPerThousand: number;
-  onTimePaymentBonus: number;
   monthlyTargetBonus: number;
-  orderFrequencyBonus: number;
+  cleanPaymentMonthBonus: number;
   newCustomerBonus: number;
-  paymentBonus: number;
-  purchaseTargetBonus: number;
   referralBonus: number;
+  // Legacy settings are read during migration but no longer generate bonuses.
+  onTimePaymentBonus?: number;
+  orderFrequencyBonus?: number;
+  paymentBonus?: number;
+  purchaseTargetBonus?: number;
   partnerLevelThresholds: Record<PartnerLevel, number>;
   rewardBudgetCap: number;
 }
@@ -87,19 +89,28 @@ export interface CustomerCreditProfile {
   tier: CustomerTier;
   creditDays: number;
   currentOutstanding: number;
-  confirmedUninvoicedCreditOrders: number;
   creditHistoryDays: 60 | 90;
   totalCreditInvoiceAmountInLookback: number;
+  totalCreditInvoiceAmountLast90Days?: number;
   averageMonthlyCreditSales: number;
+  recentMonthlyCompletedCreditSales: number;
+  representativeInvoiceValue: number;
+  effectiveCycleDays: number;
   baseCreditLimit: number;
   calculatedCreditLimit: number;
   approvedCreditLimit: number;
   availableCredit: number;
+  overLimitAmount: number;
   paymentFactor: number;
   historyFactor: number;
+  creditPaymentScore: number;
+  weightedLateDays: number;
   onTimePaymentPercentage: number;
   completedCreditInvoices: number;
   overdueAmount: number;
+  oldestOverdueInvoice?: string;
+  oldestOverdueDate?: string;
+  oldestOverdueDays: number;
   hasOverdueBeyondGrace: boolean;
   creditStatus: CreditStatus;
   creditLimitApprovalStatus: CreditLimitApprovalStatus;
@@ -108,16 +119,25 @@ export interface CustomerCreditProfile {
   lastCreditReviewAt: string;
   lastCreditReviewReason?: string;
   manualHold?: boolean;
+  manualStarterLimit?: number;
+  limitSource: string;
   creditOverride?: CreditOverride;
 }
 
 export interface CustomerCreditSummary {
   id: string;
   customerId: string;
+  suggestedCreditLimit?: number;
+  calculatedCreditLimit?: number;
   approvedCreditLimit?: number;
   availableCredit: number;
   usedCredit: number;
+  overLimitAmount: number;
   creditDays: number;
+  limitSource?: string;
+  oldestOverdueInvoice?: string;
+  oldestOverdueDate?: string;
+  oldestOverdueDays?: number;
   nextInvoiceDueDate?: string;
   nextInvoiceDueAmount?: number;
   creditStatus: CreditStatus;
@@ -143,9 +163,17 @@ export interface Invoice {
   customerId: string;
   customerName: string;
   invoiceType?: string;
+  recordStatus?: string;
   isOpeningBalance?: boolean;
   date: string;
   dueDate: string;
+  tierAtInvoice?: CustomerTier;
+  pcPercentageAtInvoice?: number;
+  creditDaysAtInvoice?: number;
+  bufferDaysAtInvoice?: number;
+  savedDueDate?: string;
+  finalPcCutoffDate?: string;
+  termsEstimated?: boolean;
   salesAmount: number;
   costAmount: number;
   transportAmount: number;
@@ -219,13 +247,20 @@ export interface AppSettings {
   defaultReportPeriod: 'current_month' | 'last_month' | 'previous_30_days';
   giftPeriodOptions: GiftPeriod[];
   staffPermissions: {
-    canViewReports: boolean;
     canViewDashboard: boolean;
   };
   creditPolicy: {
     starterLimitCap: number;
     overdueGraceDays: number;
     lookbackDays: 60 | 90;
+  };
+  overduePolicy: {
+    minorSalesRatioPercent: number;
+    seriousSalesRatioPercent: number;
+    materialDays: number;
+    seriousDays: number;
+    seriousInvoiceCount: number;
+    repeatedEventCount: number;
   };
   targetSettings: Record<TargetTierKey, TierTargetSetting>;
   loyaltySettings: LoyaltySettings;
@@ -465,6 +500,34 @@ export interface CustomerScore {
   onboardingStage: OnboardingStage;
   confidenceFactor: number;
   scoreBreakdown: ScoreBreakdownItem[];
+}
+
+export interface CustomerIntelligenceSummary extends CustomerScore {
+  id: string;
+  calculatedAt: string;
+}
+
+export interface CustomerMonthlySnapshot {
+  id: string;
+  customerId: string;
+  month: string;
+  totalSales: number;
+  totalProfit: number;
+  invoiceCount: number;
+  paymentsReceived: number;
+  needsBackfill: boolean;
+  updatedAt: string;
+}
+
+export interface BusinessMonthlySnapshot {
+  id: string;
+  month: string;
+  totalSales: number;
+  totalProfit: number;
+  invoiceCount: number;
+  paymentsReceived: number;
+  needsBackfill: boolean;
+  updatedAt: string;
 }
 
 export interface MonthlyRankingRow {

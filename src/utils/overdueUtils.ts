@@ -1,4 +1,5 @@
 import type { AppSettings, Customer, Invoice, OverdueInvoiceRisk, Payment } from '../types';
+import { getTodayDateString } from './dateUtils';
 import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import { getEffectiveInvoiceDueDate } from './settings';
@@ -13,8 +14,6 @@ const daysBetween = (fromDate: string, toDate: string) => {
   return Math.max(0, Math.floor((parseDate(toDate).getTime() - parseDate(fromDate).getTime()) / msPerDay));
 };
 
-const getToday = () => new Date().toISOString().slice(0, 10);
-
 export const getPaidAmountForInvoice = (invoiceId: string, payments: Payment[]) => {
   return payments
     .filter((payment) => payment.invoiceId === invoiceId)
@@ -27,7 +26,7 @@ export const buildOverdueInvoiceRisks = (
   payments: Payment[],
   settings?: AppSettings
 ): OverdueInvoiceRisk[] => {
-  const today = getToday();
+  const today = getTodayDateString();
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
 
   return invoices

@@ -1,9 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BarChart3, BrainCircuit, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { BarChart3, BrainCircuit, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useAppSettings } from '../hooks/useAppSettings';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 interface NavItem {
@@ -13,7 +12,6 @@ interface NavItem {
   icon: LucideIcon;
   mobileColor: string;
   adminOnly?: boolean;
-  staffPermission?: 'canViewReports';
 }
 
 const navItems: NavItem[] = [
@@ -25,22 +23,17 @@ const navItems: NavItem[] = [
   { to: '/loyalty', label: 'Loyalty', icon: Gift, mobileColor: '#FDA4AF', adminOnly: true },
   { to: '/overdue-pc-requests', label: 'PC', icon: Coins, mobileColor: '#FCD34D', adminOnly: true },
   { to: '/credit', label: 'Credit', icon: Landmark, mobileColor: '#5EEAD4', adminOnly: true },
-  { to: '/reports', label: 'Reports', icon: SlidersHorizontal, mobileColor: '#F9A8D4', staffPermission: 'canViewReports' },
   { to: '/admin', label: 'Admin', icon: ShieldCheck, mobileColor: '#FDBA74', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, mobileColor: '#CBD5E1', adminOnly: true }
 ];
 
 const Layout = () => {
   const { userProfile, logout } = useAuth();
-  const { settings } = useAppSettings();
   const isMobile = useIsMobile();
   const isStaffMobile = isMobile && userProfile?.role === 'Staff';
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const visibleNavItems = navItems.filter((item) => {
     if (item.adminOnly) return userProfile?.role === 'Admin';
-    if (item.staffPermission === 'canViewReports') {
-      return userProfile?.role === 'Admin' || settings.staffPermissions.canViewReports;
-    }
     return true;
   });
   const mobilePriorityOrder = ['/invoices', '/payments', '/customers', '/'];

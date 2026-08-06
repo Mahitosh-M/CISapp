@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, generateOverduePcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
+import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
 import type { AppSettings, BonusPcRequest, Customer, Invoice, LoyaltyLedgerEntry, OverduePcRequest, Payment, RedemptionRequest } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
@@ -68,13 +68,12 @@ const OverduePcRequests = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [coinEdits, setCoinEdits] = useState<Record<string, number>>({});
-  const [bonusCoinEdits, setBonusCoinEdits] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState('');
-  const [generating, setGenerating] = useState(false);
   const [generatingBonus, setGeneratingBonus] = useState(false);
   const [showReferral, setShowReferral] = useState(false);
-  const [selectedReferralCustomerId, setSelectedReferralCustomerId] = useState('');
+  const [selectedReferrerId, setSelectedReferrerId] = useState('');
+  const [selectedReferredCustomerId, setSelectedReferredCustomerId] = useState('');
   const [showPcViewer, setShowPcViewer] = useState(false);
   const [selectedPcCustomerId, setSelectedPcCustomerId] = useState('');
   const [customerPcView, setCustomerPcView] = useState<CustomerPcView | null>(null);
@@ -111,7 +110,6 @@ const OverduePcRequests = () => {
       setCustomers(customerRows);
       setSettings(appSettings);
       setCoinEdits(Object.fromEntries(rows.map((request) => [request.id, request.approvedCoins || request.suggestedCoins])));
-      setBonusCoinEdits(Object.fromEntries(bonusRows.map((request) => [request.id, request.approvedCoins || request.suggestedCoins])));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load PC requests.');
     } finally {
@@ -125,21 +123,6 @@ const OverduePcRequests = () => {
 
   const sortedPendingRequests = useMemo(() => sortNewestFirst(requests, ['generatedAt', 'reviewedAt']), [requests]);
   const sortedPendingBonusRequests = useMemo(() => sortNewestFirst(bonusRequests, ['generatedAt', 'reviewedAt']), [bonusRequests]);
-
-  const handleGenerate = async () => {
-    try {
-      setGenerating(true);
-      setMessage('');
-      setError('');
-      const result = await generateOverduePcRequests(auditUser);
-      setMessage(result.createdCount > 0 ? `${result.createdCount} PC request(s) created.` : 'No new PC requests found.');
-      await loadRequests();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to generate PC requests.');
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   const handleReview = async (request: OverduePcRequest, status: 'Approved' | 'Rejected') => {
     try {
@@ -185,7 +168,7 @@ const OverduePcRequests = () => {
       await reviewBonusPcRequest(
         request.id,
         status,
-        bonusCoinEdits[request.id] ?? request.approvedCoins ?? request.suggestedCoins,
+        request.suggestedCoins,
         auditUser,
         status === 'Approved' ? 'Approved by Admin' : 'Rejected by Admin'
       );
@@ -199,8 +182,8 @@ const OverduePcRequests = () => {
   };
 
   const handleReferralApproval = async () => {
-    if (!selectedReferralCustomerId) {
-      setError('Select a customer for the referral bonus.');
+    if (!selectedReferrerId || !selectedReferredCustomerId) {
+      setError('Select both the referrer and referred customer.');
       return;
     }
 
@@ -208,9 +191,12 @@ const OverduePcRequests = () => {
       setSavingId('referral');
       setMessage('');
       setError('');
-      const result = await approveReferralBonus(selectedReferralCustomerId, auditUser);
-      setMessage(`${result.referralCoins} referral PC approved for ${result.customer.name} and added to the available balance.`);
-      setSelectedReferralCustomerId('');
+      const result = await approveReferralBonus(selectedReferrerId, selectedReferredCustomerId, auditUser);
+      setMessage(result.awarded
+        ? `${result.referralCoins} referral PC approved for ${result.customer.name} and added to the available balance.`
+        : `Referral PC for ${result.customer.name} was already recorded.`);
+      setSelectedReferrerId('');
+      setSelectedReferredCustomerId('');
       setShowReferral(false);
       await loadRequests();
     } catch (err) {
@@ -569,10 +555,10 @@ const OverduePcRequests = () => {
       {showReferral ? (
           <div style={{ ...cardStyle, display: 'grid', gap: 12 }}>
             <label style={{ fontWeight: 800 }}>
-              Select Customer
+              Referrer
               <select
-                value={selectedReferralCustomerId}
-                onChange={(event) => setSelectedReferralCustomerId(event.target.value)}
+                value={selectedReferrerId}
+                onChange={(event) => setSelectedReferrerId(event.target.value)}
                 style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#11185A' }}
               >
                 <option value="">Select customer</option>
@@ -581,12 +567,27 @@ const OverduePcRequests = () => {
                 ))}
               </select>
             </label>
+            <label style={{ fontWeight: 800 }}>
+              Referred Customer
+              <select
+                value={selectedReferredCustomerId}
+                onChange={(event) => setSelectedReferredCustomerId(event.target.value)}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', borderRadius: 10, border: '1px solid #D8DEE9', marginTop: 6, color: '#11185A' }}
+              >
+                <option value="">Select customer</option>
+                {customers.filter((customer) => customer.id !== selectedReferrerId).map((customer) => (
+                  <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
+                ))}
+              </select>
+            </label>
 
-            {selectedReferralCustomerId ? (
+            {selectedReferrerId && selectedReferredCustomerId ? (
               <div style={{ padding: 14, borderRadius: 12, background: '#FFF7D6', color: '#11185A', border: '1px solid #D4AF37', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Selected customer</div>
-                  <div style={{ fontWeight: 900, marginTop: 3 }}>{customers.find((customer) => customer.id === selectedReferralCustomerId)?.name}</div>
+                  <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>Referral</div>
+                  <div style={{ fontWeight: 900, marginTop: 3 }}>
+                    {customers.find((customer) => customer.id === selectedReferrerId)?.name} for {customers.find((customer) => customer.id === selectedReferredCustomerId)?.name}
+                  </div>
                 </div>
                 <button type="button" disabled={Boolean(savingId)} onClick={handleReferralApproval} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
                   {savingId === 'referral' ? 'Approving...' : 'Approve'}
@@ -597,12 +598,6 @@ const OverduePcRequests = () => {
         ) : null}
 
       <div style={sortedPendingRequests.length > 0 ? cardStyle : { ...cardStyle, display: 'inline-block', padding: 10 }}>
-        <div style={{ marginBottom: sortedPendingRequests.length > 0 ? 14 : 0 }}>
-          <button type="button" disabled={generating} onClick={handleGenerate} style={primaryActionStyle}>
-            {generating ? 'Generating...' : 'Generate Requests'}
-          </button>
-        </div>
-
         {sortedPendingRequests.length > 0 ? <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
             <thead>
@@ -643,11 +638,8 @@ const OverduePcRequests = () => {
                   <td style={tdStyle}>
                     {request.status === 'Pending' ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button type="button" disabled={Boolean(savingId)} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }} onClick={() => handleReview(request, 'Approved')}>
-                          {savingId === request.id ? 'Saving...' : 'Approve'}
-                        </button>
                         <button type="button" disabled={Boolean(savingId)} style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleReview(request, 'Rejected')}>
-                          Reject
+                          {savingId === request.id ? 'Saving...' : 'Reject legacy request'}
                         </button>
                       </div>
                     ) : 'Reviewed'}
@@ -685,21 +677,19 @@ const OverduePcRequests = () => {
                   </td>
                   <td style={tdStyle}>{request.triggerType || '-'}</td>
                   <td style={tdStyle}>{formatPc(request.suggestedCoins)}</td>
-                  <td style={tdStyle}>
-                    <input
-                      type="number"
-                      min="0"
-                      value={bonusCoinEdits[request.id] ?? request.approvedCoins ?? request.suggestedCoins}
-                      onChange={(event) => setBonusCoinEdits((current) => ({ ...current, [request.id]: Number(event.target.value) || 0 }))}
-                      style={{ width: 96, padding: '8px 10px', borderRadius: 8, border: '1px solid #D8DEE9', boxSizing: 'border-box' }}
-                    />
-                  </td>
+                  <td style={tdStyle}>{formatPc(request.suggestedCoins)}</td>
                   <td style={tdStyle}>{request.generatedAt ? formatDate(request.generatedAt.slice(0, 10)) : '-'}</td>
                   <td style={{ ...tdStyle, color: '#B7791F', fontWeight: 900 }}>{request.status}</td>
                   <td style={tdStyle}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button type="button" disabled={Boolean(savingId)} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }} onClick={() => handleBonusReview(request, 'Approved')}>
-                        {savingId === request.id ? 'Saving...' : 'Approve'}
+                      <button
+                        type="button"
+                        disabled={Boolean(savingId) || (request.bonusType === 'monthly_target' && request.triggerType !== 'monthly_target_paid')}
+                        style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}
+                        onClick={() => handleBonusReview(request, 'Approved')}
+                        title={request.bonusType === 'monthly_target' && request.triggerType !== 'monthly_target_paid' ? 'Waiting for qualifying invoices to be paid' : undefined}
+                      >
+                        {savingId === request.id ? 'Saving...' : request.bonusType === 'monthly_target' && request.triggerType !== 'monthly_target_paid' ? 'Waiting for payment' : 'Approve'}
                       </button>
                       <button type="button" disabled={Boolean(savingId)} style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleBonusReview(request, 'Rejected')}>
                         Reject

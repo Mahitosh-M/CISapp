@@ -20,6 +20,13 @@ export interface CreditCalculationResult {
   summary: CreditDocumentData;
 }
 
+const DAY_MS = 86_400_000;
+const SETTLEMENT_TOLERANCE = 1;
+const PROVISIONAL_LIMIT_CAP = 10_000;
+const CASH_STARTER_CAP = 5_000;
+const ONE_CREDIT_CAP = 7_500;
+const TWO_CREDIT_CAP = 10_000;
+
 const numberOrZero = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -27,6 +34,10 @@ const numberOrZero = (value: unknown) => {
 
 const roundMoney = (value: number) => Math.round((Math.max(0, value) + Number.EPSILON) * 100) / 100;
 const roundPercent = (value: number) => Math.round(Math.max(0, Math.min(100, value)) * 100) / 100;
+const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+const formatLocalDate = (date: Date) => (
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+);
 
 const addDays = (dateString: string, days: number) => {
   const date = new Date(`${dateString}T00:00:00.000Z`);
@@ -35,39 +46,55 @@ const addDays = (dateString: string, days: number) => {
   return date.toISOString().slice(0, 10);
 };
 
+const daysBetween = (fromDate: string, toDate: string) => {
+  const from = new Date(`${fromDate}T00:00:00.000Z`).getTime();
+  const to = new Date(`${toDate}T00:00:00.000Z`).getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.round((to - from) / DAY_MS));
+};
+
+const percentile = (values: number[], percentage: number) => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = (sorted.length - 1) * percentage;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+};
+
+const median = (values: number[]) => percentile(values, 0.5);
+const p75 = (values: number[]) => percentile(values, 0.75);
+
+const normalized = (value: unknown) => String(value || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+
 const isExcludedInvoice = (invoice: CreditDocumentData) => {
-  const type = String(invoice.invoiceType || '').trim().toLowerCase();
+  const type = normalized(invoice.invoiceType);
+  const status = normalized(invoice.status);
   return [
-    'sales return',
-    'sale return',
-    'return',
-    'credit note',
-    'credit_note',
-    'cogs',
-    'inventory',
-    'inter-shop',
-    'inter shop',
-    'inter_shop'
-  ].includes(type);
+    'sales return', 'sale return', 'return', 'credit note', 'cogs', 'inventory',
+    'inter shop', 'quotation', 'quote', 'order', 'confirmed order'
+  ].includes(type) || ['draft', 'cancelled', 'canceled', 'deleted', 'void'].includes(status);
 };
 
 const isOpeningBalance = (invoice: CreditDocumentData) => {
-  const type = String(invoice.invoiceType || '').trim().toLowerCase();
-  return invoice.isOpeningBalance === true || type === 'opening_balance' || type === 'opening balance';
+  const type = normalized(invoice.invoiceType);
+  return invoice.isOpeningBalance === true || type === 'opening balance';
 };
 
-const paymentEffect = (payment: CreditDocumentData) => {
-  const amount = payment.amountAppliedToInvoice === undefined
-    ? numberOrZero(payment.amount ?? payment.amountReceived)
-    : numberOrZero(payment.amountAppliedToInvoice);
-  return Math.max(0, amount) + Math.max(0, numberOrZero(payment.cashDiscount));
-};
+const paymentAmount = (payment: CreditDocumentData) => Math.max(0, numberOrZero(
+  payment.amountAppliedToInvoice === undefined
+    ? payment.amount ?? payment.amountReceived
+    : payment.amountAppliedToInvoice
+));
 
-const getPaymentFactor = (percentage: number) => {
-  if (percentage >= 95) return 1.1;
-  if (percentage >= 85) return 1;
-  if (percentage >= 75) return 0.8;
-  if (percentage >= 60) return 0.6;
+const paymentEffect = (payment: CreditDocumentData) => paymentAmount(payment) + Math.max(0, numberOrZero(payment.cashDiscount));
+
+const getPaymentFactor = (score: number) => {
+  if (score >= 95) return 1.1;
+  if (score >= 85) return 1;
+  if (score >= 75) return 0.8;
+  if (score >= 60) return 0.6;
   return 0.3;
 };
 
@@ -80,19 +107,26 @@ const getHistoryFactor = (count: number) => {
   return 0;
 };
 
-export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCalculationResult => {
-  const now = input.now ?? new Date();
-  const today = now.toISOString().slice(0, 10);
-  const reviewedAt = now.toISOString();
-  const tier = ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'].includes(String(input.customer.tier))
-    ? String(input.customer.tier)
-    : 'Tier 4';
-  const creditDays = Math.max(0, Math.round(numberOrZero(input.settings.creditDays?.[tier])));
-  const bufferDays = Math.max(0, Math.round(numberOrZero(input.settings.paymentBuffers?.[tier])));
-  const starterCap = Math.max(0, numberOrZero(input.settings.creditPolicy?.starterLimitCap ?? 25000));
-  const graceDays = Math.max(0, Math.round(numberOrZero(input.settings.creditPolicy?.overdueGraceDays ?? 3)));
-  const paymentsByInvoice = new Map<string, CreditDocumentData[]>();
+interface CreditInvoiceRow {
+  id: string;
+  invoiceNumber: string;
+  total: number;
+  netCollectible: number;
+  outstanding: number;
+  invoiceDate: string;
+  dueDate: string;
+  completedDate: string;
+  settlementDays: number;
+  onTimeAmount: number;
+  lateAmountDays: number;
+  paymentExposure: number;
+  completed: boolean;
+  creditInvoice: boolean;
+  openingBalance: boolean;
+}
 
+const buildInvoiceRows = (input: CreditCalculationInput, today: string) => {
+  const paymentsByInvoice = new Map<string, CreditDocumentData[]>();
   input.payments.forEach(({ data }) => {
     const invoiceId = String(data.invoiceId || '');
     if (!invoiceId) return;
@@ -101,133 +135,227 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     paymentsByInvoice.set(invoiceId, rows);
   });
 
-  const receivableInvoices = input.invoices.filter(({ data }) => !isExcludedInvoice(data));
-  const invoiceRows = receivableInvoices.map(({ id, data }) => {
-    const total = Math.max(0, numberOrZero(data.totalSales ?? data.salesAmount));
-    const payments = paymentsByInvoice.get(id) ?? [];
-    const paid = payments.reduce((sum, payment) => sum + paymentEffect(payment), 0);
-    const outstanding = roundMoney(Math.max(0, total - paid));
-    const invoiceDate = String(data.date || data.invoiceDate || '');
-    const dueDate = String(data.dueDate || '') || addDays(invoiceDate, creditDays + bufferDays);
-    const paidOnTime = payments
-      .filter((payment) => String(payment.date || payment.paymentDate || '') <= dueDate)
-      .reduce((sum, payment) => sum + paymentEffect(payment), 0);
+  return input.invoices
+    .filter(({ data }) => !isExcludedInvoice(data))
+    .map(({ id, data }): CreditInvoiceRow => {
+      const total = Math.max(0, numberOrZero(data.totalSales ?? data.salesAmount));
+      const invoiceDate = String(data.date || data.invoiceDate || '');
+      const storedCreditDays = Math.max(0, Math.round(numberOrZero(data.creditDaysAtInvoice)));
+      const dueDate = String(data.savedDueDate || data.dueDate || '') || addDays(invoiceDate, storedCreditDays);
+      const rows = [...(paymentsByInvoice.get(id) ?? [])]
+        .filter((payment) => String(payment.date || payment.paymentDate || '') <= today)
+        .sort((left, right) => String(left.date || left.paymentDate || '').localeCompare(String(right.date || right.paymentDate || '')));
+      const approvedDiscount = rows.reduce((sum, payment) => sum + Math.max(0, numberOrZero(payment.cashDiscount)), 0);
+      const netCollectible = Math.max(0, total - approvedDiscount);
+      let remainingCollectible = netCollectible;
+      let runningEffect = 0;
+      let completedDate = '';
+      let onTimeAmount = 0;
+      let lateAmountDays = 0;
+      let paymentExposure = 0;
 
-    return {
-      id,
-      total,
-      outstanding,
-      invoiceDate,
-      dueDate,
-      onTimeAmount: Math.min(total, Math.max(0, paidOnTime)),
-      completed: total > 0 && outstanding <= 0.01,
-      openingBalance: isOpeningBalance(data)
-    };
-  });
+      rows.forEach((payment) => {
+        const date = String(payment.date || payment.paymentDate || '');
+        const allocated = Math.min(remainingCollectible, paymentAmount(payment));
+        remainingCollectible -= allocated;
+        runningEffect += paymentEffect(payment);
+        if (!completedDate && runningEffect >= total - SETTLEMENT_TOLERANCE) completedDate = date;
+        if (date <= dueDate) onTimeAmount += allocated;
+        const lateDays = date > dueDate ? daysBetween(dueDate, date) : 0;
+        paymentExposure += allocated;
+        lateAmountDays += allocated * lateDays;
+      });
 
-  const historyInvoices = invoiceRows.filter((invoice) =>
-    !invoice.openingBalance
-    && invoice.completed
-    && creditDays > 0
-    && /^\d{4}-\d{2}-\d{2}$/.test(invoice.invoiceDate)
-    && invoice.invoiceDate <= today
+      const outstanding = roundMoney(Math.max(0, total - runningEffect));
+      if (outstanding > SETTLEMENT_TOLERANCE && dueDate && today > dueDate) {
+        paymentExposure += outstanding;
+        lateAmountDays += outstanding * daysBetween(dueDate, today);
+      }
+      const completed = total > 0 && outstanding <= SETTLEMENT_TOLERANCE;
+      const creditInvoice = storedCreditDays > 0 || Boolean(dueDate && invoiceDate && dueDate > invoiceDate);
+
+      return {
+        id,
+        invoiceNumber: String(data.invoiceNumber || id),
+        total,
+        netCollectible,
+        outstanding,
+        invoiceDate,
+        dueDate,
+        completedDate,
+        settlementDays: completedDate ? daysBetween(invoiceDate, completedDate) : 0,
+        onTimeAmount: Math.min(netCollectible, onTimeAmount),
+        lateAmountDays,
+        paymentExposure,
+        completed,
+        creditInvoice,
+        openingBalance: isOpeningBalance(data)
+      };
+    });
+};
+
+const getPaymentMetrics = (rows: CreditInvoiceRow[]) => {
+  const lateAmountDays = rows.reduce((sum, row) => sum + row.lateAmountDays, 0);
+  const exposure = rows.reduce((sum, row) => sum + row.paymentExposure, 0);
+  const onTime = rows.reduce((sum, row) => sum + row.onTimeAmount, 0);
+  return {
+    weightedLateDays: exposure > 0 ? lateAmountDays / exposure : 0,
+    // Not-yet-due unpaid amounts are not payment-behaviour exposure yet.
+    onTimeAmountPercentage: exposure > 0 ? (onTime / exposure) * 100 : 100
+  };
+};
+
+export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCalculationResult => {
+  const now = input.now ?? new Date();
+  const today = formatLocalDate(now);
+  const reviewedAt = now.toISOString();
+  const tier = ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'].includes(String(input.customer.tier))
+    ? String(input.customer.tier)
+    : 'Tier 4';
+  const creditDays = Math.max(0, Math.round(numberOrZero(input.settings.creditDays?.[tier])));
+  const ninetyDaysAgo = addDays(today, -89);
+  const invoiceRows = buildInvoiceRows(input, today);
+  const historyRows = invoiceRows.filter((row) => !row.openingBalance && row.creditInvoice && row.invoiceDate <= today);
+  const completedCreditRows = historyRows.filter((row) => row.completed);
+  const recentCompletedCreditRows = completedCreditRows.filter((row) => row.invoiceDate >= ninetyDaysAgo);
+  const completedCashRows = invoiceRows.filter((row) => !row.openingBalance && !row.creditInvoice && row.completed && row.invoiceDate >= ninetyDaysAgo);
+  const firstHistoryDate = [...completedCreditRows].map((row) => row.invoiceDate).filter(Boolean).sort()[0];
+  const historyAgeDays = firstHistoryDate ? daysBetween(firstHistoryDate, today) + 1 : 0;
+  const observedMonths = historyAgeDays >= 90 ? 3 : Math.max(1, historyAgeDays / 30);
+  const recentCompletedCreditSales = recentCompletedCreditRows.reduce((sum, row) => sum + row.total, 0);
+  const recentMonthlyCompletedCreditSales = roundMoney(recentCompletedCreditSales / observedMonths);
+  const recentCycleP75 = p75(recentCompletedCreditRows.map((row) => row.settlementDays));
+  const lifetimeCycleP75 = p75(completedCreditRows.map((row) => row.settlementDays));
+  const fallbackCycle = recentCycleP75 || lifetimeCycleP75 || 3;
+  const effectiveCycleDays = roundMoney(clamp(
+    0.7 * (recentCycleP75 || fallbackCycle) + 0.3 * (lifetimeCycleP75 || fallbackCycle),
+    3,
+    20
+  ));
+  const representativeInvoiceValue = roundMoney(median(
+    (recentCompletedCreditRows.length > 0 ? recentCompletedCreditRows : completedCreditRows).map((row) => row.total)
+  ));
+  const cycleBasedLimit = roundMoney(recentMonthlyCompletedCreditSales * effectiveCycleDays / 30);
+  const baseCreditLimit = roundMoney(Math.max(cycleBasedLimit, representativeInvoiceValue));
+
+  const recentPaymentRows = historyRows.filter((row) => row.invoiceDate >= ninetyDaysAgo);
+  const recentPaymentMetrics = getPaymentMetrics(recentPaymentRows);
+  const lifetimePaymentMetrics = getPaymentMetrics(historyRows);
+  const combinedWeightedLateDays = roundMoney(
+    0.7 * recentPaymentMetrics.weightedLateDays + 0.3 * lifetimePaymentMetrics.weightedLateDays
   );
-  const firstHistoryDate = [...historyInvoices]
-    .map((invoice) => invoice.invoiceDate)
-    .filter(Boolean)
-    .sort()[0];
-  const firstHistoryTimestamp = firstHistoryDate
-    ? new Date(`${firstHistoryDate}T00:00:00.000Z`).getTime()
-    : now.getTime();
-  const creditHistoryDays = historyInvoices.length > 0
-    ? Math.max(1, Math.floor((now.getTime() - firstHistoryTimestamp) / 86_400_000) + 1)
-    : 0;
-  const historyMonths = Math.max(3, creditHistoryDays / 30);
-  const completedCreditInvoices = historyInvoices.length;
-  const onTimeDenominator = historyInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
-  const onTimeNumerator = historyInvoices.reduce((sum, invoice) => sum + invoice.onTimeAmount, 0);
-  const onTimePaymentPercentage = roundPercent(onTimeDenominator > 0 ? (onTimeNumerator / onTimeDenominator) * 100 : 0);
-  const paymentFactor = getPaymentFactor(onTimePaymentPercentage);
-  const historyFactor = getHistoryFactor(completedCreditInvoices);
-  const totalHistoricalCreditSales = roundMoney(historyInvoices.reduce((sum, invoice) => sum + invoice.total, 0));
-  const averageMonthlyCreditSales = roundMoney(totalHistoricalCreditSales / historyMonths);
-  const baseCreditLimit = roundMoney(averageMonthlyCreditSales * (creditDays / 30));
-  const rawEstablishedLimit = roundMoney(baseCreditLimit * paymentFactor * historyFactor);
-  const firstPaidInvoices = [...historyInvoices].sort((left, right) => left.invoiceDate.localeCompare(right.invoiceDate)).slice(0, 3);
-  const firstPaidAverage = firstPaidInvoices.length > 0
-    ? firstPaidInvoices.reduce((sum, invoice) => sum + invoice.total, 0) / firstPaidInvoices.length
-    : 0;
-  const derivedStarterLimit = roundMoney(Math.min(firstPaidAverage * 0.5, starterCap));
-  const manualStarterLimit = Math.min(starterCap, Math.max(0, numberOrZero(input.existingProfile?.manualStarterLimit)));
-  const starterLimit = manualStarterLimit > 0 ? roundMoney(manualStarterLimit) : derivedStarterLimit;
-  const existingApproved = Math.max(0, numberOrZero(input.existingProfile?.approvedCreditLimit));
-  const isStarter = completedCreditInvoices < 3;
-  let calculatedCreditLimit = isStarter ? starterLimit : rawEstablishedLimit;
+  const combinedOnTimeAmountPercentage = roundPercent(
+    0.7 * recentPaymentMetrics.onTimeAmountPercentage + 0.3 * lifetimePaymentMetrics.onTimeAmountPercentage
+  );
+  const latenessScore = Math.max(0, 100 - combinedWeightedLateDays * 4);
+  const creditPaymentScore = roundPercent(0.8 * latenessScore + 0.2 * combinedOnTimeAmountPercentage);
+  const paymentFactor = getPaymentFactor(creditPaymentScore);
+  const lifetimeHistoryFactor = getHistoryFactor(completedCreditRows.length);
+  const historyFactor = recentCompletedCreditRows.length > 0 ? lifetimeHistoryFactor : Math.min(1, lifetimeHistoryFactor);
+  const establishedLimit = roundMoney(baseCreditLimit * paymentFactor * historyFactor);
 
-  if (!isStarter && existingApproved > 0 && calculatedCreditLimit > existingApproved) {
-    calculatedCreditLimit = roundMoney(Math.min(calculatedCreditLimit, existingApproved * 1.2));
+  const manualStarterLimit = Math.min(PROVISIONAL_LIMIT_CAP, Math.max(0, numberOrZero(input.existingProfile?.manualStarterLimit)));
+  let limitSource = 'No history';
+  let calculatedCreditLimit = 0;
+
+  if (manualStarterLimit > 0 && completedCreditRows.length < 3) {
+    calculatedCreditLimit = roundMoney(manualStarterLimit);
+    limitSource = 'Admin provisional';
+  } else if (completedCreditRows.length >= 3) {
+    calculatedCreditLimit = establishedLimit;
+    limitSource = 'Established formula';
+  } else if (completedCreditRows.length === 2) {
+    calculatedCreditLimit = roundMoney(Math.min(TWO_CREDIT_CAP, median(completedCreditRows.map((row) => row.total)) * 0.75));
+    limitSource = 'Two completed credit invoices';
+  } else if (completedCreditRows.length === 1) {
+    calculatedCreditLimit = roundMoney(Math.min(ONE_CREDIT_CAP, completedCreditRows[0].total * 0.6));
+    limitSource = 'One completed credit invoice';
+  } else if (completedCashRows.length >= 3) {
+    calculatedCreditLimit = roundMoney(Math.min(CASH_STARTER_CAP, median(completedCashRows.map((row) => row.total)) * 0.5));
+    limitSource = 'Cash-history starter';
+  }
+
+  const completedTransactions = invoiceRows.filter((row) => !row.openingBalance && row.completed && row.completedDate);
+  const completedDates = completedTransactions.map((row) => row.completedDate).sort();
+  const lastCompletedDate = completedDates[completedDates.length - 1] || '';
+  const inactiveDays = lastCompletedDate ? daysBetween(lastCompletedDate, today) : 0;
+  if (manualStarterLimit <= 0) {
+    if (inactiveDays > 365) calculatedCreditLimit = Math.min(calculatedCreditLimit * 0.25, CASH_STARTER_CAP);
+    else if (inactiveDays > 180) calculatedCreditLimit = Math.min(calculatedCreditLimit * 0.5, CASH_STARTER_CAP);
+    else if (inactiveDays > 90) calculatedCreditLimit *= 0.75;
+    calculatedCreditLimit = roundMoney(calculatedCreditLimit);
+  }
+
+  const previousCalculatedLimit = Math.max(0, numberOrZero(
+    input.existingProfile?.calculatedCreditLimit ?? input.existingProfile?.approvedCreditLimit
+  ));
+  if (previousCalculatedLimit > 0 && calculatedCreditLimit > previousCalculatedLimit) {
+    calculatedCreditLimit = roundMoney(Math.min(calculatedCreditLimit, previousCalculatedLimit * 1.2));
   }
 
   const override = input.existingProfile?.creditOverride;
-  const overrideExpiresAt = String(override?.expiresAt || '');
-  const hasActiveOverride = Boolean(override && overrideExpiresAt >= today && numberOrZero(override.amount) >= 0);
-  let approvedCreditLimit = calculatedCreditLimit;
-  let approvalStatus: CalculatedApprovalStatus = 'approved';
-
-  if (creditDays <= 0) {
-    calculatedCreditLimit = 0;
-    approvedCreditLimit = 0;
-    approvalStatus = 'approved';
-  } else if (hasActiveOverride) {
-    approvedCreditLimit = roundMoney(numberOrZero(override.amount));
-    approvalStatus = 'approved';
-  }
-
-  const currentOutstanding = roundMoney(invoiceRows.reduce((sum, invoice) => sum + invoice.outstanding, 0));
-  const confirmedUninvoicedCreditOrders = Math.max(0, numberOrZero(input.existingProfile?.confirmedUninvoicedCreditOrders));
-  const overdueRows = invoiceRows.filter((invoice) => invoice.outstanding > 0 && invoice.dueDate && today > addDays(invoice.dueDate, graceDays));
-  const overdueAmount = roundMoney(overdueRows.reduce((sum, invoice) => sum + invoice.outstanding, 0));
-  const hasOverdueBeyondGrace = overdueRows.length > 0;
+  const hasActiveOverride = Boolean(override && String(override.expiresAt || '') >= today && numberOrZero(override.amount) >= 0);
+  const approvedCreditLimit = hasActiveOverride
+    ? roundMoney(numberOrZero(override.amount))
+    : calculatedCreditLimit;
+  const currentOutstanding = roundMoney(invoiceRows.reduce((sum, row) => sum + row.outstanding, 0));
+  const overdueRows = invoiceRows.filter((row) => row.outstanding > SETTLEMENT_TOLERANCE && row.dueDate && today > row.dueDate);
+  const overdueAmount = roundMoney(overdueRows.reduce((sum, row) => sum + row.outstanding, 0));
+  const oldestOverdue = [...overdueRows].sort((left, right) => left.dueDate.localeCompare(right.dueDate))[0];
+  const oldestOverdueDays = oldestOverdue ? daysBetween(oldestOverdue.dueDate, today) : 0;
+  const overdueSalesRatio = recentMonthlyCompletedCreditSales > 0
+    ? overdueAmount / recentMonthlyCompletedCreditSales
+    : overdueAmount > 0 ? 1 : 0;
+  const seriousRatio = Math.max(0, numberOrZero(input.settings.overduePolicy?.seriousSalesRatioPercent ?? 15)) / 100;
+  const seriousInvoiceCount = Math.max(1, Math.round(numberOrZero(input.settings.overduePolicy?.seriousInvoiceCount ?? 2)));
+  const seriousDays = Math.max(1, Math.round(numberOrZero(input.settings.overduePolicy?.seriousDays ?? 30)));
+  const seriousOverdue = overdueAmount > 0
+    && (overdueSalesRatio > seriousRatio || overdueRows.length >= seriousInvoiceCount || oldestOverdueDays > seriousDays);
   const manualHold = input.existingProfile?.manualHold === true;
-  let creditStatus: CalculatedCreditStatus = creditDays <= 0 ? 'disabled' : isStarter ? 'starter' : 'active';
-  if (manualHold || hasOverdueBeyondGrace) creditStatus = 'hold';
-
-  const availableCredit = creditStatus === 'hold' || creditStatus === 'disabled'
+  const isStarter = completedCreditRows.length < 3;
+  let creditStatus: CalculatedCreditStatus = isStarter ? 'starter' : 'active';
+  if (manualHold || seriousOverdue) creditStatus = 'hold';
+  const availableCredit = creditStatus === 'hold'
     ? 0
-    : roundMoney(Math.max(0, approvedCreditLimit - currentOutstanding - confirmedUninvoicedCreditOrders));
-  const nextDue = invoiceRows
-    .filter((invoice) => invoice.outstanding > 0 && invoice.dueDate)
+    : roundMoney(Math.max(0, approvedCreditLimit - currentOutstanding));
+  const nextDue = [...invoiceRows]
+    .filter((row) => row.outstanding > SETTLEMENT_TOLERANCE && row.dueDate)
     .sort((left, right) => left.dueDate.localeCompare(right.dueDate))[0];
+  const overLimitAmount = roundMoney(Math.max(0, currentOutstanding - approvedCreditLimit));
   const customerName = String(input.customer.name || input.customer.customerName || '');
+  const approvalStatus: CalculatedApprovalStatus = 'approved';
   const profile: CreditDocumentData = {
     customerId: input.customerId,
     customerName,
     tier,
     creditDays,
     currentOutstanding,
-    confirmedUninvoicedCreditOrders,
     creditHistoryDays: 90,
-    totalCreditInvoiceAmountInLookback: totalHistoricalCreditSales,
-    totalCreditInvoiceAmountLast90Days: roundMoney(historyInvoices
-      .filter((invoice) => {
-        const ninetyDaysAgo = new Date(now);
-        ninetyDaysAgo.setUTCDate(ninetyDaysAgo.getUTCDate() - 90);
-        return invoice.invoiceDate >= ninetyDaysAgo.toISOString().slice(0, 10);
-      })
-      .reduce((sum, invoice) => sum + invoice.total, 0)),
-    averageMonthlyCreditSales,
+    totalCreditInvoiceAmountInLookback: roundMoney(recentCompletedCreditSales),
+    totalCreditInvoiceAmountLast90Days: roundMoney(recentCompletedCreditSales),
+    averageMonthlyCreditSales: recentMonthlyCompletedCreditSales,
+    recentMonthlyCompletedCreditSales,
+    representativeInvoiceValue,
+    effectiveCycleDays,
     baseCreditLimit,
     calculatedCreditLimit,
     approvedCreditLimit,
     availableCredit,
+    overLimitAmount,
     paymentFactor,
     historyFactor,
-    onTimePaymentPercentage,
-    completedCreditInvoices,
+    creditPaymentScore,
+    weightedLateDays: combinedWeightedLateDays,
+    onTimePaymentPercentage: combinedOnTimeAmountPercentage,
+    completedCreditInvoices: completedCreditRows.length,
     overdueAmount,
-    hasOverdueBeyondGrace,
+    oldestOverdueInvoice: oldestOverdue?.invoiceNumber || '',
+    oldestOverdueDate: oldestOverdue?.dueDate || null,
+    oldestOverdueDays,
+    hasOverdueBeyondGrace: overdueAmount > 0,
     creditStatus,
     creditLimitApprovalStatus: approvalStatus,
+    limitSource,
     nextInvoiceDueDate: nextDue?.dueDate || null,
     nextInvoiceDueAmount: nextDue ? nextDue.outstanding : null,
     lastCreditReviewAt: reviewedAt,
@@ -236,17 +364,26 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     updatedAt: reviewedAt
   };
 
-  if (isStarter && manualStarterLimit > 0) profile.manualStarterLimit = manualStarterLimit;
-  if (hasActiveOverride) profile.creditOverride = override;
+  if (manualStarterLimit > 0 || Object.prototype.hasOwnProperty.call(input.existingProfile ?? {}, 'manualStarterLimit')) {
+    profile.manualStarterLimit = manualStarterLimit;
+  }
+  if (override) profile.creditOverride = override;
 
   return {
     profile,
     summary: {
       customerId: input.customerId,
+      suggestedCreditLimit: approvedCreditLimit,
+      calculatedCreditLimit,
       approvedCreditLimit,
       availableCredit,
-      usedCredit: roundMoney(currentOutstanding + confirmedUninvoicedCreditOrders),
+      usedCredit: currentOutstanding,
+      overLimitAmount,
       creditDays,
+      limitSource,
+      oldestOverdueInvoice: oldestOverdue?.invoiceNumber || '',
+      oldestOverdueDate: oldestOverdue?.dueDate || null,
+      oldestOverdueDays,
       nextInvoiceDueDate: nextDue?.dueDate || null,
       nextInvoiceDueAmount: nextDue ? nextDue.outstanding : null,
       creditStatus,

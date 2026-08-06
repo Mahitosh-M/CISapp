@@ -3,6 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getCountFromServer,
   getDoc,
   getDocs,
   limit as firestoreLimit,
@@ -35,6 +36,8 @@ import type {
   OfferFormData,
   Payment,
   PaymentFormData,
+  BusinessMonthlySnapshot,
+  CustomerMonthlySnapshot,
   MonthlyCustomerStats,
   LoyaltyLedgerEntry,
   PcBalanceRecord,
@@ -49,6 +52,7 @@ import type {
 } from '../types';
 import {
   DEFAULT_SETTINGS,
+  buildInvoiceTimeTerms,
   calculateDynamicDueDate,
   getEffectiveInvoiceDueDate,
   getPaymentTermsLabel,
@@ -61,6 +65,13 @@ import { buildCustomerScores } from '../utils/customerAnalytics';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
 import { getOpeningBalanceInvoiceId, getOpeningBalanceInvoiceNumber, isOpeningBalanceInvoice, OPENING_BALANCE_INVOICE_TYPE } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import {
+  buildAutomaticBonusCandidates,
+  FIXED_BONUS_PC,
+  getReferralBonusId,
+  isInvoiceFullyPaidThrough,
+  isValidBonusInvoice
+} from '../utils/bonusPc';
 
 const CUSTOMERS = 'customers';
 const INVOICES = 'invoices';
@@ -78,6 +89,9 @@ const REWARD_ITEMS = 'rewardItems';
 const REDEMPTION_REQUESTS = 'redemptionRequests';
 const OVERDUE_PC_REQUESTS = 'overduePcRequests';
 const BONUS_PC_REQUESTS = 'bonusPcRequests';
+const COUNTERS = 'counters';
+const CUSTOMER_MONTHLY_SNAPSHOTS = 'customerMonthlySnapshots';
+const BUSINESS_MONTHLY_SNAPSHOTS = 'businessMonthlySnapshots';
 const DEFAULT_LIST_LIMIT = 50;
 const ACTIVE_OFFER_LIMIT = 20;
 const ACTIVE_REWARD_LIMIT = 50;
@@ -165,7 +179,145 @@ export const clearFirestoreSessionCache = (prefix?: string) => {
   if (prefix === SETTINGS) appSettingsCache = undefined;
 };
 
+export const patchCachedCustomer = (customerId: string, updates: Partial<Customer>) => {
+  [...readCache.entries()].forEach(([key, entry]) => {
+    if (!key.startsWith(`${CUSTOMERS}:`) || !Array.isArray(entry.value)) return;
+    entry.value = entry.value.map((item) => (
+      item && typeof item === 'object' && 'id' in item && item.id === customerId
+        ? { ...item, ...updates }
+        : item
+    ));
+  });
+};
+
+const invalidateDateScopedCache = (collectionName: string, affectedDates: string[]) => {
+  [...readCache.keys()].forEach((key) => {
+    if (!key.startsWith(`${collectionName}:`)) return;
+    try {
+      const options = JSON.parse(key.slice(collectionName.length + 1)) as {
+        fromDate?: string;
+        toDate?: string;
+        fromMonth?: string;
+        toMonth?: string;
+      };
+      const affectsQuery = affectedDates.some((date) => {
+        const month = date.slice(0, 7);
+        if (options.fromDate || options.toDate) {
+          return (!options.fromDate || date >= options.fromDate) && (!options.toDate || date <= options.toDate);
+        }
+        if (options.fromMonth || options.toMonth) {
+          return (!options.fromMonth || month >= options.fromMonth) && (!options.toMonth || month <= options.toMonth);
+        }
+        return true;
+      });
+      if (affectsQuery) readCache.delete(key);
+    } catch {
+      readCache.delete(key);
+    }
+  });
+};
+
+const invalidateTransactionCaches = (customerIds: string[], affectedDates: string[]) => {
+  invalidateDateScopedCache(INVOICES, affectedDates);
+  invalidateDateScopedCache(PAYMENTS, affectedDates);
+  invalidateDateScopedCache(BUSINESS_MONTHLY_SNAPSHOTS, affectedDates);
+  customerIds.filter(Boolean).forEach((customerId) => {
+    clearFirestoreSessionCache(`${CUSTOMER_MONTHLY_SNAPSHOTS}:${customerId}`);
+    clearFirestoreSessionCache(`${PC_BALANCES}:${customerId}`);
+  });
+};
+
 const cacheKey = (collectionName: string, options?: unknown) => `${collectionName}:${JSON.stringify(options ?? {})}`;
+
+interface MonthlySnapshotDelta {
+  customerId: string;
+  date: string;
+  totalSales?: number;
+  totalProfit?: number;
+  invoiceCount?: number;
+  paymentsReceived?: number;
+}
+
+const getSnapshotMonth = (date: string) => /^\d{4}-\d{2}/.test(date) ? date.slice(0, 7) : '';
+
+const applyMonthlySnapshotDeltas = async (deltas: MonthlySnapshotDelta[]) => {
+  const groupedByCustomer = new Map<string, Required<Omit<MonthlySnapshotDelta, 'date'>> & { month: string }>();
+  const groupedBusiness = new Map<string, Omit<Required<MonthlySnapshotDelta>, 'customerId' | 'date'> & { month: string }>();
+
+  deltas.forEach((delta) => {
+    const month = getSnapshotMonth(delta.date);
+    if (!delta.customerId || !month) return;
+    const customerKey = `${delta.customerId}_${month}`;
+    const customerRow = groupedByCustomer.get(customerKey) ?? {
+      customerId: delta.customerId,
+      month,
+      totalSales: 0,
+      totalProfit: 0,
+      invoiceCount: 0,
+      paymentsReceived: 0
+    };
+    customerRow.totalSales += numberOrZero(delta.totalSales);
+    customerRow.totalProfit += numberOrZero(delta.totalProfit);
+    customerRow.invoiceCount += numberOrZero(delta.invoiceCount);
+    customerRow.paymentsReceived += numberOrZero(delta.paymentsReceived);
+    groupedByCustomer.set(customerKey, customerRow);
+
+    const businessRow = groupedBusiness.get(month) ?? {
+      month,
+      totalSales: 0,
+      totalProfit: 0,
+      invoiceCount: 0,
+      paymentsReceived: 0
+    };
+    businessRow.totalSales += numberOrZero(delta.totalSales);
+    businessRow.totalProfit += numberOrZero(delta.totalProfit);
+    businessRow.invoiceCount += numberOrZero(delta.invoiceCount);
+    businessRow.paymentsReceived += numberOrZero(delta.paymentsReceived);
+    groupedBusiness.set(month, businessRow);
+  });
+
+  if (groupedByCustomer.size === 0) return;
+  const timestamp = nowIso();
+  await runTransaction(db, async (transaction) => {
+    const customerRefs = [...groupedByCustomer.keys()].map((id) => doc(db, CUSTOMER_MONTHLY_SNAPSHOTS, id));
+    const businessRefs = [...groupedBusiness.keys()].map((month) => doc(db, BUSINESS_MONTHLY_SNAPSHOTS, month));
+    const [customerSnapshots, businessSnapshots] = await Promise.all([
+      Promise.all(customerRefs.map((ref) => transaction.get(ref))),
+      Promise.all(businessRefs.map((ref) => transaction.get(ref)))
+    ]);
+
+    customerSnapshots.forEach((snapshot, index) => {
+      const delta = groupedByCustomer.get(snapshot.id);
+      if (!delta) return;
+      const existing = snapshot.data() ?? {};
+      transaction.set(snapshot.ref, {
+        customerId: delta.customerId,
+        month: delta.month,
+        totalSales: Math.max(0, numberOrZero(existing.totalSales) + delta.totalSales),
+        totalProfit: numberOrZero(existing.totalProfit) + delta.totalProfit,
+        invoiceCount: Math.max(0, Math.round(numberOrZero(existing.invoiceCount) + delta.invoiceCount)),
+        paymentsReceived: Math.max(0, numberOrZero(existing.paymentsReceived) + delta.paymentsReceived),
+        needsBackfill: snapshot.exists() ? existing.needsBackfill === true : true,
+        updatedAt: timestamp
+      });
+    });
+
+    businessSnapshots.forEach((snapshot) => {
+      const delta = groupedBusiness.get(snapshot.id);
+      if (!delta) return;
+      const existing = snapshot.data() ?? {};
+      transaction.set(snapshot.ref, {
+        month: delta.month,
+        totalSales: Math.max(0, numberOrZero(existing.totalSales) + delta.totalSales),
+        totalProfit: numberOrZero(existing.totalProfit) + delta.totalProfit,
+        invoiceCount: Math.max(0, Math.round(numberOrZero(existing.invoiceCount) + delta.invoiceCount)),
+        paymentsReceived: Math.max(0, numberOrZero(existing.paymentsReceived) + delta.paymentsReceived),
+        needsBackfill: snapshot.exists() ? existing.needsBackfill === true : true,
+        updatedAt: timestamp
+      });
+    });
+  });
+};
 
 const withoutUndefined = <T extends Record<string, unknown>>(payload: T) => {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)) as Partial<T>;
@@ -249,6 +401,7 @@ export async function syncCustomerFinancialSummary(customerId: string) {
   };
 
   await updateDoc(doc(db, CUSTOMERS, customerId), payload);
+  patchCachedCustomer(customerId, payload);
 
   return payload;
 }
@@ -265,7 +418,7 @@ export const getPaymentTermsForTier = (tier: CustomerTier) => {
 };
 
 export const getCreditDaysForTier = (tier: CustomerTier) => {
-  return DEFAULT_SETTINGS.creditDays[tier] + DEFAULT_SETTINGS.paymentBuffers[tier];
+  return DEFAULT_SETTINGS.creditDays[tier];
 };
 
 export const calculateDueDate = (invoiceDate: string, tier: CustomerTier, settings?: AppSettings) => {
@@ -310,9 +463,17 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     customerId: String(data.customerId || ''),
     customerName: String(data.customerName || ''),
     invoiceType: data.invoiceType ? String(data.invoiceType) : undefined,
+    recordStatus: data.status ? String(data.status) : undefined,
     isOpeningBalance: data.isOpeningBalance === true,
     date: String(data.date || data.invoiceDate || ''),
     dueDate: String(data.dueDate || ''),
+    tierAtInvoice: data.tierAtInvoice as CustomerTier | undefined,
+    pcPercentageAtInvoice: data.pcPercentageAtInvoice === undefined ? undefined : numberOrZero(data.pcPercentageAtInvoice),
+    creditDaysAtInvoice: data.creditDaysAtInvoice === undefined ? undefined : numberOrZero(data.creditDaysAtInvoice),
+    bufferDaysAtInvoice: data.bufferDaysAtInvoice === undefined ? undefined : numberOrZero(data.bufferDaysAtInvoice),
+    savedDueDate: data.savedDueDate ? String(data.savedDueDate) : undefined,
+    finalPcCutoffDate: data.finalPcCutoffDate ? String(data.finalPcCutoffDate) : undefined,
+    termsEstimated: data.termsEstimated === true,
     salesAmount,
     costAmount,
     transportAmount,
@@ -375,6 +536,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     giftPeriodOptions: data.giftPeriodOptions as AppSettings['giftPeriodOptions'],
     staffPermissions: data.staffPermissions as AppSettings['staffPermissions'],
     creditPolicy: data.creditPolicy as AppSettings['creditPolicy'],
+    overduePolicy: data.overduePolicy as AppSettings['overduePolicy'],
     loyaltySettings: data.loyaltySettings as AppSettings['loyaltySettings'],
     targetSettings: data.targetSettings as AppSettings['targetSettings'],
     showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,
@@ -543,6 +705,29 @@ const mapMonthlyCustomerStatsDoc = (id: string, data: Record<string, unknown>): 
   updatedAt: String(data.updatedAt || '')
 });
 
+const mapCustomerMonthlySnapshotDoc = (id: string, data: Record<string, unknown>): CustomerMonthlySnapshot => ({
+  id,
+  customerId: String(data.customerId || ''),
+  month: String(data.month || ''),
+  totalSales: numberOrZero(data.totalSales),
+  totalProfit: numberOrZero(data.totalProfit),
+  invoiceCount: numberOrZero(data.invoiceCount),
+  paymentsReceived: numberOrZero(data.paymentsReceived),
+  needsBackfill: data.needsBackfill === true,
+  updatedAt: String(data.updatedAt || '')
+});
+
+const mapBusinessMonthlySnapshotDoc = (id: string, data: Record<string, unknown>): BusinessMonthlySnapshot => ({
+  id,
+  month: String(data.month || id),
+  totalSales: numberOrZero(data.totalSales),
+  totalProfit: numberOrZero(data.totalProfit),
+  invoiceCount: numberOrZero(data.invoiceCount),
+  paymentsReceived: numberOrZero(data.paymentsReceived),
+  needsBackfill: data.needsBackfill === true,
+  updatedAt: String(data.updatedAt || '')
+});
+
 const mapRewardItemDoc = (id: string, data: Record<string, unknown>): RewardItem => ({
   id,
   name: String(data.name || ''),
@@ -591,18 +776,21 @@ const mapOverduePcRequestDoc = (id: string, data: Record<string, unknown>): Over
 });
 
 export const BONUS_PC_LABELS: Record<BonusPcType, string> = {
+  monthly_target: 'Monthly sales-target bonus',
+  clean_payment_month: 'Clean-payment-month bonus',
   new_customer: 'New customer bonus',
-  payment: 'Payment bonus',
-  purchase_target: 'Purchase target bonus',
   referral: 'Referral bonus'
 };
 
-const isBonusPcType = (value: unknown): value is BonusPcType => (
-  value === 'new_customer' || value === 'payment' || value === 'purchase_target' || value === 'referral'
-);
+const normalizeBonusPcType = (value: unknown): BonusPcType => {
+  if (value === 'monthly_target' || value === 'purchase_target') return 'monthly_target';
+  if (value === 'clean_payment_month' || value === 'payment') return 'clean_payment_month';
+  if (value === 'referral') return 'referral';
+  return 'new_customer';
+};
 
 const mapBonusPcRequestDoc = (id: string, data: Record<string, unknown>): BonusPcRequest => {
-  const bonusType = isBonusPcType(data.bonusType) ? data.bonusType : 'new_customer';
+  const bonusType = normalizeBonusPcType(data.bonusType);
 
   return {
     id,
@@ -653,15 +841,10 @@ const getMonthDateRange = (month: string) => {
   };
 };
 
-const getBonusRequestId = (customerId: string, bonusType: 'payment' | 'purchase_target', month: string) => {
-  const suffix = bonusType === 'payment' ? 'payment' : 'target';
-  return `${customerId}_${suffix}_${month.replace('-', '_')}`;
-};
-
 const getMonthFromBonusRequest = (request: BonusPcRequest) => {
-  const match = request.id.match(/_(payment|target)_(\d{4})_(\d{2})$/);
+  const match = request.id.match(/:(\d{4})-(\d{2})$/);
   if (match) {
-    return `${match[2]}-${match[3]}`;
+    return `${match[1]}-${match[2]}`;
   }
 
   return request.generatedAt ? request.generatedAt.slice(0, 7) : getCurrentMonthKey();
@@ -991,10 +1174,39 @@ const getFinancialYearRange = (date = new Date()) => {
   };
 };
 
-export const getNextInvoiceNumber = async (settings?: AppSettings) => {
-  const activeSettings = mergeWithDefaultSettings(settings ?? (await getAppSettings()));
-  const prefix = activeSettings.invoicePrefix || 'INV';
-  const financialYear = getFinancialYearRange();
+export const getCustomerCount = async () => {
+  return getCached(cacheKey(CUSTOMERS, { count: true }), async () => {
+    const snapshot = await getCountFromServer(collection(db, CUSTOMERS));
+    return snapshot.data().count;
+  });
+};
+
+const parseInvoiceDate = (invoiceDate?: string) => {
+  if (!invoiceDate) return new Date();
+  const [year, month, day] = invoiceDate.split('-').map(Number);
+  return Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)
+    ? new Date(year, month - 1, day)
+    : new Date();
+};
+
+const getInvoiceCounterDetails = (settings: AppSettings, invoiceDate?: string) => {
+  const prefix = settings.invoicePrefix || 'INV';
+  const financialYear = getFinancialYearRange(parseInvoiceDate(invoiceDate));
+  const scope = settings.financialYearReset
+    ? `${financialYear.start.slice(0, 4)}_${financialYear.end.slice(0, 4)}`
+    : 'all';
+  const cleanPrefix = prefix.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40) || 'INV';
+
+  return {
+    prefix,
+    financialYear,
+    scope,
+    ref: doc(db, COUNTERS, `invoices_${cleanPrefix}_${scope}`)
+  };
+};
+
+const getHighestExistingInvoiceSequence = async (activeSettings: AppSettings, invoiceDate?: string) => {
+  const { prefix, financialYear } = getInvoiceCounterDetails(activeSettings, invoiceDate);
   const invoicesQuery = activeSettings.financialYearReset
     ? query(collection(db, INVOICES), where('date', '>=', financialYear.start), where('date', '<=', financialYear.end), orderBy('date', 'desc'))
     : query(collection(db, INVOICES), orderBy('invoiceNumber', 'desc'), firestoreLimit(1));
@@ -1012,28 +1224,82 @@ export const getNextInvoiceNumber = async (settings?: AppSettings) => {
     return Number.isFinite(numericPart) && numericPart > highest ? numericPart : highest;
   }, 0);
 
-  return `${prefix}-${String(highestNumber + 1).padStart(4, '0')}`;
+  return highestNumber;
+};
+
+export const getNextInvoiceNumber = async (settings?: AppSettings, invoiceDate?: string) => {
+  const activeSettings = mergeWithDefaultSettings(settings ?? (await getAppSettings()));
+  const counter = getInvoiceCounterDetails(activeSettings, invoiceDate);
+  const counterSnapshot = await getDoc(counter.ref);
+  let currentSequence = counterSnapshot.exists()
+    ? Math.max(0, Math.round(numberOrZero(counterSnapshot.data().sequence)))
+    : await getHighestExistingInvoiceSequence(activeSettings, invoiceDate);
+
+  if (!counterSnapshot.exists() && currentSequence > 0) {
+    currentSequence = await runTransaction(db, async (transaction) => {
+      const latestCounter = await transaction.get(counter.ref);
+      if (latestCounter.exists()) {
+        return Math.max(0, Math.round(numberOrZero(latestCounter.data().sequence)));
+      }
+      transaction.set(counter.ref, {
+        kind: 'invoice',
+        prefix: counter.prefix,
+        scope: counter.scope,
+        sequence: currentSequence,
+        updatedAt: nowIso()
+      });
+      return currentSequence;
+    });
+  }
+
+  return `${counter.prefix}-${String(currentSequence + 1).padStart(4, '0')}`;
 };
 
 export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditUser) => {
   // Rebuild first so legacy overpayments are available as advance before this invoice is created.
   await syncCustomerFinancialSummary(invoice.customerId);
-  const invoiceNumber = await getNextInvoiceNumber();
+  const activeSettings = await getAppSettings();
+  const counter = getInvoiceCounterDetails(activeSettings, invoice.date);
+  const initialCounterSnapshot = await getDoc(counter.ref);
+  const initialSequence = initialCounterSnapshot.exists()
+    ? 0
+    : await getHighestExistingInvoiceSequence(activeSettings, invoice.date);
   const docRef = doc(collection(db, INVOICES));
   const advancePaymentRef = doc(collection(db, PAYMENTS));
   const customerRef = doc(db, CUSTOMERS, invoice.customerId);
   const timestamp = nowIso();
   let advanceAppliedAmount = 0;
+  let invoiceNumber = '';
 
   await runTransaction(db, async (transaction) => {
-    const customerSnapshot = await transaction.get(customerRef);
+    const [customerSnapshot, counterSnapshot] = await Promise.all([
+      transaction.get(customerRef),
+      transaction.get(counter.ref)
+    ]);
+    if (!customerSnapshot.exists()) throw new Error('Selected customer no longer exists.');
+    const currentSequence = counterSnapshot.exists()
+      ? Math.max(0, Math.round(numberOrZero(counterSnapshot.data().sequence)))
+      : initialSequence;
+    const nextSequence = currentSequence + 1;
+    invoiceNumber = `${counter.prefix}-${String(nextSequence).padStart(4, '0')}`;
+    const customerTier = (customerSnapshot.data().tier as CustomerTier | undefined) || 'Tier 4';
+    const invoiceTerms = buildInvoiceTimeTerms(invoice.date, invoice.dueDate, customerTier, activeSettings);
     const advanceBalance = customerSnapshot.exists()
       ? Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
       : 0;
     advanceAppliedAmount = Math.min(advanceBalance, Math.max(0, numberOrZero(invoice.totalSales)));
 
+    transaction.set(counter.ref, {
+      kind: 'invoice',
+      prefix: counter.prefix,
+      scope: counter.scope,
+      sequence: nextSequence,
+      updatedAt: timestamp
+    });
     transaction.set(docRef, {
       ...invoice,
+      dueDate: invoiceTerms.savedDueDate,
+      ...invoiceTerms,
       invoiceNumber,
       createdAt: timestamp,
       updatedAt: timestamp
@@ -1068,24 +1334,65 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     }
   });
 
+  await applyMonthlySnapshotDeltas([{
+    customerId: invoice.customerId,
+    date: invoice.date,
+    totalSales: invoice.totalSales,
+    totalProfit: invoice.totalProfit,
+    invoiceCount: 1
+  }]);
   await syncCustomerFinancialSummary(invoice.customerId);
-  clearFirestoreSessionCache();
+  invalidateTransactionCaches([invoice.customerId], [invoice.date]);
   return { id: docRef.id, invoiceNumber, ref: docRef, advanceAppliedAmount };
 };
 
 export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFormData, auditUser?: AuditUser) => {
-  const existingInvoiceSnapshot = await getDoc(doc(db, INVOICES, invoiceId));
+  const [existingInvoiceSnapshot, customer, activeSettings] = await Promise.all([
+    getDoc(doc(db, INVOICES, invoiceId)),
+    getCustomerById(invoice.customerId),
+    getAppSettings()
+  ]);
   const existingInvoice = existingInvoiceSnapshot.exists() ? mapInvoiceDoc(existingInvoiceSnapshot.id, existingInvoiceSnapshot.data()) : undefined;
+  if (!existingInvoice) throw new Error('Invoice record no longer exists. Refresh the list and try again.');
+  if (!customer) throw new Error('Selected customer no longer exists.');
+  const preserveExistingTerms = existingInvoice.customerId === invoice.customerId && !isOpeningBalanceInvoice(existingInvoice);
+  const invoiceTerms = isOpeningBalanceInvoice(existingInvoice)
+    ? undefined
+    : buildInvoiceTimeTerms(
+        invoice.date,
+        invoice.dueDate,
+        customer.tier,
+        activeSettings,
+        preserveExistingTerms ? existingInvoice : undefined
+      );
 
   await updateDoc(doc(db, INVOICES, invoiceId), {
     ...invoice,
+    ...(invoiceTerms ? { dueDate: invoiceTerms.savedDueDate, ...invoiceTerms } : {}),
     updatedAt: nowIso()
   });
+
+  await applyMonthlySnapshotDeltas([
+    {
+      customerId: existingInvoice.customerId,
+      date: existingInvoice.date,
+      totalSales: -existingInvoice.totalSales,
+      totalProfit: -existingInvoice.totalProfit,
+      invoiceCount: -1
+    },
+    {
+      customerId: invoice.customerId,
+      date: invoice.date,
+      totalSales: invoice.totalSales,
+      totalProfit: invoice.totalProfit,
+      invoiceCount: 1
+    }
+  ]);
 
   const affectedCustomerIds = [existingInvoice?.customerId, invoice.customerId].filter((customerId): customerId is string => Boolean(customerId));
   await Promise.all([...new Set(affectedCustomerIds)].map((customerId) => syncCustomerFinancialSummary(customerId)));
   await recalculateProtectedPcForInvoice(invoiceId);
-  clearFirestoreSessionCache();
+  invalidateTransactionCaches(affectedCustomerIds, [existingInvoice.date, invoice.date]);
 };
 
 export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUser) => {
@@ -1094,6 +1401,8 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
   const linkedPaymentRefs = linkedPaymentsSnapshot.docs.map((paymentDoc) => paymentDoc.ref);
   let deletedPaymentCount = 0;
   let affectedCustomerId = '';
+  let deletedInvoice: Invoice | undefined;
+  let deletedPayments: Payment[] = [];
 
   if (linkedPaymentRefs.length >= 450) {
     throw new Error('This invoice has too many linked payments to delete safely in one operation.');
@@ -1106,12 +1415,22 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
       throw new Error('Invoice record no longer exists. Refresh the list and try again.');
     }
 
-    affectedCustomerId = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data()).customerId;
+    deletedInvoice = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data());
+    affectedCustomerId = deletedInvoice.customerId;
 
     const paymentSnapshots = await Promise.all(linkedPaymentRefs.map((paymentRef) => transaction.get(paymentRef)));
     const paymentsToDelete = paymentSnapshots
       .filter((paymentSnapshot) => paymentSnapshot.exists())
       .map((paymentSnapshot) => mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()));
+    deletedPayments = paymentsToDelete;
+    const invoicePcLedgerRef = deletedInvoice.customerId
+      ? doc(db, LOYALTY_LEDGER, `${deletedInvoice.customerId}_${deletedInvoice.id}_invoice_pc`)
+      : undefined;
+    const invoicePcBalanceRef = deletedInvoice.customerId ? doc(db, PC_BALANCES, deletedInvoice.customerId) : undefined;
+    const [invoicePcLedgerSnapshot, invoicePcBalanceSnapshot] = await Promise.all([
+      invoicePcLedgerRef ? transaction.get(invoicePcLedgerRef) : Promise.resolve(undefined),
+      invoicePcBalanceRef ? transaction.get(invoicePcBalanceRef) : Promise.resolve(undefined)
+    ]);
     const oldBalanceRestoreByCustomerId = paymentsToDelete.reduce((restoreMap, payment) => {
       const amountToRestore = Math.max(0, payment.amountUsedForOldBalance ?? 0);
 
@@ -1141,6 +1460,42 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
       )
     );
     const timestamp = nowIso();
+
+    if (invoicePcLedgerSnapshot?.exists()) {
+      const previousPoints = Math.max(0, Math.round(numberOrZero(invoicePcLedgerSnapshot.data().points)));
+      const ledgerCreatedAt = String(invoicePcLedgerSnapshot.data().createdAt || '');
+      const pcBalance = invoicePcBalanceSnapshot?.exists()
+        ? mapPcBalanceRecord(invoicePcBalanceSnapshot.id, invoicePcBalanceSnapshot.data())
+        : undefined;
+      const belongsToProtectedRecovery = Boolean(
+        ledgerCreatedAt && pcBalance?.protectedAt && ledgerCreatedAt <= pcBalance.protectedAt
+      );
+
+      if (previousPoints > 0 && !belongsToProtectedRecovery) {
+        if (!pcBalance || !invoicePcBalanceRef || !invoicePcLedgerRef) {
+          throw new Error('The invoice PC ledger exists, but the customer PC balance is missing.');
+        }
+
+        const nextAvailablePc = pcBalance.availablePc - previousPoints;
+        const nextIncomingPc = pcBalance.incomingPc - previousPoints;
+        if (nextAvailablePc < 0 || nextIncomingPc < 0) {
+          throw new Error('This invoice PC has already been redeemed and must be corrected before deleting the invoice.');
+        }
+
+        transaction.update(invoicePcBalanceRef, {
+          availablePc: nextAvailablePc,
+          incomingPc: nextIncomingPc,
+          lastAwardReferenceId: deletedInvoice.id,
+          updatedAt: timestamp
+        });
+        transaction.update(invoicePcLedgerRef, {
+          points: 0,
+          reason: `Invoice ${deletedInvoice.invoiceNumber || deletedInvoice.id} deleted; PC reversed`,
+          month: timestamp.slice(0, 7),
+          createdAt: timestamp
+        });
+      }
+    }
 
     customerSnapshotsById.forEach((customerSnapshot, customerId) => {
       const amountToRestore = oldBalanceRestoreByCustomerId.get(customerId) ?? 0;
@@ -1178,8 +1533,26 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
     throw new Error('Invoice delete did not complete. Refresh the list and try again.');
   }
 
+  await applyMonthlySnapshotDeltas([
+    ...(deletedInvoice && !isOpeningBalanceInvoice(deletedInvoice) ? [{
+      customerId: deletedInvoice.customerId,
+      date: deletedInvoice.date,
+      totalSales: -deletedInvoice.totalSales,
+      totalProfit: -deletedInvoice.totalProfit,
+      invoiceCount: -1
+    }] : []),
+    ...deletedPayments.map((payment) => ({
+      customerId: payment.customerId,
+      date: payment.date,
+      paymentsReceived: -payment.amount
+    }))
+  ]);
+
   await syncCustomerFinancialSummary(affectedCustomerId);
-  clearFirestoreSessionCache();
+  invalidateTransactionCaches(
+    [affectedCustomerId],
+    [deletedInvoice?.date, ...deletedPayments.map((payment) => payment.date)].filter((date): date is string => Boolean(date))
+  );
   return { deletedPaymentCount };
 };
 
@@ -1385,7 +1758,7 @@ const recalculateProtectedPcForInvoice = async (invoiceId: string) => {
         availablePc: recalculatedPoints,
         incomingPc: recalculatedPoints,
         redeemedPc: 0,
-        protectedAt: timestamp,
+        protectedAt: '',
         lastAwardReferenceId: invoice.id,
         updatedAt: timestamp
       });
@@ -1440,9 +1813,14 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     });
   });
 
+  await applyMonthlySnapshotDeltas([{
+    customerId: allocatedPayment.customerId,
+    date: allocatedPayment.date,
+    paymentsReceived: allocatedPayment.amount
+  }]);
   await syncCustomerFinancialSummary(payment.customerId);
   await recalculateProtectedPcForInvoice(allocatedPayment.invoiceId);
-  clearFirestoreSessionCache();
+  invalidateTransactionCaches([payment.customerId], [allocatedPayment.date]);
   return paymentRef;
 };
 
@@ -1450,12 +1828,14 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   const paymentRef = doc(db, PAYMENTS, paymentId);
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
+  let previousPayment: Payment | undefined;
   let affectedCustomerIds: string[] = [payment.customerId];
   let affectedInvoiceIds: string[] = [payment.invoiceId];
 
   await runTransaction(db, async (transaction) => {
     const paymentSnapshot = await transaction.get(paymentRef);
     const existingPayment = paymentSnapshot.exists() ? mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()) : undefined;
+    previousPayment = existingPayment;
 
     if (existingPayment?.paymentKind === 'advance_application') {
       throw new Error('Automatic advance adjustments cannot be edited. Edit the invoice or delete the adjustment instead.');
@@ -1532,9 +1912,25 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
     });
   });
 
+  await applyMonthlySnapshotDeltas([
+    ...(previousPayment ? [{
+      customerId: previousPayment.customerId,
+      date: previousPayment.date,
+      paymentsReceived: -previousPayment.amount
+    }] : []),
+    {
+      customerId: allocatedPayment.customerId,
+      date: allocatedPayment.date,
+      paymentsReceived: allocatedPayment.amount
+    }
+  ]);
+
   await Promise.all(affectedCustomerIds.map((customerId) => syncCustomerFinancialSummary(customerId)));
   await Promise.all(affectedInvoiceIds.map((invoiceId) => recalculateProtectedPcForInvoice(invoiceId)));
-  clearFirestoreSessionCache();
+  invalidateTransactionCaches(
+    affectedCustomerIds,
+    [previousPayment?.date, allocatedPayment.date].filter((date): date is string => Boolean(date))
+  );
 };
 
 export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUser) => {
@@ -1583,9 +1979,20 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
     throw new Error('Payment delete did not complete. Refresh the list and try again.');
   }
 
+  if (deletedPayment) {
+    await applyMonthlySnapshotDeltas([{
+      customerId: deletedPayment.customerId,
+      date: deletedPayment.date,
+      paymentsReceived: -deletedPayment.amount
+    }]);
+  }
+
   await syncCustomerFinancialSummary(deletedPayment?.customerId ?? '');
   await recalculateProtectedPcForInvoice(deletedPayment?.invoiceId ?? '');
-  clearFirestoreSessionCache();
+  invalidateTransactionCaches(
+    deletedPayment?.customerId ? [deletedPayment.customerId] : [],
+    deletedPayment?.date ? [deletedPayment.date] : []
+  );
 };
 
 export const getAppSettings = async (forceRefresh = false) => {
@@ -1902,6 +2309,32 @@ export const getMonthlyCustomerStatsForMonth = async (month = getCurrentMonthKey
   return snapshot.docs.map((statsDoc) => mapMonthlyCustomerStatsDoc(statsDoc.id, statsDoc.data()));
 };
 
+export const getBusinessMonthlySnapshots = async (fromMonth: string, toMonth: string) => {
+  return getCached(cacheKey(BUSINESS_MONTHLY_SNAPSHOTS, { fromMonth, toMonth }), async () => {
+    const snapshotQuery = query(
+      collection(db, BUSINESS_MONTHLY_SNAPSHOTS),
+      where('month', '>=', fromMonth),
+      where('month', '<=', toMonth),
+      orderBy('month', 'asc')
+    );
+    const snapshot = await getDocs(snapshotQuery);
+    return snapshot.docs.map((snapshotDoc) => mapBusinessMonthlySnapshotDoc(snapshotDoc.id, snapshotDoc.data()));
+  });
+};
+
+export const getCustomerMonthlySnapshots = async (customerId: string, fromMonth: string, toMonth: string) => {
+  if (!customerId) return [];
+  const snapshotQuery = query(
+    collection(db, CUSTOMER_MONTHLY_SNAPSHOTS),
+    where('customerId', '==', customerId),
+    where('month', '>=', fromMonth),
+    where('month', '<=', toMonth),
+    orderBy('month', 'asc')
+  );
+  const snapshot = await getDocs(snapshotQuery);
+  return snapshot.docs.map((snapshotDoc) => mapCustomerMonthlySnapshotDoc(snapshotDoc.id, snapshotDoc.data()));
+};
+
 export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), auditUser?: AuditUser) => {
   const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
     getCustomers(),
@@ -1915,34 +2348,10 @@ export const rebuildMonthlyCustomerStats = async (month = getCurrentMonthKey(), 
   await Promise.all(
     statsRows.map(async (stats) => {
       const statsRef = doc(db, MONTHLY_CUSTOMER_STATS, stats.id);
-      const existingStatsSnapshot = await getDoc(statsRef);
-      const existingStats = existingStatsSnapshot.exists() ? mapMonthlyCustomerStatsDoc(existingStatsSnapshot.id, existingStatsSnapshot.data()) : undefined;
-      const approvedRedemptions = existingStats ? Math.max(0, stats.pointsEarned - existingStats.pointsEarned) : 0;
-      const adjustedPoints = Math.max(0, stats.pointsEarned - approvedRedemptions);
-
       await setDoc(statsRef, {
         ...stats,
-        pointsEarned: adjustedPoints,
         updatedAt: timestamp
       }, { merge: true });
-
-      if (stats.pointsEarned > 0) {
-        const ledgerId = `${stats.customerId}_${month.replace('-', '_')}_monthly_points`;
-        const ledgerRef = doc(db, LOYALTY_LEDGER, ledgerId);
-        const existingLedgerSnapshot = await getDoc(ledgerRef);
-        if (existingLedgerSnapshot.exists()) return;
-        const ledgerEntry: Omit<LoyaltyLedgerEntry, 'id'> = {
-          customerId: stats.customerId,
-          type: 'purchase',
-          points: stats.pointsEarned,
-          reason: 'Monthly PC points',
-          referenceId: stats.id,
-          month,
-          createdAt: timestamp
-        };
-
-        await setDoc(ledgerRef, ledgerEntry, { merge: false });
-      }
     })
   );
 
@@ -2090,58 +2499,11 @@ export const getApprovedOverduePcRequestsForCustomer = async (customerId: string
 };
 
 export const generateOverduePcRequests = async (auditUser?: AuditUser, options?: DateRangeQueryOptions) => {
-  const fromDate = options?.fromDate || getPastDateString(180);
-  const toDate = options?.toDate || getTodayDateString();
-  const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
-    getCustomers(),
-    getInvoices({ fromDate, toDate }),
-    getPayments({ fromDate, toDate }),
-    getAppSettings()
-  ]);
-  const customersById = new Map(customerRows.map((customer) => [customer.id, customer]));
-  const timestamp = nowIso();
-  let createdCount = 0;
-
-  await Promise.all(
-    invoiceRows.map(async (invoice) => {
-      const customer = customersById.get(invoice.customerId);
-      if (!customer) return;
-
-      const fullPaymentDate = getInvoiceFullPaymentDate(invoice, paymentRows);
-      const pcInfo = calculateInvoiceApcInfo(invoice, paymentRows, customer.tier, appSettings);
-
-      if (!fullPaymentDate || !pcInfo.apcDeadline || fullPaymentDate <= pcInfo.apcDeadline || pcInfo.expectedApc <= 0) {
-        return;
-      }
-
-      const requestRef = doc(db, OVERDUE_PC_REQUESTS, invoice.id);
-      const existingSnapshot = await getDoc(requestRef);
-      if (existingSnapshot.exists()) return;
-
-      await setDoc(requestRef, {
-        customerId: customer.id,
-        customerName: customer.name,
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        invoiceDate: invoice.date,
-        dueDate: pcInfo.apcDeadline,
-        fullPaymentDate,
-        overdueDays: daysBetweenDateStrings(pcInfo.apcDeadline, fullPaymentDate),
-        invoiceAmount: invoice.totalSales || invoice.salesAmount,
-        suggestedCoins: Math.max(0, Math.round(pcInfo.expectedApc)),
-        approvedCoins: Math.max(0, Math.round(pcInfo.expectedApc)),
-        status: 'Pending',
-        generatedAt: timestamp,
-        reviewedAt: '',
-        reviewedBy: '',
-        notes: auditUser?.userEmail ? `Generated by ${auditUser.userEmail}` : 'Generated by Admin'
-      });
-      createdCount += 1;
-    })
-  );
-
-  clearFirestoreSessionCache();
-  return { createdCount };
+  requireAdminAudit(auditUser);
+  void options;
+  // Hybrid invoice PC already applies lateness retention and posts the final
+  // amount. Generating a second overdue request would duplicate that award.
+  return { createdCount: 0 };
 };
 
 export const reviewOverduePcRequest = async (
@@ -2151,6 +2513,11 @@ export const reviewOverduePcRequest = async (
   auditUser?: AuditUser,
   notes = ''
 ) => {
+  requireAdminAudit(auditUser);
+  if (status === 'Approved') {
+    throw new Error('Legacy overdue PC requests cannot be approved because hybrid invoice PC is posted automatically.');
+  }
+  void approvedCoins;
   const requestRef = doc(db, OVERDUE_PC_REQUESTS, requestId);
   const timestamp = nowIso();
 
@@ -2167,40 +2534,16 @@ export const reviewOverduePcRequest = async (
       throw new Error('Only pending overdue PC requests can be reviewed.');
     }
 
-    const cleanCoins = Math.max(0, Math.round(numberOrZero(approvedCoins)));
-    const balanceRef = doc(db, PC_BALANCES, pcRequest.customerId);
-    const balanceSnapshot = await transaction.get(balanceRef);
-
     transaction.update(requestRef, {
-      status,
-      approvedCoins: status === 'Approved' ? cleanCoins : 0,
+      status: 'Rejected',
+      approvedCoins: 0,
       reviewedAt: timestamp,
       reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
       notes
     });
-
-    if (status === 'Approved' && cleanCoins > 0) {
-      transaction.set(doc(db, LOYALTY_LEDGER, `${pcRequest.customerId}_${requestId}_overdue_pc`), {
-        customerId: pcRequest.customerId,
-        type: 'overdue_payment',
-        points: cleanCoins,
-        reason: `Admin approved overdue invoice PC: ${pcRequest.invoiceNumber}`,
-        referenceId: requestId,
-        month: (pcRequest.fullPaymentDate || getTodayDateString()).slice(0, 7),
-        createdAt: timestamp
-      });
-      if (balanceSnapshot.exists()) {
-        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
-        transaction.update(balanceRef, {
-          availablePc: balance.availablePc + cleanCoins,
-          incomingPc: balance.incomingPc + cleanCoins,
-          updatedAt: timestamp
-        });
-      }
-    }
   });
 
-  clearFirestoreSessionCache();
+  clearFirestoreSessionCache(OVERDUE_PC_REQUESTS);
 };
 
 export const getBonusPcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {
@@ -2235,41 +2578,54 @@ export const getApprovedBonusPcRequestsForCustomer = async (customerId: string, 
   });
 };
 
-export const approveReferralBonus = async (customerId: string, auditUser?: AuditUser) => {
+export const approveReferralBonus = async (referrerId: string, referredCustomerId: string, auditUser?: AuditUser) => {
   if (auditUser?.role !== 'Admin') {
     throw new Error('Only Admin users can approve referral bonuses.');
   }
 
-  const [customer, appSettings] = await Promise.all([
-    getCustomerById(customerId),
-    getAppSettings()
+  if (!referrerId || !referredCustomerId) throw new Error('Select both the referrer and referred customer.');
+  if (referrerId === referredCustomerId) throw new Error('The referrer and referred customer must be different.');
+
+  const [referrer, referredCustomer, referredInvoices, referredPayments] = await Promise.all([
+    getCustomerById(referrerId),
+    getCustomerById(referredCustomerId),
+    getInvoicesByCustomerId(referredCustomerId),
+    getPaymentsByCustomerId(referredCustomerId)
   ]);
 
-  if (!customer) {
-    throw new Error('Selected customer no longer exists.');
+  if (!referrer || !referredCustomer) throw new Error('A selected customer no longer exists.');
+  const firstValidInvoice = referredInvoices
+    .filter(isValidBonusInvoice)
+    .sort((left, right) => left.date.localeCompare(right.date) || left.createdAt.localeCompare(right.createdAt))[0];
+  if (!firstValidInvoice || !isInvoiceFullyPaidThrough(firstValidInvoice, referredPayments, getTodayDateString())) {
+    throw new Error('The referred customer first valid business invoice must be fully paid before referral PC is awarded.');
   }
 
-  const referralCoins = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.referralBonus)));
-
-  if (referralCoins <= 0) {
-    throw new Error('Set the referral bonus above 0 in Partner Program settings before approving it.');
-  }
-
-  const requestRef = doc(collection(db, BONUS_PC_REQUESTS));
+  const referralCoins = FIXED_BONUS_PC.referral;
+  const requestId = getReferralBonusId(referrer.id, referredCustomer.id);
+  const requestRef = doc(db, BONUS_PC_REQUESTS, requestId);
   const timestamp = nowIso();
   const reviewer = auditUser.userEmail || auditUser.userId || '';
-  const notes = 'Referral bonus approved by Admin';
+  const notes = `Referral completed after ${referredCustomer.name}'s first valid invoice was fully paid.`;
+  let awarded = false;
 
   await runTransaction(db, async (transaction) => {
-    const balanceRef = doc(db, PC_BALANCES, customer.id);
-    const balanceSnapshot = await transaction.get(balanceRef);
+    const balanceRef = doc(db, PC_BALANCES, referrer.id);
+    const ledgerRef = doc(db, LOYALTY_LEDGER, `${referrer.id}_${requestId}_bonus_pc`);
+    const [existingRequest, balanceSnapshot, ledgerSnapshot] = await Promise.all([
+      transaction.get(requestRef),
+      transaction.get(balanceRef),
+      transaction.get(ledgerRef)
+    ]);
+    if (existingRequest.exists() || ledgerSnapshot.exists()) return;
+
     transaction.set(requestRef, {
-      customerId: customer.id,
-      customerName: customer.name,
+      customerId: referrer.id,
+      customerName: referrer.name,
       bonusType: 'referral',
       bonusLabel: BONUS_PC_LABELS.referral,
-      triggerType: 'admin_referral_approval',
-      referenceId: requestRef.id,
+      triggerType: 'referred_first_invoice_fully_paid',
+      referenceId: referredCustomer.id,
       suggestedCoins: referralCoins,
       approvedCoins: referralCoins,
       status: 'Approved',
@@ -2280,12 +2636,12 @@ export const approveReferralBonus = async (customerId: string, auditUser?: Audit
       notes
     });
 
-    transaction.set(doc(db, LOYALTY_LEDGER, `${customer.id}_${requestRef.id}_bonus_pc`), {
-      customerId: customer.id,
+    transaction.set(ledgerRef, {
+      customerId: referrer.id,
       type: 'bonus',
       points: referralCoins,
       reason: `${BONUS_PC_LABELS.referral}: ${notes}`,
-      referenceId: requestRef.id,
+      referenceId: requestId,
       month: timestamp.slice(0, 7),
       createdAt: timestamp
     });
@@ -2297,154 +2653,76 @@ export const approveReferralBonus = async (customerId: string, auditUser?: Audit
         updatedAt: timestamp
       });
     }
+    awarded = true;
   });
 
-  clearFirestoreSessionCache();
-  return { requestId: requestRef.id, customer, referralCoins };
+  clearFirestoreSessionCache(BONUS_PC_REQUESTS);
+  clearFirestoreSessionCache(LOYALTY_LEDGER);
+  clearFirestoreSessionCache(PC_BALANCES);
+  return { requestId, customer: referrer, referredCustomer, referralCoins, awarded };
 };
 
-export const generateBonusPcRequests = async (auditUser?: AuditUser, month = getCurrentMonthKey()) => {
-  const monthRange = getMonthDateRange(month);
-  const recentFromDate = getPastDateString(180);
-  const [customerRows, invoiceRows, paymentRows, monthlyInvoiceRows, monthlyPaymentRows, statsRows, appSettings] = await Promise.all([
-    getCustomers(),
-    getInvoices({ fromDate: recentFromDate, toDate: monthRange.toDate }),
-    getPayments({ fromDate: recentFromDate, toDate: monthRange.toDate }),
-    getInvoices({ fromDate: monthRange.fromDate, toDate: monthRange.toDate }),
-    getPayments({ fromDate: monthRange.fromDate, toDate: monthRange.toDate }),
-    getMonthlyCustomerStatsForMonth(month, 500),
+export const generateBonusPcRequests = async (
+  auditUser?: AuditUser,
+  month = getCurrentMonthKey(),
+  customerId?: string
+) => {
+  requireAdminAudit(auditUser);
+  const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
+    customerId ? getCustomerById(customerId).then((customer) => customer ? [customer] : []) : getCustomers({ limitCount: 5000 }),
+    customerId ? getInvoicesByCustomerId(customerId) : getInvoices(),
+    customerId ? getPaymentsByCustomerId(customerId) : getPayments(),
     getAppSettings()
   ]);
-  const newCustomerAmount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.newCustomerBonus)));
-  const paymentBonusAmount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.paymentBonus)));
-  const targetBonusAmount = Math.max(0, Math.round(numberOrZero(appSettings.loyaltySettings.purchaseTargetBonus)));
-  const paymentScoreThreshold = 85;
-  const statsByCustomerId = new Map(statsRows.map((stats) => [stats.customerId, stats]));
   const timestamp = nowIso();
   let createdCount = 0;
 
-  if (newCustomerAmount <= 0 && paymentBonusAmount <= 0 && targetBonusAmount <= 0) {
-    return { createdCount };
-  }
-
-  const createBonusRequestIfMissing = async (
-    requestId: string,
-    customer: Customer,
-    bonusType: Exclude<BonusPcType, 'referral'>,
-    triggerType: string,
-    referenceId: string,
-    amount: number,
-    notes: string
-  ) => {
-    if (amount <= 0) return;
-
-    const requestRef = doc(db, BONUS_PC_REQUESTS, requestId);
-    const existingSnapshot = await getDoc(requestRef);
-    if (existingSnapshot.exists()) return;
-
-    await setDoc(requestRef, {
-      customerId: customer.id,
-      customerName: customer.name,
-      bonusType,
-      bonusLabel: BONUS_PC_LABELS[bonusType],
-      triggerType,
-      referenceId,
-      suggestedCoins: amount,
-      approvedCoins: amount,
-      status: 'Pending',
-      generatedAt: timestamp,
-      reviewedAt: '',
-      reviewedBy: '',
-      customerSeenAt: '',
-      notes
-    });
-    createdCount += 1;
-  };
-
   await Promise.all(
     customerRows.map(async (customer) => {
-      const customerInvoices = invoiceRows
-        .filter((invoice) => invoice.customerId === customer.id)
-        .sort((left, right) => left.date.localeCompare(right.date) || left.createdAt.localeCompare(right.createdAt));
-      const firstInvoice = customerInvoices[0];
+      const customerInvoices = invoiceRows.filter((invoice) => invoice.customerId === customer.id);
+      const customerPayments = paymentRows.filter((payment) => payment.customerId === customer.id);
+      const candidates = buildAutomaticBonusCandidates(customer, customerInvoices, customerPayments, appSettings, month);
 
-      if (firstInvoice && newCustomerAmount > 0) {
-        await createBonusRequestIfMissing(
-          `${customer.id}_new_customer`,
-          customer,
-          'new_customer',
-          'first_invoice',
-          firstInvoice.id,
-          newCustomerAmount,
-          `First invoice ${firstInvoice.invoiceNumber || firstInvoice.id}`
-        );
-      }
+      await Promise.all(candidates.map(async (candidate) => {
+        const requestRef = doc(db, BONUS_PC_REQUESTS, candidate.id);
+        const existingSnapshot = await getDoc(requestRef);
+        const amount = FIXED_BONUS_PC[candidate.bonusType];
+        if (existingSnapshot.exists()) {
+          const existing = mapBonusPcRequestDoc(existingSnapshot.id, existingSnapshot.data());
+          if (existing.status === 'Pending' && existing.triggerType !== candidate.triggerType) {
+            await updateDoc(requestRef, {
+              triggerType: candidate.triggerType,
+              referenceId: candidate.referenceId,
+              suggestedCoins: amount,
+              approvedCoins: amount,
+              notes: candidate.notes
+            });
+          }
+          return;
+        }
 
-      const monthlyInvoices = monthlyInvoiceRows.filter((invoice) => invoice.customerId === customer.id);
-      const monthlyPayments = monthlyPaymentRows.filter((payment) => payment.customerId === customer.id);
-      const stats = statsByCustomerId.get(customer.id);
-      const hasMonthlyActivity = monthlyInvoices.length > 0 || monthlyPayments.length > 0;
-
-      if (!hasMonthlyActivity || hasUnpaidOverdueInvoice(customer, invoiceRows, paymentRows, appSettings)) {
-        return;
-      }
-
-      const basePcEarned = stats?.basePcEarned ?? getBasePcEarnedForMonth(customer, monthlyInvoices, paymentRows, appSettings);
-      if (basePcEarned <= 0) return;
-
-      let plannedMonthlyBonus = 0;
-      const dueInvoicesPaidOnTime = allDueInvoicesPaidOnTime(customer, invoiceRows, paymentRows, appSettings, month);
-      const paymentScore = stats?.paymentScore && stats.paymentScore > 0
-        ? stats.paymentScore
-        : getPaymentScoreForInvoices(
-            customer,
-            invoiceRows.filter((invoice) => {
-              const dueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, appSettings);
-              return invoice.customerId === customer.id && dueDate.startsWith(`${month}-`);
-            }),
-            paymentRows,
-            appSettings
-          );
-
-      if (paymentBonusAmount > 0 && dueInvoicesPaidOnTime && paymentScore >= paymentScoreThreshold) {
-        const paymentRequestAmount = getCappedBonusAmount(paymentBonusAmount, basePcEarned, plannedMonthlyBonus);
-        plannedMonthlyBonus += paymentRequestAmount;
-        await createBonusRequestIfMissing(
-          getBonusRequestId(customer.id, 'payment', month),
-          customer,
-          'payment',
-          'monthly_payment_discipline',
-          stats?.id || getMonthlyStatsId(customer.id, month),
-          paymentRequestAmount,
-          `Payment discipline bonus for ${month}: no overdue and payment score above threshold.`
-        );
-      }
-
-      const totalSales = stats?.totalSales ?? monthlyInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
-      const totalProfit = stats?.totalProfit ?? monthlyInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalProfit), 0);
-      const orderCount = stats?.orderCount ?? monthlyInvoices.length;
-      const salesTarget = stats?.salesTarget ?? stats?.target ?? 0;
-      const frequencyTarget = stats?.frequencyTarget ?? 0;
-      const salesTargetAchieved = salesTarget > 0 && totalSales >= salesTarget;
-      const frequencyTargetAchieved = frequencyTarget > 0 && orderCount >= frequencyTarget;
-
-      if (targetBonusAmount > 0 && salesTargetAchieved && frequencyTargetAchieved && totalProfit > 0) {
-        const targetRequestAmount = getCappedBonusAmount(targetBonusAmount, basePcEarned, plannedMonthlyBonus);
-        plannedMonthlyBonus += targetRequestAmount;
-        await createBonusRequestIfMissing(
-          getBonusRequestId(customer.id, 'purchase_target', month),
-          customer,
-          'purchase_target',
-          'monthly_purchase_target',
-          stats?.id || getMonthlyStatsId(customer.id, month),
-          targetRequestAmount,
-          `Purchase target bonus for ${month}: sales target and order frequency achieved.`
-        );
-      }
+        await setDoc(requestRef, {
+          customerId: customer.id,
+          customerName: customer.name,
+          bonusType: candidate.bonusType,
+          bonusLabel: BONUS_PC_LABELS[candidate.bonusType],
+          triggerType: candidate.triggerType,
+          referenceId: candidate.referenceId,
+          suggestedCoins: amount,
+          approvedCoins: amount,
+          status: 'Pending',
+          generatedAt: timestamp,
+          reviewedAt: '',
+          reviewedBy: '',
+          customerSeenAt: '',
+          notes: candidate.notes
+        });
+        createdCount += 1;
+      }));
     })
   );
 
-  clearFirestoreSessionCache();
+  clearFirestoreSessionCache(BONUS_PC_REQUESTS);
   return { createdCount };
 };
 
@@ -2455,6 +2733,7 @@ export const reviewBonusPcRequest = async (
   auditUser?: AuditUser,
   notes = ''
 ) => {
+  requireAdminAudit(auditUser);
   const requestRef = doc(db, BONUS_PC_REQUESTS, requestId);
   const timestamp = nowIso();
 
@@ -2471,13 +2750,24 @@ export const reviewBonusPcRequest = async (
       throw new Error('Only pending bonus PC requests can be reviewed.');
     }
 
-    const cleanCoins = Math.max(0, Math.round(numberOrZero(approvedCoins)));
+    if (
+      status === 'Approved'
+      && bonusRequest.bonusType === 'monthly_target'
+      && bonusRequest.triggerType !== 'monthly_target_paid'
+    ) {
+      throw new Error('The monthly target bonus cannot be released until the qualifying invoices are fully paid.');
+    }
+
+    const cleanCoins = status === 'Approved' ? FIXED_BONUS_PC[bonusRequest.bonusType] : 0;
     const balanceRef = doc(db, PC_BALANCES, bonusRequest.customerId);
     const balanceSnapshot = await transaction.get(balanceRef);
 
     transaction.update(requestRef, {
+      bonusType: bonusRequest.bonusType,
+      bonusLabel: BONUS_PC_LABELS[bonusRequest.bonusType],
+      suggestedCoins: FIXED_BONUS_PC[bonusRequest.bonusType],
       status,
-      approvedCoins: status === 'Approved' ? cleanCoins : 0,
+      approvedCoins: cleanCoins,
       reviewedAt: timestamp,
       reviewedBy: auditUser?.userEmail || auditUser?.userId || '',
       notes

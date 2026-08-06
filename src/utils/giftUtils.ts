@@ -2,7 +2,6 @@ import type { AppSettings, BonusPcRequest, Customer, GiftHistory, GiftItem, Gift
 import { calculateInvoiceApcInfo } from './customerPortal';
 import { getBusinessInvoices } from './openingBalance';
 import { getGiftPercentageForTier } from './settings';
-import { getTierTargetSettings } from './settings';
 
 export const getGiftPeriodLabel = (period: GiftPeriod) => {
   if (period === '1_month') return '1 month';
@@ -48,24 +47,16 @@ const numberOrZero = (value: unknown) => {
 };
 
 export const calculateCustomerApcBonuses = (
-  customer: Customer,
-  customerInvoices: Invoice[],
-  customerPayments: Payment[],
-  settings: AppSettings
+  _customer: Customer,
+  _customerInvoices: Invoice[],
+  _customerPayments: Payment[],
+  _settings: AppSettings
 ) => {
-  const businessInvoices = getBusinessInvoices(customerInvoices);
-  const targetSettings = getTierTargetSettings(customer.tier, settings);
-  const apcEligibleInvoices = businessInvoices.filter((invoice) => calculateInvoiceApcInfo(invoice, customerPayments, customer.tier, settings).earnedApc > 0);
-  const totalSales = apcEligibleInvoices.reduce((sum, invoice) => sum + numberOrZero(invoice.totalSales), 0);
+  // Fixed bonuses are posted only through idempotent bonusPcRequests. Keeping
+  // the legacy fallback at zero prevents a second, calculated copy of a bonus.
   const onTimePaymentBonus = 0;
-  const monthlyTargetBonus =
-    targetSettings.monthlySalesTarget > 0 && totalSales >= targetSettings.monthlySalesTarget
-      ? numberOrZero(settings.loyaltySettings.monthlyTargetBonus)
-      : 0;
-  const orderFrequencyBonus =
-    targetSettings.monthlyOrderTarget > 0 && apcEligibleInvoices.length >= targetSettings.monthlyOrderTarget
-      ? numberOrZero(settings.loyaltySettings.orderFrequencyBonus)
-      : 0;
+  const monthlyTargetBonus = 0;
+  const orderFrequencyBonus = 0;
 
   return {
     onTimePaymentBonus,

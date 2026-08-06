@@ -15,13 +15,13 @@ import SectionHeader from '../components/SectionHeader';
 import { getAppSettings } from '../services/firestoreService';
 import {
   type CreditPageCursor,
-  autoApproveCalculatedProfiles,
   getCreditProfilesPage,
   manageCustomerCredit,
   recalculateAllCustomerCredit,
   saveCreditPolicy
 } from '../services/creditService';
 import type { CustomerCreditProfile, CustomerTier } from '../types';
+import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 
 type CreditAction = 'approve' | 'reject' | 'manual_starter' | 'hold' | 'remove_hold' | 'override' | 'remove_override' | 'recalculate';
@@ -70,8 +70,7 @@ const Credit = () => {
     totalOutstanding: 0,
     totalAvailableCredit: 0
   });
-  const [starterLimitCap, setStarterLimitCap] = useState(25000);
-  const [overdueGraceDays, setOverdueGraceDays] = useState(3);
+  const [starterLimitCap, setStarterLimitCap] = useState(10000);
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<'all' | CustomerTier>('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -84,22 +83,11 @@ const Credit = () => {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [recordsVisible, setRecordsVisible] = useState(false);
   const [recordsLoaded, setRecordsLoaded] = useState(false);
+  const [pageCursor, setPageCursor] = useState<CreditPageCursor>();
+  const [hasMore, setHasMore] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-
-  const loadAllProfiles = async () => {
-    const rows: CustomerCreditProfile[] = [];
-    let nextCursor: CreditPageCursor | undefined;
-    let hasNextPage = true;
-    while (hasNextPage) {
-      const page = await getCreditProfilesPage(nextCursor);
-      rows.push(...page.rows);
-      nextCursor = page.cursor;
-      hasNextPage = page.hasMore && Boolean(nextCursor);
-    }
-    return rows;
-  };
 
   const loadSettings = async () => {
     try {
@@ -107,7 +95,6 @@ const Credit = () => {
       setError('');
       const settings = await getAppSettings();
       setStarterLimitCap(settings.creditPolicy.starterLimitCap);
-      setOverdueGraceDays(settings.creditPolicy.overdueGraceDays);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load customer credit.');
     } finally {
@@ -119,12 +106,15 @@ const Credit = () => {
     void loadSettings();
   }, []);
 
-  const loadRecords = async () => {
+  const loadRecords = async (append = false) => {
     try {
       setLoadingRecords(true);
       setError('');
-      const rows = await autoApproveCalculatedProfiles(await loadAllProfiles());
+      const page = await getCreditProfilesPage(append ? pageCursor : undefined);
+      const rows = append ? [...profiles, ...page.rows] : page.rows;
       setProfiles(rows);
+      setPageCursor(page.cursor);
+      setHasMore(page.hasMore);
       setMetrics({
         totalOutstanding: rows.reduce((sum, profile) => sum + profile.currentOutstanding, 0),
         totalAvailableCredit: rows.reduce((sum, profile) => sum + profile.availableCredit, 0)
@@ -143,7 +133,7 @@ const Credit = () => {
       return;
     }
     setRecordsVisible(true);
-    if (!recordsLoaded) await loadRecords();
+    if (!recordsLoaded) await loadRecords(false);
   };
 
   const visibleProfiles = useMemo(() => {
@@ -184,7 +174,7 @@ const Credit = () => {
       });
       setDialog(undefined);
       setMessage('Customer credit updated.');
-      await loadRecords();
+      await loadRecords(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update customer credit.');
     } finally {
@@ -196,8 +186,8 @@ const Credit = () => {
     try {
       setSaving(true);
       setError('');
-      await saveCreditPolicy(starterLimitCap, overdueGraceDays, 90);
-      setMessage('Credit policy saved. Calculations use complete customer history.');
+      await saveCreditPolicy(starterLimitCap, 0, 90);
+      setMessage('Provisional starter cap saved. Invoice overdue status has no grace period.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save credit policy.');
     } finally {
@@ -211,7 +201,7 @@ const Credit = () => {
       setError('');
       const result = await recalculateAllCustomerCredit(90);
       setMessage(`${result.count} customer credit profiles recalculated and automatically approved.`);
-      if (recordsVisible) await loadRecords();
+      if (recordsVisible) await loadRecords(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to recalculate customer credit.');
     } finally {
@@ -258,10 +248,6 @@ const Credit = () => {
               <span>Starter cap</span>
               <input style={inputStyle} type="number" min="0" value={starterLimitCap} onChange={(event) => setStarterLimitCap(Number(event.target.value) || 0)} />
             </label>
-            <label>
-              <span>Grace days</span>
-              <input style={inputStyle} type="number" min="0" step="1" value={overdueGraceDays} onChange={(event) => setOverdueGraceDays(Math.max(0, Math.trunc(Number(event.target.value) || 0)))} />
-            </label>
             <button type="button" disabled={saving} onClick={handleSavePolicy} style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', alignSelf: 'end' }}>
               <Save size={16} /> Save
             </button>
@@ -282,7 +268,7 @@ const Credit = () => {
             style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }}
           >
             {loadingRecords ? <RefreshCw size={16} /> : <Eye size={16} />}
-            {loadingRecords ? 'Loading...' : recordsVisible ? 'Hide all' : 'View all'}
+            {loadingRecords ? 'Loading...' : recordsVisible ? 'Hide credit' : 'View credit'}
           </button>
           <input aria-label="Customer name" style={inputStyle} placeholder="Customer name" value={search} onChange={(event) => setSearch(event.target.value)} />
           <select aria-label="Filter by tier" style={inputStyle} value={tierFilter} onChange={(event) => setTierFilter(event.target.value as 'all' | CustomerTier)}>
@@ -307,7 +293,7 @@ const Credit = () => {
           <table className="credit-table">
             <thead>
               <tr>
-                {['Customer', 'Tier', 'Days', 'Outstanding', 'Calculated', 'Approved', 'Available', 'On time', 'Invoices', 'Overdue', 'Status', 'Last review', 'Actions'].map((header) => <th key={header}>{header}</th>)}
+                {['Customer', 'Tier', 'Days', 'Used', 'Suggested', 'Available', 'Over limit', 'Payment score', 'Invoices', 'Oldest overdue', 'Status', 'Last review', 'Actions'].map((header) => <th key={header}>{header}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -319,12 +305,12 @@ const Credit = () => {
                   <td>{profile.tier}</td>
                   <td>{profile.creditDays}</td>
                   <td>{formatMoney(profile.currentOutstanding)}</td>
-                  <td>{formatMoney(profile.calculatedCreditLimit)}</td>
                   <td>{formatMoney(profile.approvedCreditLimit)}</td>
                   <td style={{ color: '#86EFAC', fontWeight: 900 }}>{formatMoney(profile.availableCredit)}</td>
-                  <td>{profile.onTimePaymentPercentage.toFixed(1)}%</td>
+                  <td style={{ color: profile.overLimitAmount > 0 ? '#FCA5A5' : 'inherit' }}>{formatMoney(profile.overLimitAmount)}</td>
+                  <td>{profile.creditPaymentScore.toFixed(1)}</td>
                   <td>{profile.completedCreditInvoices}</td>
-                  <td style={{ color: profile.overdueAmount > 0 ? '#FCA5A5' : 'inherit' }}>{formatMoney(profile.overdueAmount)}</td>
+                  <td style={{ color: profile.overdueAmount > 0 ? '#FCA5A5' : 'inherit' }}>{profile.oldestOverdueInvoice || '-'}</td>
                   <td><span className={`credit-status credit-status-${profile.creditStatus}`}>{profile.creditStatus}</span></td>
                   <td>{formatDate(profile.lastCreditReviewAt)}</td>
                   <td>
@@ -341,6 +327,11 @@ const Credit = () => {
               ))}
             </tbody>
           </table>
+          {hasMore ? (
+            <button type="button" disabled={loadingRecords} onClick={() => loadRecords(true)} style={{ ...buttonStyle, margin: 12, background: '#FFFFFF', color: '#11185A' }}>
+              <RefreshCw size={16} /> Load more
+            </button>
+          ) : null}
         </div> : null}
 
       </section>
@@ -358,14 +349,16 @@ const Credit = () => {
 
             {dialog.action === 'breakdown' ? (
               <div className="credit-breakdown">
-                <div><span>Lifetime completed credit sales</span><strong>{formatMoney(dialog.profile.totalCreditInvoiceAmountInLookback)}</strong></div>
-                <div><span>Average monthly credit sales</span><strong>{formatMoney(dialog.profile.averageMonthlyCreditSales)}</strong></div>
+                <div><span>Recent monthly completed credit sales</span><strong>{formatMoney(dialog.profile.recentMonthlyCompletedCreditSales)}</strong></div>
+                <div><span>Representative invoice</span><strong>{formatMoney(dialog.profile.representativeInvoiceValue)}</strong></div>
+                <div><span>Effective payment cycle</span><strong>{dialog.profile.effectiveCycleDays.toFixed(1)} days</strong></div>
                 <div><span>Base credit limit</span><strong>{formatMoney(dialog.profile.baseCreditLimit)}</strong></div>
                 <div><span>Payment factor</span><strong>{dialog.profile.paymentFactor.toFixed(2)}</strong></div>
                 <div><span>History factor</span><strong>{dialog.profile.historyFactor.toFixed(2)}</strong></div>
+                <div><span>Limit source</span><strong>{dialog.profile.limitSource}</strong></div>
                 <div><span>Completed credit invoices</span><strong>{dialog.profile.completedCreditInvoices}</strong></div>
                 <div><span>Current outstanding</span><strong>{formatMoney(dialog.profile.currentOutstanding)}</strong></div>
-                <div><span>Confirmed uninvoiced orders</span><strong>{formatMoney(dialog.profile.confirmedUninvoicedCreditOrders)}</strong></div>
+                <div><span>Weighted late days</span><strong>{dialog.profile.weightedLateDays.toFixed(2)}</strong></div>
                 {dialog.profile.creditOverride ? <div><span>Override until {formatDate(dialog.profile.creditOverride.expiresAt)}</span><strong>{formatMoney(dialog.profile.creditOverride.amount)}</strong></div> : null}
               </div>
             ) : (
@@ -374,7 +367,7 @@ const Credit = () => {
                   <label>Amount<input required style={inputStyle} type="number" min="0" step="0.01" value={actionAmount} onChange={(event) => setActionAmount(Number(event.target.value) || 0)} /></label>
                 ) : null}
                 {dialog.action === 'override' ? (
-                  <label>Expiry date<input required style={inputStyle} type="date" min={new Date().toISOString().slice(0, 10)} value={overrideExpiry} onChange={(event) => setOverrideExpiry(event.target.value)} /></label>
+                  <label>Expiry date<input required style={inputStyle} type="date" min={getTodayDateString()} value={overrideExpiry} onChange={(event) => setOverrideExpiry(event.target.value)} /></label>
                 ) : null}
                 {dialog.action !== 'recalculate' ? (
                   <label>Reason (optional)<textarea style={{ ...inputStyle, minHeight: 88, resize: 'vertical' }} maxLength={500} value={actionReason} onChange={(event) => setActionReason(event.target.value)} /></label>

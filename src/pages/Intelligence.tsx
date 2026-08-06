@@ -1,15 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { CalendarDays, Gauge, Users } from 'lucide-react';
+import { Gauge, RefreshCw, Trophy, Users } from 'lucide-react';
 import CustomerScoreCard from '../components/CustomerScoreCard';
 import SectionHeader from '../components/SectionHeader';
 import SectionTileNav from '../components/SectionTileNav';
 import StatCard from '../components/StatCard';
 import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
-import { useErpData } from '../hooks/useErpData';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { buildIntelligenceSummary, buildMonthlyRankings } from '../utils/customerAnalytics';
+import { getIntelligenceSummariesPage, type IntelligencePageCursor } from '../services/derivedDataService';
+import { buildIntelligenceSummary } from '../utils/customerAnalytics';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
@@ -20,35 +20,53 @@ type IntelligenceSection = 'overview' | 'score' | 'rankings';
 const intelligenceSections = [
   { id: 'overview', label: 'Top Customers', icon: Users },
   { id: 'score', label: 'Score Breakdown', icon: Gauge },
-  { id: 'rankings', label: 'Monthly Rankings', icon: CalendarDays }
+  { id: 'rankings', label: 'Stored Rankings', icon: Trophy }
 ] satisfies { id: IntelligenceSection; label: string; icon: typeof Users }[];
 
 const Intelligence = () => {
   const { userProfile } = useAuth();
-  const { customers, invoices, payments, settings, customerScores, loading, error } = useErpData();
+  const [customerScores, setCustomerScores] = useState<CustomerScore[]>([]);
+  const [pageCursor, setPageCursor] = useState<IntelligencePageCursor>();
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const isMobile = useIsMobile();
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  const [selectedRankingMonth, setSelectedRankingMonth] = useState('');
   const [activeSection, setActiveSection] = useState<IntelligenceSection | null>(null);
   const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
   const formatWholeOrders = (value: number) => String(Math.round(value));
   const isStaff = userProfile?.role === 'Staff';
   const selectedCustomerScore = customerScores.find((customer) => customer.customerId === selectedCustomerId);
-  const rankingMonthOptions = useMemo(() => {
-    const referenceDate = new Date();
-    return [0, 1].map((monthsAgo) => {
-      const monthStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - monthsAgo, 1);
-      const monthKey = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`;
-      const monthLabel = monthStart.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const storedRanking = useMemo(() => customerScores.map((score) => ({
+    customerId: score.customerId,
+    customerName: score.customerName,
+    customerArea: score.customerArea,
+    rank: score.rank,
+    tier: score.tier,
+    intelligenceScore: score.intelligenceScore,
+    totalSales: score.totalSales,
+    totalProfit: score.totalProfit,
+    giftBudget: score.giftBudget
+  })), [customerScores]);
 
-      return { monthKey, monthLabel };
-    });
+  const loadSummaries = async (append = false) => {
+    try {
+      setLoading(true);
+      setError('');
+      const page = await getIntelligenceSummariesPage(append ? pageCursor : undefined);
+      setCustomerScores((current) => append ? [...current, ...page.rows] : page.rows);
+      setPageCursor(page.cursor);
+      setHasMore(page.hasMore);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load stored intelligence summaries.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSummaries(false);
   }, []);
-  const selectedMonthlyRanking = useMemo(() => {
-    if (!selectedRankingMonth) return undefined;
-    return buildMonthlyRankings(customers, invoices, payments, new Date(), settings)
-      .find((month) => month.monthKey === selectedRankingMonth);
-  }, [customers, invoices, payments, selectedRankingMonth, settings]);
 
   const topCustomers = customerScores;
 
@@ -168,6 +186,17 @@ const Intelligence = () => {
         onSelect={setActiveSection}
       />
 
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={() => loadSummaries(true)}
+          disabled={loading}
+          style={{ border: 0, borderRadius: 6, padding: '9px 12px', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 16, fontWeight: 800, cursor: 'pointer' }}
+        >
+          <RefreshCw size={16} /> Load more customers
+        </button>
+      ) : null}
+
       {activeSection === 'overview' ? <>
       {!isStaff ? (
         <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>
@@ -239,38 +268,25 @@ const Intelligence = () => {
       {!isStaff && activeSection === 'rankings' ? (
         <>
           <SectionHeader
-            title="Monthly Rankings"
-            description="Each ranking uses rolling 2-month data, so one quiet month does not unfairly punish a customer."
+            title="Stored Rankings"
+            description="Latest rolling 2-month scores stored after customer transaction changes."
           />
-          <div style={{ ...whiteCardStyle, marginBottom: 18 }}>
-            <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Select Month</div>
-            <select style={inputStyle} value={selectedRankingMonth} onChange={(event) => setSelectedRankingMonth(event.target.value)}>
-              <option value="">Select month</option>
-              {rankingMonthOptions.map((month) => (
-                <option key={month.monthKey} value={month.monthKey}>{month.monthLabel}</option>
-              ))}
-            </select>
-            {!selectedRankingMonth ? (
-              <div style={{ color: '#D7DEEA', marginTop: 12 }}>Select a month to load rankings.</div>
-            ) : null}
-          </div>
-          {selectedMonthlyRanking ? (
             <div style={panelGridStyle}>
               <div style={panelStyle}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                     <div>
-                      <div style={{ color: '#D4AF37', fontWeight: 800 }}>{selectedMonthlyRanking.monthLabel}</div>
-                      <div style={mutedTextStyle}>{selectedMonthlyRanking.periodLabel}</div>
+                      <div style={{ color: '#D4AF37', fontWeight: 800 }}>Latest stored ranking</div>
+                      <div style={mutedTextStyle}>Updated only for affected customers</div>
                     </div>
-                    <div style={{ color: '#BFC8D9', fontWeight: 700 }}>{selectedMonthlyRanking.rankings.length} ranked</div>
+                    <div style={{ color: '#BFC8D9', fontWeight: 700 }}>{storedRanking.length} ranked</div>
                   </div>
 
-                  {selectedMonthlyRanking.rankings.length === 0 ? (
+                  {storedRanking.length === 0 ? (
                     <div style={{ color: '#BFC8D9' }}>No invoice activity for this ranking period.</div>
                   ) : (
                     <div style={latestFiveScrollStyle}>
-                      {selectedMonthlyRanking.rankings.map((ranking) => (
-                        <div key={`${selectedMonthlyRanking.monthKey}-${ranking.customerId}`} style={rowStyle}>
+                      {storedRanking.map((ranking) => (
+                        <div key={ranking.customerId} style={rowStyle}>
                           <div>
                             <div style={{ fontWeight: 800 }}>{formatCustomerSelectLabel(ranking)}</div>
                             <div style={mutedTextStyle}>
@@ -287,7 +303,6 @@ const Intelligence = () => {
                   )}
                 </div>
               </div>
-            ) : null}
         </>
       ) : null}
     </div>

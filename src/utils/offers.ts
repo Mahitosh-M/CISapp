@@ -1,4 +1,5 @@
 import type { Offer } from '../types';
+import { getTodayDateString } from './dateUtils';
 import { formatDateRange } from './formatters';
 
 const VIEWED_OFFER_KEY_PREFIX = 'viewedOfferIds';
@@ -17,7 +18,7 @@ const parseDateOnly = (dateString?: string) => {
   return date;
 };
 
-const getTodayDate = (todayString = new Date().toISOString().slice(0, 10)) => {
+const getTodayDate = (todayString = getTodayDateString()) => {
   const parsedToday = parseDateOnly(todayString) ?? new Date();
   parsedToday.setHours(0, 0, 0, 0);
   return parsedToday;

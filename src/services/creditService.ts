@@ -26,6 +26,7 @@ import type {
 } from '../types';
 import { calculateCustomerCredit } from '../utils/creditCalculation';
 import type { CreditCalculationInput, CreditCalculationResult, CreditDocumentData } from '../utils/creditCalculation';
+import { getTodayDateString } from '../utils/dateUtils';
 import {
   getAppSettings,
   getCustomerById,
@@ -62,19 +63,28 @@ const mapProfile = (snapshot: QueryDocumentSnapshot<DocumentData> | Awaited<Retu
     tier: (data.tier as CustomerTier) || 'Tier 4',
     creditDays: numberOrZero(data.creditDays),
     currentOutstanding: numberOrZero(data.currentOutstanding),
-    confirmedUninvoicedCreditOrders: numberOrZero(data.confirmedUninvoicedCreditOrders),
     creditHistoryDays: Number(data.creditHistoryDays) === 60 ? 60 : 90,
     totalCreditInvoiceAmountInLookback: numberOrZero(data.totalCreditInvoiceAmountInLookback ?? data.totalCreditInvoiceAmountLast90Days),
+    totalCreditInvoiceAmountLast90Days: numberOrZero(data.totalCreditInvoiceAmountLast90Days),
     averageMonthlyCreditSales: numberOrZero(data.averageMonthlyCreditSales),
+    recentMonthlyCompletedCreditSales: numberOrZero(data.recentMonthlyCompletedCreditSales ?? data.averageMonthlyCreditSales),
+    representativeInvoiceValue: numberOrZero(data.representativeInvoiceValue),
+    effectiveCycleDays: numberOrZero(data.effectiveCycleDays),
     baseCreditLimit: numberOrZero(data.baseCreditLimit),
     calculatedCreditLimit: numberOrZero(data.calculatedCreditLimit),
     approvedCreditLimit: numberOrZero(data.approvedCreditLimit),
     availableCredit: numberOrZero(data.availableCredit),
+    overLimitAmount: numberOrZero(data.overLimitAmount),
     paymentFactor: numberOrZero(data.paymentFactor),
     historyFactor: numberOrZero(data.historyFactor),
+    creditPaymentScore: numberOrZero(data.creditPaymentScore),
+    weightedLateDays: numberOrZero(data.weightedLateDays),
     onTimePaymentPercentage: numberOrZero(data.onTimePaymentPercentage),
     completedCreditInvoices: numberOrZero(data.completedCreditInvoices),
     overdueAmount: numberOrZero(data.overdueAmount),
+    oldestOverdueInvoice: data.oldestOverdueInvoice ? String(data.oldestOverdueInvoice) : undefined,
+    oldestOverdueDate: data.oldestOverdueDate ? String(data.oldestOverdueDate) : undefined,
+    oldestOverdueDays: numberOrZero(data.oldestOverdueDays),
     hasOverdueBeyondGrace: data.hasOverdueBeyondGrace === true,
     creditStatus: mapCreditStatus(data.creditStatus),
     creditLimitApprovalStatus: mapApprovalStatus(data.creditLimitApprovalStatus),
@@ -83,6 +93,8 @@ const mapProfile = (snapshot: QueryDocumentSnapshot<DocumentData> | Awaited<Retu
     lastCreditReviewAt: String(data.lastCreditReviewAt || ''),
     lastCreditReviewReason: data.lastCreditReviewReason ? String(data.lastCreditReviewReason) : undefined,
     manualHold: data.manualHold === true,
+    manualStarterLimit: data.manualStarterLimit === undefined ? undefined : numberOrZero(data.manualStarterLimit),
+    limitSource: String(data.limitSource || 'Legacy calculation'),
     creditOverride: data.creditOverride && typeof data.creditOverride === 'object'
       ? {
           amount: numberOrZero(data.creditOverride.amount),
@@ -118,10 +130,17 @@ export const getCustomerCreditSummary = async (customerId: string) => {
   return {
     id: snapshot.id,
     customerId: String(data.customerId || snapshot.id),
+    suggestedCreditLimit: data.suggestedCreditLimit === undefined ? undefined : numberOrZero(data.suggestedCreditLimit),
+    calculatedCreditLimit: data.calculatedCreditLimit === undefined ? undefined : numberOrZero(data.calculatedCreditLimit),
     approvedCreditLimit: data.approvedCreditLimit === undefined ? undefined : numberOrZero(data.approvedCreditLimit),
     availableCredit: numberOrZero(data.availableCredit),
     usedCredit: numberOrZero(data.usedCredit),
+    overLimitAmount: numberOrZero(data.overLimitAmount),
     creditDays: numberOrZero(data.creditDays),
+    limitSource: data.limitSource ? String(data.limitSource) : undefined,
+    oldestOverdueInvoice: data.oldestOverdueInvoice ? String(data.oldestOverdueInvoice) : undefined,
+    oldestOverdueDate: data.oldestOverdueDate ? String(data.oldestOverdueDate) : undefined,
+    oldestOverdueDays: data.oldestOverdueDays === undefined ? undefined : numberOrZero(data.oldestOverdueDays),
     nextInvoiceDueDate: data.nextInvoiceDueDate ? String(data.nextInvoiceDueDate) : undefined,
     nextInvoiceDueAmount: data.nextInvoiceDueAmount === null || data.nextInvoiceDueAmount === undefined ? undefined : numberOrZero(data.nextInvoiceDueAmount),
     creditStatus: mapCreditStatus(data.creditStatus),
@@ -147,60 +166,8 @@ const requiredText = (value: unknown, label: string, maxLength = 500) => {
 };
 
 export const autoApproveCalculatedProfiles = async (profiles: CustomerCreditProfile[]) => {
-  const today = new Date().toISOString().slice(0, 10);
-  const pending = profiles.filter((profile) => {
-    const hasActiveOverride = Boolean(profile.creditOverride && profile.creditOverride.expiresAt >= today);
-    return !hasActiveOverride && (
-      profile.creditLimitApprovalStatus !== 'approved'
-      || Math.abs(profile.approvedCreditLimit - profile.calculatedCreditLimit) > 0.01
-    );
-  });
-
-  for (let index = 0; index < pending.length; index += 200) {
-    const batch = writeBatch(db);
-    const updatedAt = new Date().toISOString();
-    pending.slice(index, index + 200).forEach((profile) => {
-      const approvedCreditLimit = profile.calculatedCreditLimit;
-      const usedCredit = profile.currentOutstanding + profile.confirmedUninvoicedCreditOrders;
-      const availableCredit = profile.creditStatus === 'hold' || profile.creditStatus === 'disabled'
-        ? 0
-        : Math.max(0, approvedCreditLimit - usedCredit);
-      batch.update(doc(db, PROFILE_COLLECTION, profile.id), {
-        approvedCreditLimit,
-        availableCredit,
-        creditLimitApprovalStatus: 'approved',
-        updatedAt
-      });
-      batch.set(doc(db, SUMMARY_COLLECTION, profile.id), {
-        customerId: profile.customerId,
-        approvedCreditLimit,
-        availableCredit,
-        usedCredit,
-        creditDays: profile.creditDays,
-        nextInvoiceDueDate: profile.nextInvoiceDueDate ?? null,
-        nextInvoiceDueAmount: profile.nextInvoiceDueAmount ?? null,
-        creditStatus: profile.creditStatus,
-        manualHold: profile.manualHold === true,
-        updatedAt
-      });
-    });
-    await batch.commit();
-  }
-
-  const pendingIds = new Set(pending.map((profile) => profile.id));
-  return profiles.map((profile) => {
-    if (!pendingIds.has(profile.id)) return profile;
-    const approvedCreditLimit = profile.calculatedCreditLimit;
-    const usedCredit = profile.currentOutstanding + profile.confirmedUninvoicedCreditOrders;
-    return {
-      ...profile,
-      approvedCreditLimit,
-      availableCredit: profile.creditStatus === 'hold' || profile.creditStatus === 'disabled'
-        ? 0
-        : Math.max(0, approvedCreditLimit - usedCredit),
-      creditLimitApprovalStatus: 'approved' as const
-    };
-  });
+  // Kept as a compatibility wrapper for older callers. Page reads must never write.
+  return profiles;
 };
 
 const optionalReason = (value: unknown, maxLength = 500) => {
@@ -246,7 +213,7 @@ const loadCreditCalculation = async (
   const calculationInput: CreditCalculationInput = {
     customerId,
     customer: asCreditData(customer),
-    invoices: invoices.map((invoice) => ({ id: invoice.id, data: asCreditData(invoice) })),
+    invoices: invoices.map((invoice) => ({ id: invoice.id, data: asCreditData({ ...invoice, status: invoice.recordStatus }) })),
     payments: payments.map((payment) => ({ id: payment.id, data: asCreditData(payment) })),
     settings: asCreditData(settings),
     existingProfile,
@@ -332,7 +299,7 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
   } else if (input.action === 'override') {
     const amount = finiteAmount(input.amount, 'Override amount');
     const expiresAt = requiredText(input.expiresAt, 'Expiry date', 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresAt) || expiresAt < new Date().toISOString().slice(0, 10)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiresAt) || expiresAt < getTodayDateString()) {
       throw new Error('Override expiry must be today or a future date.');
     }
     const creditOverride = {
@@ -365,7 +332,7 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
       throw new Error('Use an override to approve above the calculated recommendation.');
     }
     if (input.action === 'manual_starter') {
-      const starterCap = Number(loaded.settings.creditPolicy.starterLimitCap ?? 25000);
+      const starterCap = Math.min(10_000, Number(loaded.settings.creditPolicy.starterLimitCap ?? 10_000));
       if (amount > starterCap + 0.01) throw new Error('The starter limit cannot exceed the configured starter cap.');
       calculated.profile.manualStarterLimit = amount;
     }
@@ -373,9 +340,13 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
     calculated.profile.creditLimitApprovalStatus = 'approved';
     calculated.profile.availableCredit = calculated.profile.creditStatus === 'hold' || calculated.profile.creditStatus === 'disabled'
       ? 0
-      : Math.max(0, amount - Number(calculated.profile.currentOutstanding) - Number(calculated.profile.confirmedUninvoicedCreditOrders));
+      : Math.max(0, amount - Number(calculated.profile.currentOutstanding));
+    calculated.profile.overLimitAmount = Math.max(0, Number(calculated.profile.currentOutstanding) - amount);
     calculated.summary.availableCredit = calculated.profile.availableCredit;
+    calculated.summary.suggestedCreditLimit = amount;
+    calculated.summary.calculatedCreditLimit = calculated.profile.calculatedCreditLimit;
     calculated.summary.approvedCreditLimit = amount;
+    calculated.summary.overLimitAmount = calculated.profile.overLimitAmount;
     auditNew = { approvedCreditLimit: amount, creditLimitApprovalStatus: 'approved' };
   } else if (input.action === 'reject') {
     calculated.profile.approvedCreditLimit = Math.min(
@@ -385,9 +356,16 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
     calculated.profile.creditLimitApprovalStatus = 'rejected';
     calculated.profile.availableCredit = calculated.profile.creditStatus === 'hold' || calculated.profile.creditStatus === 'disabled'
       ? 0
-      : Math.max(0, Number(calculated.profile.approvedCreditLimit) - Number(calculated.profile.currentOutstanding) - Number(calculated.profile.confirmedUninvoicedCreditOrders));
+      : Math.max(0, Number(calculated.profile.approvedCreditLimit) - Number(calculated.profile.currentOutstanding));
+    calculated.profile.overLimitAmount = Math.max(
+      0,
+      Number(calculated.profile.currentOutstanding) - Number(calculated.profile.approvedCreditLimit)
+    );
     calculated.summary.availableCredit = calculated.profile.availableCredit;
+    calculated.summary.suggestedCreditLimit = calculated.profile.approvedCreditLimit;
+    calculated.summary.calculatedCreditLimit = calculated.profile.calculatedCreditLimit;
     calculated.summary.approvedCreditLimit = calculated.profile.approvedCreditLimit;
+    calculated.summary.overLimitAmount = calculated.profile.overLimitAmount;
     auditNew = {
       approvedCreditLimit: calculated.profile.approvedCreditLimit,
       creditLimitApprovalStatus: 'rejected'
@@ -405,6 +383,7 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
 
 export const saveCreditPolicy = async (starterLimitCap: number, overdueGraceDays: number, lookbackDays: 60 | 90) => {
   const cleanStarterLimit = finiteAmount(starterLimitCap, 'Starter limit cap');
+  if (cleanStarterLimit > 10_000) throw new Error('The provisional starter cap cannot exceed ₹10,000.');
   if (!Number.isInteger(overdueGraceDays) || overdueGraceDays < 0 || overdueGraceDays > 365) {
     throw new Error('Overdue grace days must be a whole number from 0 to 365.');
   }
@@ -451,7 +430,7 @@ export const calculateCustomerCreditSummaryLocally = (
   const result = calculateCustomerCredit({
     customerId: customer.id,
     customer: asCreditData(customer),
-    invoices: invoices.map((invoice) => ({ id: invoice.id, data: asCreditData(invoice) })),
+    invoices: invoices.map((invoice) => ({ id: invoice.id, data: asCreditData({ ...invoice, status: invoice.recordStatus }) })),
     payments: payments.map((payment) => ({ id: payment.id, data: asCreditData(payment) })),
     settings: asCreditData(settings),
     reviewReason: 'customer_view'
@@ -469,10 +448,17 @@ export const calculateCustomerCreditSummaryLocally = (
   return {
     id: customer.id,
     customerId: customer.id,
+    suggestedCreditLimit: numberOrZero(summary.suggestedCreditLimit ?? approvedCreditLimit),
+    calculatedCreditLimit: numberOrZero(summary.calculatedCreditLimit),
     approvedCreditLimit,
     availableCredit,
     usedCredit,
+    overLimitAmount: Math.max(0, usedCredit - approvedCreditLimit),
     creditDays: numberOrZero(summary.creditDays),
+    limitSource: summary.limitSource ? String(summary.limitSource) : undefined,
+    oldestOverdueInvoice: summary.oldestOverdueInvoice ? String(summary.oldestOverdueInvoice) : undefined,
+    oldestOverdueDate: summary.oldestOverdueDate ? String(summary.oldestOverdueDate) : undefined,
+    oldestOverdueDays: summary.oldestOverdueDays === undefined ? undefined : numberOrZero(summary.oldestOverdueDays),
     nextInvoiceDueDate: summary.nextInvoiceDueDate ? String(summary.nextInvoiceDueDate) : undefined,
     nextInvoiceDueAmount: summary.nextInvoiceDueAmount === null || summary.nextInvoiceDueAmount === undefined
       ? undefined

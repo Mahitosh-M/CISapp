@@ -15,7 +15,6 @@ interface AuthContextValue {
   canDeleteRecords: boolean;
   canEditRecords: boolean;
   canManageSettings: boolean;
-  canViewReports: boolean;
   canApproveGifts: boolean;
   canManageUsers: boolean;
 }
@@ -297,7 +296,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       canDeleteRecords: role === 'Admin',
       canEditRecords: role === 'Admin',
       canManageSettings: role === 'Admin',
-      canViewReports: role === 'Admin',
       canApproveGifts: role === 'Admin',
       canManageUsers: role === 'Admin'
     };

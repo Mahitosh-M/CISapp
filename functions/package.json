@@ -1,14 +1,14 @@
 {
   "name": "cisapp-functions",
   "private": true,
-  "main": "lib/index.js",
+  "main": "lib/functions/src/index.js",
   "engines": {
     "node": "20"
   },
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "npm run build && node --test lib/*.test.js"
+    "test": "npm run build && node --test lib/functions/src/*.test.js"
   },
   "dependencies": {
     "firebase-admin": "^13.4.0",

@@ -5,18 +5,20 @@ import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { createCustomerAuthAccount, createMedicalAuthAccount, createStaffAuthAccount, deleteManagedUserAccount, sendUserPasswordResetEmail } from '../services/authService';
 import {
+  getCustomers,
   getUserProfiles,
   updateUserProfileRecord,
 } from '../services/firestoreService';
-import { useErpData } from '../hooks/useErpData';
-import type { UserProfile, UserRole } from '../types';
+import type { Customer, UserProfile, UserRole } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 
 type AdminPanel = 'staff' | 'customers' | 'medicals' | null;
 
 const Admin = () => {
-  const { customers, loading, error } = useErpData();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const { userProfile } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [staffName, setStaffName] = useState('');
@@ -45,11 +47,17 @@ const Admin = () => {
 
   const loadAdminData = async () => {
     try {
+      setLoading(true);
       setAdminError('');
-      const userRows = await getUserProfiles();
+      const [userRows, customerRows] = await Promise.all([getUserProfiles(), getCustomers({ limitCount: 5000 })]);
       setUsers(userRows);
+      setCustomers(customerRows);
     } catch (err) {
-      setAdminError(err instanceof Error ? err.message : 'Unable to load admin data.');
+      const message = err instanceof Error ? err.message : 'Unable to load admin data.';
+      setAdminError(message);
+      setError(message);
+    } finally {
+      setLoading(false);
     }
   };
 

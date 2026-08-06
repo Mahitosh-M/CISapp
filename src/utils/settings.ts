@@ -1,4 +1,4 @@
-import type { AppSettings, CustomerTier, TargetTierKey, TierTargetSetting } from '../types';
+import type { AppSettings, CustomerTier, Invoice, TargetTierKey, TierTargetSetting } from '../types';
 import { addDaysToDateString } from './dateUtils';
 import { getTierDisplayName } from './tiers';
 
@@ -9,10 +9,10 @@ export const SCORING_WEIGHT_KEYS: ScoringWeightKey[] = ['profit', 'paymentDiscip
 export const DEFAULT_SETTINGS: AppSettings = {
   key: 'erpSettings',
   giftPercentages: {
-    'Tier 1': 3,
-    'Tier 2': 2,
-    'Tier 3': 1,
-    'Tier 4': 0
+    'Tier 1': 4,
+    'Tier 2': 3,
+    'Tier 3': 2,
+    'Tier 4': 1
   },
   creditDays: {
     'Tier 1': 15,
@@ -29,8 +29,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scoringWeights: {
     profit: 30,
     paymentDiscipline: 30,
-    frequency: 20,
-    sales: 15,
+    frequency: 15,
+    sales: 20,
     loyalty: 5
   },
   highOutstandingThreshold: 100000,
@@ -40,23 +40,31 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultReportPeriod: 'current_month',
   giftPeriodOptions: ['1_month', '3_months', '6_months', '1_year', 'custom'],
   staffPermissions: {
-    canViewReports: false,
     canViewDashboard: true
   },
   creditPolicy: {
-    starterLimitCap: 25000,
-    overdueGraceDays: 3,
+    starterLimitCap: 10000,
+    overdueGraceDays: 0,
     lookbackDays: 90
+  },
+  overduePolicy: {
+    minorSalesRatioPercent: 5,
+    seriousSalesRatioPercent: 15,
+    materialDays: 7,
+    seriousDays: 30,
+    seriousInvoiceCount: 2,
+    repeatedEventCount: 3
   },
   loyaltySettings: {
     pointsPerThousand: 0,
     onTimePaymentBonus: 0,
-    monthlyTargetBonus: 0,
+    monthlyTargetBonus: 5,
     orderFrequencyBonus: 0,
-    newCustomerBonus: 0,
+    cleanPaymentMonthBonus: 5,
+    newCustomerBonus: 20,
     paymentBonus: 0,
     purchaseTargetBonus: 0,
-    referralBonus: 0,
+    referralBonus: 50,
     partnerLevelThresholds: {
       'Active Partner': 0,
       'Silver Partner': 0,
@@ -118,8 +126,7 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   financialYearReset: settings?.financialYearReset ?? DEFAULT_SETTINGS.financialYearReset,
   defaultReportPeriod: settings?.defaultReportPeriod ?? DEFAULT_SETTINGS.defaultReportPeriod,
   giftPercentages: {
-    ...DEFAULT_SETTINGS.giftPercentages,
-    ...settings?.giftPercentages
+    ...DEFAULT_SETTINGS.giftPercentages
   },
   creditDays: {
     ...DEFAULT_SETTINGS.creditDays,
@@ -130,8 +137,7 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
     ...settings?.paymentBuffers
   },
   scoringWeights: {
-    ...DEFAULT_SETTINGS.scoringWeights,
-    ...settings?.scoringWeights
+    ...DEFAULT_SETTINGS.scoringWeights
   },
   giftPeriodOptions: settings?.giftPeriodOptions ?? DEFAULT_SETTINGS.giftPeriodOptions,
   staffPermissions: {
@@ -140,11 +146,26 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   },
   creditPolicy: {
     ...DEFAULT_SETTINGS.creditPolicy,
-    ...settings?.creditPolicy
+    ...settings?.creditPolicy,
+    starterLimitCap: Math.min(10_000, Math.max(0, numberOrZero(settings?.creditPolicy?.starterLimitCap ?? DEFAULT_SETTINGS.creditPolicy.starterLimitCap))),
+    overdueGraceDays: 0,
+    lookbackDays: 90
+  },
+  overduePolicy: {
+    ...DEFAULT_SETTINGS.overduePolicy,
+    ...settings?.overduePolicy
   },
   loyaltySettings: {
     ...DEFAULT_SETTINGS.loyaltySettings,
     ...settings?.loyaltySettings,
+    onTimePaymentBonus: 0,
+    monthlyTargetBonus: 5,
+    orderFrequencyBonus: 0,
+    cleanPaymentMonthBonus: 5,
+    newCustomerBonus: 20,
+    paymentBonus: 0,
+    purchaseTargetBonus: 0,
+    referralBonus: 50,
     partnerLevelThresholds: {
       ...DEFAULT_SETTINGS.loyaltySettings.partnerLevelThresholds,
       ...settings?.loyaltySettings?.partnerLevelThresholds
@@ -253,23 +274,33 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
     errors.push('Starter credit limit cap cannot be negative.');
   }
 
-  if (!Number.isInteger(Number(activeSettings.creditPolicy.overdueGraceDays)) || Number(activeSettings.creditPolicy.overdueGraceDays) < 0) {
-    errors.push('Overdue grace days must be a non-negative whole number.');
-  }
-
-  if (![60, 90].includes(Number(activeSettings.creditPolicy.lookbackDays))) {
-    errors.push('Credit history period must be 60 or 90 days.');
+  if (Number(activeSettings.creditPolicy.starterLimitCap) > 10_000) {
+    errors.push('Starter credit limit cap cannot exceed 10,000.');
   }
 
   if (!activeSettings.invoicePrefix.trim()) {
     errors.push('Invoice prefix is required.');
   }
 
+  const overduePolicy = activeSettings.overduePolicy;
+  if (overduePolicy.minorSalesRatioPercent < 0 || overduePolicy.seriousSalesRatioPercent <= overduePolicy.minorSalesRatioPercent) {
+    errors.push('Serious overdue sales ratio must be greater than the minor ratio.');
+  }
+  if (overduePolicy.materialDays < 0 || overduePolicy.seriousDays <= overduePolicy.materialDays) {
+    errors.push('Serious overdue days must be greater than material overdue days.');
+  }
+  if (!Number.isInteger(overduePolicy.seriousInvoiceCount) || overduePolicy.seriousInvoiceCount < 1) {
+    errors.push('Serious overdue invoice count must be a whole number of at least 1.');
+  }
+  if (!Number.isInteger(overduePolicy.repeatedEventCount) || overduePolicy.repeatedEventCount < 1) {
+    errors.push('Repeated overdue event count must be a whole number of at least 1.');
+  }
+
   const loyaltySettings = activeSettings.loyaltySettings;
   [
+    ['Monthly target bonus', loyaltySettings.monthlyTargetBonus],
+    ['Clean payment month bonus', loyaltySettings.cleanPaymentMonthBonus],
     ['New customer bonus', loyaltySettings.newCustomerBonus],
-    ['Payment bonus', loyaltySettings.paymentBonus],
-    ['Purchase target bonus', loyaltySettings.purchaseTargetBonus],
     ['Referral bonus', loyaltySettings.referralBonus]
   ].forEach(([label, value]) => {
     if (!Number.isFinite(Number(value)) || Number(value) < 0) {
@@ -328,7 +359,73 @@ export const getTotalCreditDaysForTier = (tier: CustomerTier, settings?: AppSett
 };
 
 export const calculateDynamicDueDate = (invoiceDate: string, tier: CustomerTier, settings?: AppSettings) => {
-  return addDaysToDateString(invoiceDate, getTotalCreditDaysForTier(tier, settings));
+  return addDaysToDateString(invoiceDate, getCreditDaysForTierFromSettings(tier, settings));
+};
+
+export const getInvoiceSavedDueDate = (invoice: Pick<Invoice, 'date' | 'dueDate' | 'savedDueDate' | 'creditDaysAtInvoice'>, tier: CustomerTier, settings?: AppSettings) => {
+  const storedDueDate = invoice.savedDueDate?.trim() || invoice.dueDate?.trim();
+  if (storedDueDate) return storedDueDate;
+  const creditDays = invoice.creditDaysAtInvoice ?? getCreditDaysForTierFromSettings(tier, settings);
+  return addDaysToDateString(invoice.date, Math.max(0, Math.round(creditDays)));
+};
+
+export const getInvoiceBufferDays = (invoice: Pick<Invoice, 'bufferDaysAtInvoice'>, tier: CustomerTier, settings?: AppSettings) => {
+  return Math.max(0, Math.round(invoice.bufferDaysAtInvoice ?? getPaymentBufferForTier(tier, settings)));
+};
+
+export const getInvoiceFinalPcCutoffDate = (
+  invoice: Pick<Invoice, 'date' | 'dueDate' | 'savedDueDate' | 'finalPcCutoffDate' | 'creditDaysAtInvoice' | 'bufferDaysAtInvoice'>,
+  tier: CustomerTier,
+  settings?: AppSettings
+) => {
+  return invoice.finalPcCutoffDate?.trim()
+    || addDaysToDateString(getInvoiceSavedDueDate(invoice, tier, settings), getInvoiceBufferDays(invoice, tier, settings));
+};
+
+export const buildInvoiceTimeTerms = (
+  invoiceDate: string,
+  dueDate: string,
+  tier: CustomerTier,
+  settings?: AppSettings,
+  existing?: Partial<Pick<Invoice,
+    'tierAtInvoice'
+    | 'pcPercentageAtInvoice'
+    | 'creditDaysAtInvoice'
+    | 'bufferDaysAtInvoice'
+    | 'savedDueDate'
+    | 'termsEstimated'
+  >>
+) => {
+  const tierAtInvoice = existing?.tierAtInvoice ?? tier;
+  const creditDaysAtInvoice = Math.max(0, Math.round(
+    existing?.creditDaysAtInvoice ?? getCreditDaysForTierFromSettings(tierAtInvoice, settings)
+  ));
+  const bufferDaysAtInvoice = Math.max(0, Math.round(
+    existing?.bufferDaysAtInvoice ?? getPaymentBufferForTier(tierAtInvoice, settings)
+  ));
+  const pcPercentageAtInvoice = Math.max(0,
+    existing?.pcPercentageAtInvoice ?? getGiftPercentageForTier(tierAtInvoice, settings)
+  );
+  const savedDueDate = dueDate.trim()
+    || existing?.savedDueDate?.trim()
+    || addDaysToDateString(invoiceDate, creditDaysAtInvoice);
+  const termsEstimated = existing
+    ? existing.termsEstimated === true
+      || existing.tierAtInvoice === undefined
+      || existing.pcPercentageAtInvoice === undefined
+      || existing.creditDaysAtInvoice === undefined
+      || existing.bufferDaysAtInvoice === undefined
+    : false;
+
+  return {
+    tierAtInvoice,
+    pcPercentageAtInvoice,
+    creditDaysAtInvoice,
+    bufferDaysAtInvoice,
+    savedDueDate,
+    finalPcCutoffDate: addDaysToDateString(savedDueDate, bufferDaysAtInvoice),
+    termsEstimated
+  };
 };
 
 export const getEffectiveInvoiceDueDate = (
@@ -349,7 +446,7 @@ export const getPaymentTermsLabel = (tier: CustomerTier, settings?: AppSettings)
     return 'No credit - same day payment preferred';
   }
 
-  return bufferDays > 0 ? `${creditDays} day credit + ${bufferDays} day buffer` : `${creditDays} day credit`;
+  return bufferDays > 0 ? `${creditDays} day credit; ${bufferDays} day PC buffer` : `${creditDays} day credit`;
 };
 
 export const normalizeScoreWeights = (settings?: AppSettings) => {

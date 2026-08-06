@@ -15,12 +15,11 @@ import {
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
   getPaymentsByInvoiceIds,
-  getPaymentsByCustomerId,
-  syncCustomerPartnerLevelsFromFirestore,
   updateInvoiceRecord,
   updatePaymentRecord
 } from '../services/firestoreService';
-import { calculateCustomerCreditSummaryLocally, getCustomerCreditSummary } from '../services/creditService';
+import { getCustomerCreditSummary } from '../services/creditService';
+import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
@@ -203,6 +202,27 @@ const Invoices = () => {
     return sortByLatestInvoiceNumber(rows);
   }, [customerFilter, customers, invoices, payments, searchText, settings, statusFilter]);
 
+  const editingInvoice = editingInvoiceId ? invoices.find((invoice) => invoice.id === editingInvoiceId) : undefined;
+  const editingCreationPayment = editingInvoice ? getInvoiceCreationPayment(editingInvoice.id) : undefined;
+  const editingOtherPaymentEffect = editingInvoice
+    ? Math.max(0, getPaidAmount(editingInvoice.id) - (editingCreationPayment ? getInvoicePaymentEffect(editingCreationPayment) : 0))
+    : 0;
+  const currentInvoiceOutstanding = editingInvoice
+    ? getPendingAmount(editingInvoice.totalSales, getPaidAmount(editingInvoice.id))
+    : 0;
+  const newInvoiceOutstanding = getPendingAmount(
+    formData.totalSales,
+    editingOtherPaymentEffect + Math.max(0, sameDayPaymentAmount) + Math.max(0, sameDayCashDiscount)
+  );
+  const projectedUsedCredit = Math.max(
+    0,
+    (selectedCreditSummary?.usedCredit ?? 0) - currentInvoiceOutstanding + newInvoiceOutstanding
+  );
+  const suggestedCreditLimit = selectedCreditSummary?.suggestedCreditLimit
+    ?? selectedCreditSummary?.approvedCreditLimit
+    ?? 0;
+  const projectedOverLimit = Math.max(0, projectedUsedCredit - suggestedCreditLimit);
+
   const recalculateTotals = (nextFormData: InvoiceFormData): InvoiceFormData => {
     const totalSales = Number(nextFormData.salesAmount) || 0;
     const costAmount = Number(nextFormData.costAmount) || 0;
@@ -228,18 +248,11 @@ const Invoices = () => {
       return;
     }
 
-    const customer = customers.find((item) => item.id === customerId);
-    if (!customer) return;
-
     try {
       setLoadingCreditLimit(true);
-      const [storedSummary, customerInvoices, customerPayments] = await Promise.all([
-        getCustomerCreditSummary(customerId),
-        getInvoicesByCustomerId(customerId),
-        getPaymentsByCustomerId(customerId)
-      ]);
+      const storedSummary = await getCustomerCreditSummary(customerId);
       if (requestId !== creditRequestRef.current) return;
-      setSelectedCreditSummary(calculateCustomerCreditSummaryLocally(customer, customerInvoices, customerPayments, settings, storedSummary));
+      setSelectedCreditSummary(storedSummary);
     } catch (err) {
       if (requestId === creditRequestRef.current) setError(err instanceof Error ? err.message : 'Unable to load available credit.');
     } finally {
@@ -295,9 +308,9 @@ const Invoices = () => {
 
   const canEditInvoice = (_invoice: Invoice) => true;
 
-  const getInvoiceCreationPayment = (invoiceId: string, paymentRows = payments) => {
+  function getInvoiceCreationPayment(invoiceId: string, paymentRows = payments) {
     return paymentRows.find((payment) => payment.invoiceId === invoiceId && payment.notes === invoiceCreationPaymentNote);
-  };
+  }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -315,6 +328,9 @@ const Invoices = () => {
     try {
       setSaving(true);
       setError('');
+      const previousCustomerId = editingInvoiceId
+        ? invoices.find((invoice) => invoice.id === editingInvoiceId)?.customerId
+        : undefined;
 
       if (editingInvoiceId) {
         await updateInvoiceRecord(editingInvoiceId, formData, auditUser);
@@ -377,7 +393,10 @@ const Invoices = () => {
         );
       }
 
-      await syncCustomerPartnerLevelsFromFirestore();
+      await Promise.all(
+        [...new Set([previousCustomerId, formData.customerId].filter((customerId): customerId is string => Boolean(customerId)))]
+          .map((customerId) => recalculateCustomerDerivedData(customerId, editingInvoiceId ? 'invoice_edited' : 'invoice_created'))
+      );
       resetForm();
       await loadData();
     } catch (err) {
@@ -427,7 +446,7 @@ const Invoices = () => {
       if (!confirmed) return;
 
       const deleteResult = await deleteInvoiceRecord(invoice.id, auditUser);
-      await syncCustomerPartnerLevelsFromFirestore();
+      await recalculateCustomerDerivedData(invoice.customerId, 'invoice_deleted');
       setMessage(
         deleteResult.deletedPaymentCount > 0
           ? `Invoice deleted with ${deleteResult.deletedPaymentCount} linked payment(s).`
@@ -639,23 +658,25 @@ const Invoices = () => {
             <input style={inputStyle} type="number" min="0" value={formData.transportAmount} onChange={(event) => handleFieldChange('transportAmount', event.target.value)} />
           </label>
 
-          <div style={labelStyle}>
-            Credit Limit
-            <div style={{
-              ...inputStyle,
-              minHeight: 42,
-              display: 'flex',
-              alignItems: 'center',
-              fontSize: 17,
-              fontWeight: 900,
-              color: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#B42318' : '#166534',
-              background: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#FDECEC' : '#ECFDF3'
-            }}>
-              {loadingCreditLimit
-                ? 'Loading...'
-                : formData.customerId
-                  ? formatMoney(selectedCreditSummary?.availableCredit ?? 0)
-                  : 'Select customer'}
+          <div style={{ ...labelStyle, gridColumn: isMobile ? 'auto' : 'span 2' }}>
+            Credit Advisory
+            <div style={{ ...inputStyle, height: 'auto', display: 'grid', gap: 7, background: projectedOverLimit > 0 ? '#FDECEC' : '#ECFDF3' }}>
+              {loadingCreditLimit ? 'Loading...' : !formData.customerId ? 'Select customer' : (
+                <>
+                  <div>Suggested: <strong>{formatMoney(suggestedCreditLimit)}</strong></div>
+                  <div>Used: <strong>{formatMoney(selectedCreditSummary?.usedCredit ?? 0)}</strong></div>
+                  <div>Available: <strong>{formatMoney(selectedCreditSummary?.availableCredit ?? 0)}</strong></div>
+                  <div>New invoice exposure: <strong>{formatMoney(newInvoiceOutstanding)}</strong></div>
+                  <div>Projected over limit: <strong>{formatMoney(projectedOverLimit)}</strong></div>
+                  <div>Status: <strong>{selectedCreditSummary?.creditStatus ?? 'starter'}</strong></div>
+                  {selectedCreditSummary?.oldestOverdueInvoice ? (
+                    <div>Oldest overdue: <strong>{selectedCreditSummary.oldestOverdueInvoice}</strong></div>
+                  ) : null}
+                  {projectedOverLimit > 0 ? (
+                    <div style={{ color: '#B42318', fontWeight: 900 }}>This invoice exceeds the advisory limit. Staff/Admin may still continue.</div>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
 

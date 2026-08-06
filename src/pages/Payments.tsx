@@ -7,12 +7,13 @@ import {
   createPayment,
   deletePaymentRecord,
   getCustomers,
-  getInvoices,
+  getInvoicesByCustomerId,
   getPayments,
+  getPaymentsByInvoiceIds,
   getPaymentsByCustomerId,
-  syncCustomerPartnerLevelsFromFirestore,
   updatePaymentRecord
 } from '../services/firestoreService';
+import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { Customer, Invoice, Payment, PaymentFormData } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
@@ -91,14 +92,12 @@ const Payments = () => {
           ? getPayments({ limitCount: paymentLimit, sortBy: 'createdAt' })
           : getPaymentsByCustomerId(customerFilter, { limitCount: paymentLimit });
 
-      const [customerRows, invoiceRows, paymentRows] = await Promise.all([
+      const [customerRows, paymentRows] = await Promise.all([
         getCustomers(),
-        getInvoices(),
         paymentRead
       ]);
 
       setCustomers(customerRows);
-      setInvoices(invoiceRows);
       setPayments(paymentRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load payments.');
@@ -119,6 +118,7 @@ const Payments = () => {
     let isActive = true;
 
     if (!formData.customerId) {
+      setInvoices([]);
       setCustomerPayments([]);
       setLoadingCustomerPayments(false);
       return undefined;
@@ -127,9 +127,14 @@ const Payments = () => {
     setCustomerPayments([]);
     setLoadingCustomerPayments(true);
 
-    getPaymentsByCustomerId(formData.customerId)
-      .then((paymentRows) => {
+    getInvoicesByCustomerId(formData.customerId, { limitCount: 50 })
+      .then(async (invoiceRows) => ({
+        invoiceRows,
+        paymentRows: await getPaymentsByInvoiceIds(invoiceRows.map((invoice) => invoice.id))
+      }))
+      .then(({ invoiceRows, paymentRows }) => {
         if (isActive) {
+          setInvoices(invoiceRows);
           setCustomerPayments(paymentRows);
         }
       })
@@ -429,6 +434,9 @@ const Payments = () => {
     try {
       setSaving(true);
       setError('');
+      const previousCustomerId = editingPaymentId
+        ? payments.find((payment) => payment.id === editingPaymentId)?.customerId
+        : undefined;
 
       if (editingPaymentId) {
         const amountAppliedToInvoice = Math.min(
@@ -480,7 +488,10 @@ const Payments = () => {
         );
       }
 
-      await syncCustomerPartnerLevelsFromFirestore();
+      await Promise.all(
+        [...new Set([previousCustomerId, formData.customerId].filter((customerId): customerId is string => Boolean(customerId)))]
+          .map((customerId) => recalculateCustomerDerivedData(customerId, editingPaymentId ? 'payment_edited' : 'payment_created'))
+      );
       resetForm();
       await loadData();
     } catch (err) {
@@ -521,7 +532,7 @@ const Payments = () => {
 
     try {
       await deletePaymentRecord(payment.id, auditUser);
-      await syncCustomerPartnerLevelsFromFirestore();
+      await recalculateCustomerDerivedData(payment.customerId, 'payment_deleted');
       setMessage('Payment deleted successfully.');
       await loadData();
     } catch (err) {
