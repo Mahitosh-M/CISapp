@@ -3,6 +3,11 @@ import { getCurrentMonthRange, getTodayDateString } from './dateUtils';
 import { getPreviousOutstandingFallback } from './openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
 import {
+  LEGACY_PC_POLICY_VERSION,
+  PC_POLICY_VERSION_1,
+  getInvoicePcPolicyVersion
+} from './pcAwardPolicy';
+import {
   getGiftPercentageForTier,
   getInvoiceBufferDays,
   getInvoiceFinalPcCutoffDate,
@@ -78,24 +83,32 @@ export const getInvoiceApcDeadline = (invoice: Invoice, tier?: CustomerTier, set
   return getInvoiceFinalPcCutoffDate(invoice, invoice.tierAtInvoice ?? tier, settings);
 };
 
-export const getInvoiceFullPaymentDate = (invoice: Invoice, payments: Payment[]) => {
+export const getInvoiceFullPaymentEvent = (invoice: Invoice, payments: Payment[]) => {
   const invoiceAmount = invoice.totalSales || invoice.salesAmount;
   let runningPaid = 0;
   const invoicePayments = payments
     .filter((payment) => payment.invoiceId === invoice.id)
-    .sort((left, right) => left.date.localeCompare(right.date));
+    .sort((left, right) => (
+      left.date.localeCompare(right.date)
+      || left.createdAt.localeCompare(right.createdAt)
+      || left.id.localeCompare(right.id)
+    ));
 
   for (const payment of invoicePayments) {
     runningPaid += getInvoicePaymentEffect(payment);
     if (getPendingAmount(invoiceAmount, runningPaid) <= 0) {
-      return payment.date;
+      return payment;
     }
   }
 
-  return '';
+  return undefined;
 };
 
-export const calculateInvoiceApcInfo = (
+export const getInvoiceFullPaymentDate = (invoice: Invoice, payments: Payment[]) => {
+  return getInvoiceFullPaymentEvent(invoice, payments)?.date ?? '';
+};
+
+const calculateInvoiceApcInfoV1 = (
   invoice: Invoice,
   payments: Payment[],
   tier?: CustomerTier,
@@ -148,6 +161,27 @@ export const calculateInvoiceApcInfo = (
     apcDeadline: deadline || '',
     apcStatus: isFullyPaid ? 'Earned' as const : isExpired ? 'Expired' as const : isDeadlineValid ? 'Available' as const : 'Not available' as const
   };
+};
+
+type InvoicePcPolicyCalculator = typeof calculateInvoiceApcInfoV1;
+
+// Existing invoices without a version use the frozen legacy contract. Future
+// formula changes must add a new stable version key instead of replacing one.
+const INVOICE_PC_POLICY_CALCULATORS: Record<number, InvoicePcPolicyCalculator> = {
+  [LEGACY_PC_POLICY_VERSION]: calculateInvoiceApcInfoV1,
+  [PC_POLICY_VERSION_1]: calculateInvoiceApcInfoV1
+};
+
+export const calculateInvoiceApcInfo: InvoicePcPolicyCalculator = (
+  invoice,
+  payments,
+  tier,
+  settings,
+  todayString = getTodayDateString()
+) => {
+  const calculator = INVOICE_PC_POLICY_CALCULATORS[getInvoicePcPolicyVersion(invoice)]
+    ?? INVOICE_PC_POLICY_CALCULATORS[LEGACY_PC_POLICY_VERSION];
+  return calculator(invoice, payments, tier, settings, todayString);
 };
 
 export const getDueUrgencyColor = (dueProgressPercentage: number, isOverdue: boolean, isPaid: boolean) => {

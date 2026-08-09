@@ -60,12 +60,17 @@ import {
   validateAppSettings
 } from '../utils/settings';
 import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
-import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate } from '../utils/customerPortal';
+import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate, getInvoiceFullPaymentEvent } from '../utils/customerPortal';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
 import { getOpeningBalanceInvoiceId, getOpeningBalanceInvoiceNumber, isOpeningBalanceInvoice, OPENING_BALANCE_INVOICE_TYPE } from '../utils/openingBalance';
 import { getUnpaidInvoicesAfterPayment } from '../utils/paymentAllocation';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import {
+  CURRENT_PC_POLICY_VERSION,
+  canPostInvoicePcForSettlement,
+  decideImmutableInvoicePcAward
+} from '../utils/pcAwardPolicy';
 import {
   buildAutomaticBonusCandidates,
   FIXED_BONUS_PC,
@@ -146,6 +151,8 @@ const mapPcBalanceRecord = (id: string, data: Record<string, unknown>): PcBalanc
   incomingPc: Math.max(0, Math.round(numberOrZero(data.incomingPc))),
   redeemedPc: Math.max(0, Math.round(numberOrZero(data.redeemedPc))),
   protectedAt: String(data.protectedAt || ''),
+  lastAwardReferenceId: data.lastAwardReferenceId ? String(data.lastAwardReferenceId) : undefined,
+  lastMutationReferenceId: data.lastMutationReferenceId ? String(data.lastMutationReferenceId) : undefined,
   updatedAt: String(data.updatedAt || '')
 });
 
@@ -470,6 +477,9 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     isOpeningBalance: data.isOpeningBalance === true,
     date: String(data.date || data.invoiceDate || ''),
     dueDate: String(data.dueDate || ''),
+    pcPolicyVersionAtInvoice: data.pcPolicyVersionAtInvoice === undefined
+      ? undefined
+      : Math.max(0, Math.round(numberOrZero(data.pcPolicyVersionAtInvoice))),
     tierAtInvoice: data.tierAtInvoice as CustomerTier | undefined,
     pcPercentageAtInvoice: data.pcPercentageAtInvoice === undefined ? undefined : numberOrZero(data.pcPercentageAtInvoice),
     creditDaysAtInvoice: data.creditDaysAtInvoice === undefined ? undefined : numberOrZero(data.creditDaysAtInvoice),
@@ -501,6 +511,9 @@ const mapPaymentDoc = (id: string, data: Record<string, unknown>): Payment => {
     customerId: String(data.customerId || ''),
     customerName: String(data.customerName || ''),
     date: String(data.date || data.paymentDate || ''),
+    pcPolicyVersionAtPayment: data.pcPolicyVersionAtPayment === undefined
+      ? undefined
+      : Math.max(0, Math.round(numberOrZero(data.pcPolicyVersionAtPayment))),
     amount,
     amountAppliedToInvoice,
     advanceCreatedAmount: data.advanceCreatedAmount === undefined && paymentKind === 'receipt'
@@ -1303,6 +1316,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       ...invoice,
       dueDate: invoiceTerms.savedDueDate,
       ...invoiceTerms,
+      pcPolicyVersionAtInvoice: CURRENT_PC_POLICY_VERSION,
       invoiceNumber,
       createdAt: timestamp,
       updatedAt: timestamp
@@ -1315,6 +1329,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
         invoiceId: docRef.id,
         invoiceNumber,
         date: invoice.date,
+        pcPolicyVersionAtPayment: CURRENT_PC_POLICY_VERSION,
         amount: 0,
         amountAppliedToInvoice: advanceAppliedAmount,
         advanceCreatedAmount: 0,
@@ -1358,6 +1373,16 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
   const existingInvoice = existingInvoiceSnapshot.exists() ? mapInvoiceDoc(existingInvoiceSnapshot.id, existingInvoiceSnapshot.data()) : undefined;
   if (!existingInvoice) throw new Error('Invoice record no longer exists. Refresh the list and try again.');
   if (!customer) throw new Error('Selected customer no longer exists.');
+  if (existingInvoice.customerId && existingInvoice.customerId !== invoice.customerId) {
+    const postedPcSnapshot = await getDoc(doc(
+      db,
+      LOYALTY_LEDGER,
+      `${existingInvoice.customerId}_${existingInvoice.id}_invoice_pc`
+    ));
+    if (postedPcSnapshot.exists()) {
+      throw new Error('This invoice cannot be moved because its PC award is already permanently posted.');
+    }
+  }
   const preserveExistingTerms = existingInvoice.customerId === invoice.customerId && !isOpeningBalanceInvoice(existingInvoice);
   const invoiceTerms = isOpeningBalanceInvoice(existingInvoice)
     ? undefined
@@ -1394,7 +1419,7 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
 
   const affectedCustomerIds = [existingInvoice?.customerId, invoice.customerId].filter((customerId): customerId is string => Boolean(customerId));
   await Promise.all([...new Set(affectedCustomerIds)].map((customerId) => syncCustomerFinancialSummary(customerId)));
-  await recalculateProtectedPcForInvoice(invoiceId);
+  await awardInvoicePcOnce(invoiceId);
   invalidateTransactionCaches(affectedCustomerIds, [existingInvoice.date, invoice.date]);
 };
 
@@ -1426,14 +1451,6 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
       .filter((paymentSnapshot) => paymentSnapshot.exists())
       .map((paymentSnapshot) => mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()));
     deletedPayments = paymentsToDelete;
-    const invoicePcLedgerRef = deletedInvoice.customerId
-      ? doc(db, LOYALTY_LEDGER, `${deletedInvoice.customerId}_${deletedInvoice.id}_invoice_pc`)
-      : undefined;
-    const invoicePcBalanceRef = deletedInvoice.customerId ? doc(db, PC_BALANCES, deletedInvoice.customerId) : undefined;
-    const [invoicePcLedgerSnapshot, invoicePcBalanceSnapshot] = await Promise.all([
-      invoicePcLedgerRef ? transaction.get(invoicePcLedgerRef) : Promise.resolve(undefined),
-      invoicePcBalanceRef ? transaction.get(invoicePcBalanceRef) : Promise.resolve(undefined)
-    ]);
     const oldBalanceRestoreByCustomerId = paymentsToDelete.reduce((restoreMap, payment) => {
       const amountToRestore = Math.max(0, payment.amountUsedForOldBalance ?? 0);
 
@@ -1463,42 +1480,6 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
       )
     );
     const timestamp = nowIso();
-
-    if (invoicePcLedgerSnapshot?.exists()) {
-      const previousPoints = Math.max(0, Math.round(numberOrZero(invoicePcLedgerSnapshot.data().points)));
-      const ledgerCreatedAt = String(invoicePcLedgerSnapshot.data().createdAt || '');
-      const pcBalance = invoicePcBalanceSnapshot?.exists()
-        ? mapPcBalanceRecord(invoicePcBalanceSnapshot.id, invoicePcBalanceSnapshot.data())
-        : undefined;
-      const belongsToProtectedRecovery = Boolean(
-        ledgerCreatedAt && pcBalance?.protectedAt && ledgerCreatedAt <= pcBalance.protectedAt
-      );
-
-      if (previousPoints > 0 && !belongsToProtectedRecovery) {
-        if (!pcBalance || !invoicePcBalanceRef || !invoicePcLedgerRef) {
-          throw new Error('The invoice PC ledger exists, but the customer PC balance is missing.');
-        }
-
-        const nextAvailablePc = pcBalance.availablePc - previousPoints;
-        const nextIncomingPc = pcBalance.incomingPc - previousPoints;
-        if (nextAvailablePc < 0 || nextIncomingPc < 0) {
-          throw new Error('This invoice PC has already been redeemed and must be corrected before deleting the invoice.');
-        }
-
-        transaction.update(invoicePcBalanceRef, {
-          availablePc: nextAvailablePc,
-          incomingPc: nextIncomingPc,
-          lastAwardReferenceId: deletedInvoice.id,
-          updatedAt: timestamp
-        });
-        transaction.update(invoicePcLedgerRef, {
-          points: 0,
-          reason: `Invoice ${deletedInvoice.invoiceNumber || deletedInvoice.id} deleted; PC reversed`,
-          month: timestamp.slice(0, 7),
-          createdAt: timestamp
-        });
-      }
-    }
 
     customerSnapshotsById.forEach((customerSnapshot, customerId) => {
       const amountToRestore = oldBalanceRestoreByCustomerId.get(customerId) ?? 0;
@@ -1691,17 +1672,7 @@ const assertAdvanceCanBeCreated = async (
   }
 };
 
-const getLatestInvoicePcChangeAt = (invoice: Invoice, payments: Payment[]) => {
-  return [
-    invoice.updatedAt,
-    invoice.createdAt,
-    ...payments.flatMap((payment) => [payment.updatedAt, payment.createdAt])
-  ]
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => right.localeCompare(left))[0] ?? '';
-};
-
-const recalculateProtectedPcForInvoice = async (invoiceId: string) => {
+const awardInvoicePcOnce = async (invoiceId: string) => {
   if (!invoiceId) return;
 
   const invoiceSnapshot = await getDoc(doc(db, INVOICES, invoiceId));
@@ -1709,6 +1680,12 @@ const recalculateProtectedPcForInvoice = async (invoiceId: string) => {
 
   const invoice = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data());
   if (!invoice.customerId || isOpeningBalanceInvoice(invoice)) return;
+  const ledgerRef = doc(db, LOYALTY_LEDGER, `${invoice.customerId}_${invoice.id}_invoice_pc`);
+
+  // Most edit/delete calls hit an already-posted invoice. Stop after one
+  // ledger read instead of reloading its customer, payments, and settings.
+  const postedLedgerSnapshot = await getDoc(ledgerRef);
+  if (postedLedgerSnapshot.exists()) return;
 
   const [customer, payments, settings] = await Promise.all([
     getCustomerById(invoice.customerId),
@@ -1717,98 +1694,64 @@ const recalculateProtectedPcForInvoice = async (invoiceId: string) => {
   ]);
   if (!customer) return;
 
+  const settlementPayment = getInvoiceFullPaymentEvent(invoice, payments);
+  if (!settlementPayment) return;
   const award = calculateInvoiceApcInfo(invoice, payments, customer.tier, settings);
-  const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
-  const recalculatedPoints = fullPaymentDate ? Math.max(0, Math.round(award.earnedApc)) : 0;
-  const latestInvoiceChangeAt = getLatestInvoicePcChangeAt(invoice, payments);
+  const recalculatedPoints = Math.max(0, Math.round(award.earnedApc));
 
   const timestamp = nowIso();
   const balanceRef = doc(db, PC_BALANCES, customer.id);
-  const ledgerRef = doc(db, LOYALTY_LEDGER, `${customer.id}_${invoice.id}_invoice_pc`);
 
   await runTransaction(db, async (transaction) => {
-    const [ledgerSnapshot, balanceSnapshot] = await Promise.all([
-      transaction.get(ledgerRef),
-      transaction.get(balanceRef)
-    ]);
+    const ledgerSnapshot = await transaction.get(ledgerRef);
+    const decision = decideImmutableInvoicePcAward(
+      ledgerSnapshot.exists(),
+      ledgerSnapshot.exists() ? ledgerSnapshot.data().points : undefined,
+      recalculatedPoints
+    );
+    if (decision.action === 'keep') return;
 
+    const balanceSnapshot = await transaction.get(balanceRef);
     const balance = balanceSnapshot.exists()
       ? mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data())
       : undefined;
-    const previousPoints = ledgerSnapshot.exists()
-      ? Math.max(0, Math.round(numberOrZero(ledgerSnapshot.data().points)))
-      : 0;
-    const ledgerCreatedAt = ledgerSnapshot.exists() ? String(ledgerSnapshot.data().createdAt || '') : '';
 
-    // Any invoice award that existed when protection was saved is part of the
-    // opening recovery amount and must not reduce or duplicate that baseline.
-    if (ledgerCreatedAt && balance?.protectedAt && ledgerCreatedAt <= balance.protectedAt) return;
+    if (!canPostInvoicePcForSettlement(invoice, settlementPayment, balance?.protectedAt)) return;
 
-    // The protected amount is a one-time opening balance. Old invoices without
-    // their own ledger entry are already represented by that opening amount.
-    if (
-      !ledgerSnapshot.exists()
-      && balance?.protectedAt
-      && latestInvoiceChangeAt
-      && latestInvoiceChangeAt <= balance.protectedAt
-    ) {
-      return;
+    if (decision.action === 'award') {
+      if (balance) {
+        transaction.update(balanceRef, {
+          availablePc: balance.availablePc + decision.pointsToAdd,
+          incomingPc: balance.incomingPc + decision.pointsToAdd,
+          lastAwardReferenceId: invoice.id,
+          lastMutationReferenceId: ledgerRef.id,
+          updatedAt: timestamp
+        });
+      } else {
+        transaction.set(balanceRef, {
+          customerId: customer.id,
+          availablePc: decision.pointsToAdd,
+          incomingPc: decision.pointsToAdd,
+          redeemedPc: 0,
+          protectedAt: '',
+          lastAwardReferenceId: invoice.id,
+          lastMutationReferenceId: ledgerRef.id,
+          updatedAt: timestamp
+        });
+      }
     }
 
-    if (!ledgerSnapshot.exists() && recalculatedPoints <= 0) return;
-    if (ledgerSnapshot.exists() && previousPoints === recalculatedPoints) return;
-
-    const pointsDelta = recalculatedPoints - previousPoints;
-
-    if (balance) {
-      const nextAvailablePc = balance.availablePc + pointsDelta;
-      const nextIncomingPc = balance.incomingPc + pointsDelta;
-
-      if (nextAvailablePc < 0 || nextIncomingPc < 0) {
-        throw new Error('Invoice PC cannot be reduced below the customer\'s already redeemed or available balance.');
-      }
-
-      transaction.update(balanceRef, {
-        availablePc: nextAvailablePc,
-        incomingPc: nextIncomingPc,
-        lastAwardReferenceId: invoice.id,
-        updatedAt: timestamp
-      });
-    } else {
-      if (ledgerSnapshot.exists()) {
-        throw new Error('The invoice PC ledger exists, but the customer protected PC balance is missing.');
-      }
-
-      transaction.set(balanceRef, {
-        customerId: customer.id,
-        availablePc: recalculatedPoints,
-        incomingPc: recalculatedPoints,
-        redeemedPc: 0,
-        protectedAt: '',
-        lastAwardReferenceId: invoice.id,
-        updatedAt: timestamp
-      });
-    }
-
-    const ledgerPayload = {
-      points: recalculatedPoints,
-      reason: recalculatedPoints > 0
-        ? `Invoice ${invoice.invoiceNumber || invoice.id} paid on time`
-        : `Invoice ${invoice.invoiceNumber || invoice.id} PC recalculated to zero`,
-      month: (fullPaymentDate || timestamp).slice(0, 7),
+    transaction.set(ledgerRef, {
+      customerId: customer.id,
+      type: 'on_time_payment',
+      points: decision.awardedPoints,
+      reason: decision.awardedPoints > 0
+        ? `Invoice ${invoice.invoiceNumber || invoice.id} PC permanently awarded`
+        : `Invoice ${invoice.invoiceNumber || invoice.id} PC permanently finalized at zero`,
+      referenceId: invoice.id,
+      month: settlementPayment.date.slice(0, 7),
       createdAt: timestamp
-    };
-
-    if (ledgerSnapshot.exists()) {
-      transaction.update(ledgerRef, ledgerPayload);
-    } else {
-      transaction.set(ledgerRef, {
-        customerId: customer.id,
-        type: 'on_time_payment',
-        ...ledgerPayload,
-        referenceId: invoice.id
-      });
-    }
+    });
   });
 };
 
@@ -1836,6 +1779,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
 
     transaction.set(paymentRef, {
       ...allocatedPayment,
+      pcPolicyVersionAtPayment: CURRENT_PC_POLICY_VERSION,
       createdAt: timestamp,
       updatedAt: timestamp
     });
@@ -1847,7 +1791,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     paymentsReceived: allocatedPayment.amount
   }]);
   await syncCustomerFinancialSummary(payment.customerId);
-  await recalculateProtectedPcForInvoice(allocatedPayment.invoiceId);
+  await awardInvoicePcOnce(allocatedPayment.invoiceId);
   invalidateTransactionCaches([payment.customerId], [allocatedPayment.date]);
   return paymentRef;
 };
@@ -1869,6 +1813,23 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
 
     if (existingPayment?.paymentKind === 'advance_application') {
       throw new Error('Automatic advance adjustments cannot be edited. Edit the invoice or delete the adjustment instead.');
+    }
+
+    const movesPostedAward = Boolean(
+      existingPayment
+      && (existingPayment.invoiceId !== payment.invoiceId || existingPayment.customerId !== payment.customerId)
+      && existingPayment.invoiceId
+      && existingPayment.customerId
+    );
+    if (movesPostedAward && existingPayment) {
+      const postedPcSnapshot = await transaction.get(doc(
+        db,
+        LOYALTY_LEDGER,
+        `${existingPayment.customerId}_${existingPayment.invoiceId}_invoice_pc`
+      ));
+      if (postedPcSnapshot.exists()) {
+        throw new Error('This payment cannot be moved because its invoice PC award is already permanently posted.');
+      }
     }
 
     const oldCustomerId = existingPayment?.customerId || payment.customerId;
@@ -1956,7 +1917,7 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   ]);
 
   await Promise.all(affectedCustomerIds.map((customerId) => syncCustomerFinancialSummary(customerId)));
-  await Promise.all(affectedInvoiceIds.map((invoiceId) => recalculateProtectedPcForInvoice(invoiceId)));
+  await Promise.all(affectedInvoiceIds.map((invoiceId) => awardInvoicePcOnce(invoiceId)));
   invalidateTransactionCaches(
     affectedCustomerIds,
     [previousPayment?.date, allocatedPayment.date].filter((date): date is string => Boolean(date))
@@ -2018,7 +1979,7 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
   }
 
   await syncCustomerFinancialSummary(deletedPayment?.customerId ?? '');
-  await recalculateProtectedPcForInvoice(deletedPayment?.invoiceId ?? '');
+  await awardInvoicePcOnce(deletedPayment?.invoiceId ?? '');
   invalidateTransactionCaches(
     deletedPayment?.customerId ? [deletedPayment.customerId] : [],
     deletedPayment?.date ? [deletedPayment.date] : []
@@ -2432,6 +2393,7 @@ export const protectCustomerPcBalance = async (
       incomingPc: cleanBalance,
       redeemedPc: 0,
       protectedAt: timestamp,
+      lastMutationReferenceId: openingRef.id,
       updatedAt: timestamp
     });
     transaction.set(openingRef, {
@@ -2479,6 +2441,7 @@ export const adjustCustomerPcBalance = async (
       availablePc: nextAvailable,
       incomingPc: balance.incomingPc + (delta > 0 ? delta : 0),
       redeemedPc: balance.redeemedPc + (delta < 0 ? Math.abs(delta) : 0),
+      lastMutationReferenceId: entryRef.id,
       updatedAt: timestamp
     });
     transaction.set(entryRef, {
@@ -2680,6 +2643,17 @@ export const approveReferralBonus = async (referrerId: string, referredCustomerI
       transaction.update(balanceRef, {
         availablePc: balance.availablePc + referralCoins,
         incomingPc: balance.incomingPc + referralCoins,
+        lastMutationReferenceId: ledgerRef.id,
+        updatedAt: timestamp
+      });
+    } else {
+      transaction.set(balanceRef, {
+        customerId: referrer.id,
+        availablePc: referralCoins,
+        incomingPc: referralCoins,
+        redeemedPc: 0,
+        protectedAt: '',
+        lastMutationReferenceId: ledgerRef.id,
         updatedAt: timestamp
       });
     }
@@ -2797,6 +2771,7 @@ export const reviewBonusPcRequest = async (
 
     const cleanCoins = status === 'Approved' ? FIXED_BONUS_PC[bonusRequest.bonusType] : 0;
     const balanceRef = doc(db, PC_BALANCES, bonusRequest.customerId);
+    const ledgerRef = doc(db, LOYALTY_LEDGER, getBonusPcLedgerId(bonusRequest.customerId, requestId));
     const otherWelcomeRequestRefs = status === 'Approved' && bonusRequest.bonusType === 'new_customer'
       ? getNewCustomerBonusRequestIds(bonusRequest.customerId)
           .filter((candidateId) => candidateId !== requestId)
@@ -2835,7 +2810,7 @@ export const reviewBonusPcRequest = async (
     });
 
     if (status === 'Approved' && cleanCoins > 0) {
-      transaction.set(doc(db, LOYALTY_LEDGER, getBonusPcLedgerId(bonusRequest.customerId, requestId)), {
+      transaction.set(ledgerRef, {
         customerId: bonusRequest.customerId,
         type: 'bonus',
         points: cleanCoins,
@@ -2849,6 +2824,17 @@ export const reviewBonusPcRequest = async (
         transaction.update(balanceRef, {
           availablePc: balance.availablePc + cleanCoins,
           incomingPc: balance.incomingPc + cleanCoins,
+          lastMutationReferenceId: ledgerRef.id,
+          updatedAt: timestamp
+        });
+      } else {
+        transaction.set(balanceRef, {
+          customerId: bonusRequest.customerId,
+          availablePc: cleanCoins,
+          incomingPc: cleanCoins,
+          redeemedPc: 0,
+          protectedAt: '',
+          lastMutationReferenceId: ledgerRef.id,
           updatedAt: timestamp
         });
       }
@@ -3001,24 +2987,25 @@ export const reviewRedemptionRequest = async (
     const balanceRef = doc(db, PC_BALANCES, redemption.customerId);
     const ledgerRef = doc(db, LOYALTY_LEDGER, `${redemption.customerId}_${requestId}_redemption`);
     const balanceSnapshot = await transaction.get(balanceRef);
-    if (balanceSnapshot.exists()) {
-      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
-      if (redemption.points > balance.availablePc) throw new Error('Customer does not have enough available PC for this gift.');
-      transaction.update(balanceRef, {
-        availablePc: balance.availablePc - redemption.points,
-        redeemedPc: balance.redeemedPc + redemption.points,
-        updatedAt: timestamp
-      });
-      transaction.set(ledgerRef, {
-        customerId: redemption.customerId,
-        type: 'redemption',
-        points: -Math.abs(redemption.points),
-        reason: `Gift approved: ${redemption.rewardName}`,
-        referenceId: requestId,
-        month: timestamp.slice(0, 7),
-        createdAt: timestamp
-      });
-    }
+    if (!balanceSnapshot.exists()) throw new Error('Protect this customer PC balance before approving a redemption.');
+    if (redemption.points <= 0) throw new Error('Reward PC must be above 0.');
+    const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+    if (redemption.points > balance.availablePc) throw new Error('Customer does not have enough available PC for this gift.');
+    transaction.update(balanceRef, {
+      availablePc: balance.availablePc - redemption.points,
+      redeemedPc: balance.redeemedPc + redemption.points,
+      lastMutationReferenceId: ledgerRef.id,
+      updatedAt: timestamp
+    });
+    transaction.set(ledgerRef, {
+      customerId: redemption.customerId,
+      type: 'redemption',
+      points: -Math.abs(redemption.points),
+      reason: `Gift approved: ${redemption.rewardName}`,
+      referenceId: requestId,
+      month: timestamp.slice(0, 7),
+      createdAt: timestamp
+    });
 
     transaction.update(requestRef, {
       status,
@@ -3066,6 +3053,7 @@ export const removeRedemptionApproval = async (requestId: string, auditUser?: Au
     });
 
     if (ledgerSnapshot.exists() && !reversalSnapshot.exists()) {
+      if (!balanceSnapshot.exists()) throw new Error('The customer PC balance is missing and the redemption cannot be reversed.');
       transaction.set(reversalRef, {
         customerId: redemption.customerId,
         type: 'redemption_reversal',
@@ -3075,14 +3063,16 @@ export const removeRedemptionApproval = async (requestId: string, auditUser?: Au
         month: timestamp.slice(0, 7),
         createdAt: timestamp
       });
-      if (balanceSnapshot.exists()) {
-        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
-        transaction.update(balanceRef, {
-          availablePc: balance.availablePc + redemption.points,
-          redeemedPc: Math.max(0, balance.redeemedPc - redemption.points),
-          updatedAt: timestamp
-        });
+      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+      if (redemption.points > balance.redeemedPc) {
+        throw new Error('The redeemed PC history is inconsistent and cannot be reversed automatically.');
       }
+      transaction.update(balanceRef, {
+        availablePc: balance.availablePc + redemption.points,
+        redeemedPc: balance.redeemedPc - redemption.points,
+        lastMutationReferenceId: reversalRef.id,
+        updatedAt: timestamp
+      });
     }
   });
 
@@ -3154,6 +3144,8 @@ export const markRedemptionRequestGifted = async (requestId: string, auditUser?:
     });
 
     if (!ledgerSnapshot.exists()) {
+      if (!balanceSnapshot.exists()) throw new Error('Protect this customer PC balance before redeeming a gift.');
+      if (redemption.points <= 0) throw new Error('Reward PC must be above 0.');
       transaction.set(ledgerRef, {
         customerId: redemption.customerId,
         type: 'redemption',
@@ -3163,15 +3155,14 @@ export const markRedemptionRequestGifted = async (requestId: string, auditUser?:
         month: getCurrentMonthKey(),
         createdAt: timestamp
       });
-      if (balanceSnapshot.exists()) {
-        const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
-        if (redemption.points > balance.availablePc) throw new Error('Customer does not have enough available PC for this gift.');
-        transaction.update(balanceRef, {
-          availablePc: balance.availablePc - redemption.points,
-          redeemedPc: balance.redeemedPc + redemption.points,
-          updatedAt: timestamp
-        });
-      }
+      const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
+      if (redemption.points > balance.availablePc) throw new Error('Customer does not have enough available PC for this gift.');
+      transaction.update(balanceRef, {
+        availablePc: balance.availablePc - redemption.points,
+        redeemedPc: balance.redeemedPc + redemption.points,
+        lastMutationReferenceId: ledgerRef.id,
+        updatedAt: timestamp
+      });
     }
   });
 

@@ -167,6 +167,7 @@ export interface Invoice {
   isOpeningBalance?: boolean;
   date: string;
   dueDate: string;
+  pcPolicyVersionAtInvoice?: number;
   tierAtInvoice?: CustomerTier;
   pcPercentageAtInvoice?: number;
   creditDaysAtInvoice?: number;
@@ -192,6 +193,7 @@ export interface Payment {
   customerId: string;
   customerName: string;
   date: string;
+  pcPolicyVersionAtPayment?: number;
   // amount is the real money received from the customer.
   amount: number;
   // Amount that reduces the selected invoice. Older documents may also track old-balance allocation separately.
@@ -612,6 +614,8 @@ export interface PcBalanceRecord {
   incomingPc: number;
   redeemedPc: number;
   protectedAt: string;
+  lastAwardReferenceId?: string;
+  lastMutationReferenceId?: string;
   updatedAt: string;
 }
 

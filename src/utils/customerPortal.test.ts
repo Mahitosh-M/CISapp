@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Invoice, Payment } from '../types';
-import { calculateInvoiceApcInfo } from './customerPortal';
+import { calculateInvoiceApcInfo, getInvoiceFullPaymentEvent } from './customerPortal';
 import { DEFAULT_SETTINGS } from './settings';
 
 const invoice = (overrides: Partial<Invoice> = {}): Invoice => ({
@@ -87,5 +87,26 @@ describe('hybrid invoice PC', () => {
   it('uses the invoice-time tier rate after the customer tier changes', () => {
     const result = calculateInvoiceApcInfo(invoice({ tierAtInvoice: 'Tier 1', pcPercentageAtInvoice: 4 }), [payment('p1', 10000, '2026-07-11')], 'Tier 4', DEFAULT_SETTINGS);
     expect(result.earnedApc).toBe(400);
+  });
+
+  it('identifies the payment document that first fully settles the invoice', () => {
+    const firstPayment = payment('p1', 4000, '2026-07-08');
+    const settlementPayment = payment('p2', 6000, '2026-07-10');
+
+    expect(getInvoiceFullPaymentEvent(invoice(), [settlementPayment, firstPayment])?.id).toBe('p2');
+  });
+
+  it('uses creation order to identify same-day settlement payments', () => {
+    const laterCreated = {
+      ...payment('p2', 6000, '2026-07-10'),
+      createdAt: '2026-07-10T11:00:00.000Z'
+    };
+    const earlierCreated = {
+      ...payment('p1', 4000, '2026-07-10'),
+      createdAt: '2026-07-10T10:00:00.000Z',
+      updatedAt: '2026-08-10T10:00:00.000Z'
+    };
+
+    expect(getInvoiceFullPaymentEvent(invoice(), [laterCreated, earlierCreated])?.id).toBe('p2');
   });
 });
