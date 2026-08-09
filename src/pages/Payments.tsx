@@ -20,6 +20,7 @@ import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../utils/openingBalance';
+import { allocateReceiptOldestFirst } from '../utils/paymentAllocation';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 
 const LIST_PAGE_SIZE = 1;
@@ -65,7 +66,6 @@ const Payments = () => {
   const [loadingCustomerPayments, setLoadingCustomerPayments] = useState(false);
   const [formData, setFormData] = useState<PaymentFormData>(emptyPaymentForm);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
-  const [manualInvoiceSelection, setManualInvoiceSelection] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
@@ -127,7 +127,9 @@ const Payments = () => {
     setCustomerPayments([]);
     setLoadingCustomerPayments(true);
 
-    getInvoicesByCustomerId(formData.customerId, { limitCount: 50 })
+    // Every invoice is required here: advance is valid only after the customer's
+    // complete pending balance has been cleared.
+    getInvoicesByCustomerId(formData.customerId)
       .then(async (invoiceRows) => ({
         invoiceRows,
         paymentRows: await getPaymentsByInvoiceIds(invoiceRows.map((invoice) => invoice.id))
@@ -188,6 +190,7 @@ const Payments = () => {
     () => invoiceOptions.filter((invoice) => invoice.pendingAmount > 0),
     [invoiceOptions]
   );
+  const totalPendingAmount = pendingInvoiceOptions.reduce((sum, invoice) => sum + invoice.pendingAmount, 0);
   const selectedCustomer = customers.find((customer) => customer.id === formData.customerId);
 
   const selectedInvoice = invoices.find((invoice) => invoice.id === formData.invoiceId);
@@ -199,46 +202,13 @@ const Payments = () => {
     .map((invoiceId) => invoiceOptions.find((invoice) => invoice.id === invoiceId))
     .filter((invoice): invoice is Invoice & { paidAmount: number; pendingAmount: number } => Boolean(invoice));
   const selectedPendingTotal = selectedInvoiceOptions.reduce((sum, invoice) => sum + invoice.pendingAmount, 0);
-  const overpaymentAmount = selectedInvoiceIds.length > 1
-    ? Math.max(0, paymentEffect - selectedPendingTotal)
-    : selectedInvoice
-      ? Math.max(0, paymentEffect - selectedInvoiceOutstanding)
-      : 0;
-
-  const allocationPreview = useMemo(() => {
-    let remainingEffect = paymentEffect;
-    let remainingAmount = formData.amount;
-    let remainingDiscount = formData.cashDiscount;
+  const allocationResult = useMemo(() => {
     const invoicesForAllocation = editingPaymentId ? selectedInvoiceOptions : pendingInvoiceOptions;
-
-    const allocations = invoicesForAllocation.map((invoice) => {
-      const appliedTotal = Math.min(invoice.pendingAmount, Math.max(0, remainingEffect));
-      const amountAppliedToInvoice = Math.min(remainingAmount, appliedTotal);
-      const cashDiscount = Math.min(remainingDiscount, appliedTotal - amountAppliedToInvoice);
-
-      remainingEffect -= appliedTotal;
-      remainingAmount -= amountAppliedToInvoice;
-      remainingDiscount -= cashDiscount;
-
-      return {
-        invoice,
-        amount: amountAppliedToInvoice,
-        amountAppliedToInvoice,
-        cashDiscount,
-        appliedTotal
-      };
-    });
-
-    // Keep the full cash amount received even when it is slightly above the selected
-    // invoice balance. Only amountAppliedToInvoice reduces outstanding.
-    if (remainingAmount > 0 && allocations.length > 0) {
-      allocations[allocations.length - 1].amount += remainingAmount;
-    }
-
-    return allocations;
-  }, [editingPaymentId, formData.amount, formData.cashDiscount, paymentEffect, pendingInvoiceOptions, selectedInvoiceOptions]);
-
-  const appliedTotalPreview = allocationPreview.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
+    return allocateReceiptOldestFirst(invoicesForAllocation, formData.amount, formData.cashDiscount);
+  }, [editingPaymentId, formData.amount, formData.cashDiscount, pendingInvoiceOptions, selectedInvoiceOptions]);
+  const allocationPreview = allocationResult.allocations;
+  const appliedTotalPreview = allocationResult.appliedTotal;
+  const overpaymentAmount = allocationResult.advanceAmount;
 
   const splitPaymentTotalById = useMemo(() => {
     const totals = new Map<string, number>();
@@ -274,7 +244,6 @@ const Payments = () => {
         setSelectedInvoiceIds([]);
         setFormData((current) => ({ ...current, invoiceId: '', invoiceNumber: '' }));
       }
-      setManualInvoiceSelection(false);
       return;
     }
 
@@ -300,7 +269,7 @@ const Payments = () => {
         invoiceNumber: firstInvoice?.invoiceNumber ?? ''
       }));
     }
-  }, [editingPaymentId, formData.customerId, formData.invoiceId, manualInvoiceSelection, paymentEffect, pendingInvoiceOptions, selectedInvoiceIds]);
+  }, [editingPaymentId, formData.customerId, formData.invoiceId, paymentEffect, pendingInvoiceOptions, selectedInvoiceIds]);
 
   const filteredPaymentRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
@@ -328,7 +297,6 @@ const Payments = () => {
         invoiceNumber: ''
       }));
       setSelectedInvoiceIds([]);
-      setManualInvoiceSelection(false);
       return;
     }
 
@@ -342,7 +310,6 @@ const Payments = () => {
         customerName: invoice?.customerName ?? current.customerName
       }));
       setSelectedInvoiceIds(invoice?.id ? [invoice.id] : []);
-      setManualInvoiceSelection(true);
       return;
     }
 
@@ -363,56 +330,22 @@ const Payments = () => {
   const resetForm = () => {
     setFormData(emptyPaymentForm);
     setSelectedInvoiceIds([]);
-    setManualInvoiceSelection(false);
     setEditingPaymentId('');
   };
 
   const toggleSelectedInvoice = (invoiceId: string) => {
-    setManualInvoiceSelection(true);
+    if (!editingPaymentId) return;
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) return;
 
-    if (editingPaymentId) {
-      const invoice = invoices.find((item) => item.id === invoiceId);
-
-      if (!invoice) return;
-
-      setSelectedInvoiceIds([invoice.id]);
-      setFormData((form) => ({
-        ...form,
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        customerId: invoice.customerId,
-        customerName: invoice.customerName
-      }));
-      return;
-    }
-
-    setSelectedInvoiceIds((current) => {
-      if (current.includes(invoiceId)) {
-        const next = current.filter((id) => id !== invoiceId);
-        const firstInvoice = invoices.find((invoice) => invoice.id === next[0]);
-
-        setFormData((form) => ({
-          ...form,
-          invoiceId: firstInvoice?.id ?? '',
-          invoiceNumber: firstInvoice?.invoiceNumber ?? ''
-        }));
-
-        return next;
-      }
-
-      const next = [...current, invoiceId];
-      const firstInvoice = invoices.find((invoice) => invoice.id === next[0]);
-
-      setFormData((form) => ({
-        ...form,
-        invoiceId: firstInvoice?.id ?? '',
-        invoiceNumber: firstInvoice?.invoiceNumber ?? '',
-        customerId: firstInvoice?.customerId ?? form.customerId,
-        customerName: firstInvoice?.customerName ?? form.customerName
-      }));
-
-      return next;
-    });
+    setSelectedInvoiceIds([invoice.id]);
+    setFormData((form) => ({
+      ...form,
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      customerId: invoice.customerId,
+      customerName: invoice.customerName
+    }));
   };
 
   const canEditPayment = (payment: Payment) => payment.paymentKind !== 'advance_application';
@@ -480,8 +413,7 @@ const Payments = () => {
           }, auditUser);
         }
         const appliedAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
-        const appliedCashAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.amountAppliedToInvoice, 0);
-        const advanceAmount = Math.max(0, formData.amount - appliedCashAmount);
+        const advanceAmount = allocationResult.advanceAmount;
         setMessage(
           `Payment added. ${formatMoney(formData.amount)} received; ${formatMoney(appliedAmount)} applied across ${payableAllocations.length} invoice(s)` +
           (advanceAmount > 0 ? `; ${formatMoney(advanceAmount)} stored as advance.` : '.')
@@ -659,9 +591,9 @@ const Payments = () => {
           {formData.customerId && !loadingCustomerPayments && invoiceOptions.length > 0 ? (
             <div style={{ gridColumn: '1 / -1', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12, background: 'var(--role-card-subtle)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                <div style={{ fontWeight: 900, color: '#FFFFFF' }}>{editingPaymentId ? 'Apply to invoice' : 'Apply to invoices'}</div>
+                <div style={{ fontWeight: 900, color: '#FFFFFF' }}>{editingPaymentId ? 'Apply to invoice' : 'Oldest-first invoice allocation'}</div>
                 <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>
-                  Selected pending: {formatMoney(selectedPendingTotal)}
+                  {editingPaymentId ? 'Selected' : 'Total'} pending: {formatMoney(editingPaymentId ? selectedPendingTotal : totalPendingAmount)}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
@@ -678,10 +610,15 @@ const Payments = () => {
                         background: checked ? '#FFF8E1' : '#FFFFFF',
                         borderRadius: 8,
                         padding: 10,
-                        cursor: 'pointer'
+                        cursor: editingPaymentId ? 'pointer' : 'default'
                       }}
                     >
-                      <input type={editingPaymentId ? 'radio' : 'checkbox'} checked={checked} onChange={() => toggleSelectedInvoice(invoice.id)} />
+                      <input
+                        type={editingPaymentId ? 'radio' : 'checkbox'}
+                        checked={checked}
+                        disabled={!editingPaymentId}
+                        onChange={() => toggleSelectedInvoice(invoice.id)}
+                      />
                       <span style={{ minWidth: 0 }}>
                         <span style={{ display: 'block', color: '#000000', fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</span>
                         <span style={{ display: 'block', color: '#7F1D1D', fontSize: 12, fontWeight: 800 }}>Pending {formatMoney(invoice.pendingAmount)}</span>

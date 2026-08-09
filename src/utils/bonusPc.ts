@@ -52,6 +52,14 @@ const getMonthRange = (month: string) => {
   };
 };
 
+export const getNewCustomerBonusRequestIds = (customerId: string) => [
+  `${customerId}_new_customer`,
+  `newCustomerWelcome:${customerId}`
+];
+
+export const getBonusPcLedgerId = (customerId: string, requestId: string) =>
+  `${customerId}_${requestId}_bonus_pc`;
+
 export const buildAutomaticBonusCandidates = (
   customer: Customer,
   invoices: Invoice[],

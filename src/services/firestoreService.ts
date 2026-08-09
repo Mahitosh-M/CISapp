@@ -64,10 +64,13 @@ import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate } from '../utils/cus
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
 import { getOpeningBalanceInvoiceId, getOpeningBalanceInvoiceNumber, isOpeningBalanceInvoice, OPENING_BALANCE_INVOICE_TYPE } from '../utils/openingBalance';
+import { getUnpaidInvoicesAfterPayment } from '../utils/paymentAllocation';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import {
   buildAutomaticBonusCandidates,
   FIXED_BONUS_PC,
+  getBonusPcLedgerId,
+  getNewCustomerBonusRequestIds,
   getReferralBonusId,
   isInvoiceFullyPaidThrough,
   isValidBonusInvoice
@@ -1665,6 +1668,29 @@ const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstand
   };
 };
 
+const assertAdvanceCanBeCreated = async (
+  payment: PaymentFormData & { amountAppliedToInvoice: number; advanceCreatedAmount: number },
+  ignoredPaymentId = ''
+) => {
+  if (payment.advanceCreatedAmount <= 0) return;
+
+  // Only overpayments take this additional read path.
+  const [customerInvoices, customerPayments] = await Promise.all([
+    getInvoicesByCustomerId(payment.customerId),
+    getPaymentsByCustomerId(payment.customerId)
+  ]);
+  const unpaidInvoices = getUnpaidInvoicesAfterPayment(
+    customerInvoices,
+    customerPayments,
+    payment,
+    ignoredPaymentId
+  );
+
+  if (unpaidInvoices.length > 0) {
+    throw new Error('Customer advance can be created only after every pending invoice is fully paid.');
+  }
+};
+
 const getLatestInvoicePcChangeAt = (invoice: Invoice, payments: Payment[]) => {
   return [
     invoice.updatedAt,
@@ -1791,6 +1817,8 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
 
+  await assertAdvanceCanBeCreated(allocatedPayment);
+
   await runTransaction(db, async (transaction) => {
     const customerRef = doc(db, CUSTOMERS, payment.customerId);
     const customerSnapshot = await transaction.get(customerRef);
@@ -1831,6 +1859,8 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
   let previousPayment: Payment | undefined;
   let affectedCustomerIds: string[] = [payment.customerId];
   let affectedInvoiceIds: string[] = [payment.invoiceId];
+
+  await assertAdvanceCanBeCreated(allocatedPayment, paymentId);
 
   await runTransaction(db, async (transaction) => {
     const paymentSnapshot = await transaction.get(paymentRef);
@@ -2685,12 +2715,19 @@ export const generateBonusPcRequests = async (
 
       await Promise.all(candidates.map(async (candidate) => {
         const requestRef = doc(db, BONUS_PC_REQUESTS, candidate.id);
-        const existingSnapshot = await getDoc(requestRef);
+        const existingSnapshot = candidate.bonusType === 'new_customer'
+          ? (await getDocs(query(
+              collection(db, BONUS_PC_REQUESTS),
+              where('customerId', '==', customer.id),
+              where('bonusType', '==', 'new_customer'),
+              firestoreLimit(1)
+            ))).docs[0]
+          : await getDoc(requestRef);
         const amount = FIXED_BONUS_PC[candidate.bonusType];
-        if (existingSnapshot.exists()) {
+        if (existingSnapshot?.exists()) {
           const existing = mapBonusPcRequestDoc(existingSnapshot.id, existingSnapshot.data());
           if (existing.status === 'Pending' && existing.triggerType !== candidate.triggerType) {
-            await updateDoc(requestRef, {
+            await updateDoc(existingSnapshot.ref, {
               triggerType: candidate.triggerType,
               referenceId: candidate.referenceId,
               suggestedCoins: amount,
@@ -2760,7 +2797,31 @@ export const reviewBonusPcRequest = async (
 
     const cleanCoins = status === 'Approved' ? FIXED_BONUS_PC[bonusRequest.bonusType] : 0;
     const balanceRef = doc(db, PC_BALANCES, bonusRequest.customerId);
-    const balanceSnapshot = await transaction.get(balanceRef);
+    const otherWelcomeRequestRefs = status === 'Approved' && bonusRequest.bonusType === 'new_customer'
+      ? getNewCustomerBonusRequestIds(bonusRequest.customerId)
+          .filter((candidateId) => candidateId !== requestId)
+          .map((candidateId) => doc(db, BONUS_PC_REQUESTS, candidateId))
+      : [];
+    const welcomeLedgerRefs = status === 'Approved' && bonusRequest.bonusType === 'new_customer'
+      ? getNewCustomerBonusRequestIds(bonusRequest.customerId)
+          .map((candidateId) => doc(db, LOYALTY_LEDGER, getBonusPcLedgerId(bonusRequest.customerId, candidateId)))
+      : [];
+    const [balanceSnapshot, otherWelcomeRequestSnapshots, welcomeLedgerSnapshots] = await Promise.all([
+      transaction.get(balanceRef),
+      Promise.all(otherWelcomeRequestRefs.map((reference) => transaction.get(reference))),
+      Promise.all(welcomeLedgerRefs.map((reference) => transaction.get(reference)))
+    ]);
+
+    if (status === 'Approved' && bonusRequest.bonusType === 'new_customer') {
+      const alreadyApproved = otherWelcomeRequestSnapshots.some((snapshot) => (
+        snapshot.exists()
+        && mapBonusPcRequestDoc(snapshot.id, snapshot.data()).status === 'Approved'
+      ));
+      const alreadyCredited = welcomeLedgerSnapshots.some((snapshot) => snapshot.exists());
+      if (alreadyApproved || alreadyCredited) {
+        throw new Error('This customer has already received the new customer bonus.');
+      }
+    }
 
     transaction.update(requestRef, {
       bonusType: bonusRequest.bonusType,
@@ -2774,7 +2835,7 @@ export const reviewBonusPcRequest = async (
     });
 
     if (status === 'Approved' && cleanCoins > 0) {
-      transaction.set(doc(db, LOYALTY_LEDGER, `${bonusRequest.customerId}_${requestId}_bonus_pc`), {
+      transaction.set(doc(db, LOYALTY_LEDGER, getBonusPcLedgerId(bonusRequest.customerId, requestId)), {
         customerId: bonusRequest.customerId,
         type: 'bonus',
         points: cleanCoins,

@@ -320,6 +320,15 @@ const Invoices = () => {
         const invoiceCreationPayment = getInvoiceCreationPayment(editingInvoiceId, linkedPayments);
 
         if (cleanPaymentAmount > 0) {
+          const otherPaymentEffect = linkedPayments
+            .filter((payment) => payment.id !== invoiceCreationPayment?.id)
+            .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
+          const remainingInvoiceAmount = getPendingAmount(formData.totalSales, otherPaymentEffect);
+          const amountAppliedToInvoice = Math.min(cleanPaymentAmount, remainingInvoiceAmount);
+          const cashDiscountApplied = Math.min(
+            cleanCashDiscount,
+            Math.max(0, remainingInvoiceAmount - amountAppliedToInvoice)
+          );
           const paymentPayload = {
             customerId: formData.customerId,
             customerName: formData.customerName,
@@ -327,7 +336,8 @@ const Invoices = () => {
             invoiceNumber: currentInvoice?.invoiceNumber ?? invoiceCreationPayment?.invoiceNumber ?? '',
             date: formData.date,
             amount: cleanPaymentAmount,
-            cashDiscount: cleanCashDiscount,
+            amountAppliedToInvoice,
+            cashDiscount: cashDiscountApplied,
             mode: sameDayPaymentMode,
             notes: invoiceCreationPaymentNote
           };

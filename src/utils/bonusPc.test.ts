@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer, Invoice, Payment } from '../types';
-import { buildAutomaticBonusCandidates, FIXED_BONUS_PC, getReferralBonusId } from './bonusPc';
+import {
+  buildAutomaticBonusCandidates,
+  FIXED_BONUS_PC,
+  getBonusPcLedgerId,
+  getNewCustomerBonusRequestIds,
+  getReferralBonusId
+} from './bonusPc';
 import { DEFAULT_SETTINGS } from './settings';
 
 const customer: Customer = {
@@ -75,6 +81,15 @@ describe('automatic PC bonuses', () => {
       .not.toEqual(expect.arrayContaining([expect.objectContaining({ bonusType: 'new_customer' })]));
     expect(buildAutomaticBonusCandidates(customer, [first], [payment(first.id, '2026-05-04')], DEFAULT_SETTINGS, '2026-05', '2026-05-10'))
       .toEqual(expect.arrayContaining([expect.objectContaining({ id: `newCustomerWelcome:${customer.id}` })]));
+  });
+
+  it('recognizes legacy and current one-time welcome bonus records', () => {
+    expect(getNewCustomerBonusRequestIds(customer.id)).toEqual([
+      `${customer.id}_new_customer`,
+      `newCustomerWelcome:${customer.id}`
+    ]);
+    expect(getBonusPcLedgerId(customer.id, `${customer.id}_new_customer`))
+      .toBe(`${customer.id}_${customer.id}_new_customer_bonus_pc`);
   });
 
   it('creates one stable monthly target key and keeps it pending until invoices are paid', () => {
