@@ -24,9 +24,11 @@ import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceForm
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
+import { formatPc } from '../utils/loyalty';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { summarizePaymentSaveResults, type PaymentSaveResultLike } from '../utils/paymentSaveResult';
 import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
 
 const buildEmptyInvoiceForm = (): InvoiceFormData => ({
@@ -119,6 +121,7 @@ const Invoices = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [warning, setWarning] = useState('');
   const [error, setError] = useState('');
   const { canDeleteRecords, userProfile } = useAuth();
   const isMobile = useIsMobile();
@@ -307,14 +310,23 @@ const Invoices = () => {
     try {
       setSaving(true);
       setError('');
+      setMessage('');
+      setWarning('');
       const previousCustomerId = editingInvoiceId
         ? invoices.find((invoice) => invoice.id === editingInvoiceId)?.customerId
         : undefined;
+      const saveResults: PaymentSaveResultLike[] = [];
+      let successMessage = '';
 
       if (editingInvoiceId) {
-        await updateInvoiceRecord(editingInvoiceId, formData, auditUser);
         const cleanPaymentAmount = Math.max(0, Number(sameDayPaymentAmount) || 0);
         const cleanCashDiscount = Math.max(0, Number(sameDayCashDiscount) || 0);
+        saveResults.push(await updateInvoiceRecord(
+          editingInvoiceId,
+          formData,
+          auditUser,
+          { deferPcAward: cleanPaymentAmount > 0 }
+        ));
         const currentInvoice = invoices.find((invoice) => invoice.id === editingInvoiceId);
         const linkedPayments = await getPaymentsByInvoiceId(editingInvoiceId);
         const invoiceCreationPayment = getInvoiceCreationPayment(editingInvoiceId, linkedPayments);
@@ -343,15 +355,16 @@ const Invoices = () => {
           };
 
           if (invoiceCreationPayment) {
-            await updatePaymentRecord(invoiceCreationPayment.id, paymentPayload, auditUser);
+            saveResults.push(await updatePaymentRecord(invoiceCreationPayment.id, paymentPayload, auditUser));
           } else {
-            await createPayment(paymentPayload, auditUser);
+            saveResults.push(await createPayment(paymentPayload, auditUser));
           }
         }
 
-        setMessage('Invoice updated successfully.');
+        successMessage = 'Invoice updated successfully.';
       } else {
         const createdInvoice = await createInvoice(formData, auditUser);
+        saveResults.push(createdInvoice);
         const cleanPaymentAmount = Math.max(0, Number(sameDayPaymentAmount) || 0);
         const cleanCashDiscount = Math.max(0, Number(sameDayCashDiscount) || 0);
 
@@ -360,7 +373,7 @@ const Invoices = () => {
           const amountAppliedToInvoice = Math.min(cleanPaymentAmount, remainingAfterAdvance);
           const cashDiscountApplied = Math.min(cleanCashDiscount, Math.max(0, remainingAfterAdvance - amountAppliedToInvoice));
 
-          await createPayment({
+          saveResults.push(await createPayment({
             customerId: formData.customerId,
             customerName: formData.customerName,
             invoiceId: createdInvoice.id,
@@ -371,21 +384,31 @@ const Invoices = () => {
             cashDiscount: cashDiscountApplied,
             mode: sameDayPaymentMode,
             notes: invoiceCreationPaymentNote
-          }, auditUser);
+          }, auditUser));
         }
 
         const advanceMessage = createdInvoice.advanceAppliedAmount > 0
           ? ` ${formatMoney(createdInvoice.advanceAppliedAmount)} customer advance was adjusted automatically.`
           : '';
-        setMessage(
+        successMessage = (
           (cleanPaymentAmount > 0 ? 'Invoice and same-day payment created successfully.' : 'Invoice created successfully.') + advanceMessage
         );
       }
 
-      await Promise.all(
+      const derivedResults = await Promise.allSettled(
         [...new Set([previousCustomerId, formData.customerId].filter((customerId): customerId is string => Boolean(customerId)))]
           .map((customerId) => recalculateCustomerDerivedData(customerId, editingInvoiceId ? 'invoice_edited' : 'invoice_created'))
       );
+      const saveSummary = summarizePaymentSaveResults(saveResults);
+      const pcConfirmation = saveSummary.creditedPc > 0
+        ? ` ${formatPc(saveSummary.creditedPc)} PC credited${saveSummary.availablePc !== undefined ? `; confirmed Available PC: ${formatPc(saveSummary.availablePc)}` : ''}.`
+        : '';
+      const derivedWarning = derivedResults.some((result) => result.status === 'rejected')
+        ? 'Invoice was saved, but customer scoring and credit refresh is pending.'
+        : '';
+
+      setMessage(`${successMessage}${pcConfirmation}`);
+      setWarning([...saveSummary.warnings, derivedWarning].filter(Boolean).join(' '));
       resetForm();
       await loadData();
     } catch (err) {
@@ -417,6 +440,7 @@ const Invoices = () => {
     });
     void loadCustomerCreditLimit(invoice.customerId);
     setMessage('');
+    setWarning('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -693,6 +717,7 @@ const Invoices = () => {
 
         {error ? <div style={{ color: '#FCA5A5', marginTop: 12 }}>{error}</div> : null}
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
+        {warning ? <div style={{ color: '#B7791F', marginTop: 12, fontWeight: 800 }}>{warning}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
           <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>

@@ -111,6 +111,38 @@ export interface AuditUser {
   role?: UserRole;
 }
 
+export type InvoicePcAwardStatus =
+  | 'credited'
+  | 'finalized_zero'
+  | 'already_finalized'
+  | 'not_fully_paid'
+  | 'not_eligible'
+  | 'not_applicable';
+
+export interface InvoicePcAwardResult {
+  invoiceId: string;
+  status: InvoicePcAwardStatus;
+  points: number;
+  availablePc?: number;
+}
+
+export interface TransactionPostProcessingWarning {
+  area: 'monthly_snapshot' | 'financial_summary' | 'pc';
+  message: string;
+  referenceId?: string;
+}
+
+export interface PaymentSaveResult {
+  paymentId: string;
+  pcAwards: InvoicePcAwardResult[];
+  warnings: TransactionPostProcessingWarning[];
+}
+
+export interface InvoicePcRetryFailure {
+  invoiceId: string;
+  permissionDenied: boolean;
+}
+
 interface DateRangeQueryOptions {
   fromDate?: string;
   toDate?: string;
@@ -1352,19 +1384,28 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     }
   });
 
-  await applyMonthlySnapshotDeltas([{
-    customerId: invoice.customerId,
-    date: invoice.date,
-    totalSales: invoice.totalSales,
-    totalProfit: invoice.totalProfit,
-    invoiceCount: 1
-  }]);
-  await syncCustomerFinancialSummary(invoice.customerId);
+  const postProcessing = await runTransactionPostProcessing({
+    recordLabel: 'Invoice',
+    monthlyDeltas: [{
+      customerId: invoice.customerId,
+      date: invoice.date,
+      totalSales: invoice.totalSales,
+      totalProfit: invoice.totalProfit,
+      invoiceCount: 1
+    }],
+    customerIds: [invoice.customerId],
+    invoiceIds: advanceAppliedAmount > 0 ? [docRef.id] : []
+  });
   invalidateTransactionCaches([invoice.customerId], [invoice.date]);
-  return { id: docRef.id, invoiceNumber, ref: docRef, advanceAppliedAmount };
+  return { id: docRef.id, invoiceNumber, ref: docRef, advanceAppliedAmount, ...postProcessing };
 };
 
-export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFormData, auditUser?: AuditUser) => {
+export const updateInvoiceRecord = async (
+  invoiceId: string,
+  invoice: InvoiceFormData,
+  auditUser?: AuditUser,
+  options?: { deferPcAward?: boolean }
+) => {
   const [existingInvoiceSnapshot, customer, activeSettings] = await Promise.all([
     getDoc(doc(db, INVOICES, invoiceId)),
     getCustomerById(invoice.customerId),
@@ -1400,27 +1441,30 @@ export const updateInvoiceRecord = async (invoiceId: string, invoice: InvoiceFor
     updatedAt: nowIso()
   });
 
-  await applyMonthlySnapshotDeltas([
-    {
-      customerId: existingInvoice.customerId,
-      date: existingInvoice.date,
-      totalSales: -existingInvoice.totalSales,
-      totalProfit: -existingInvoice.totalProfit,
-      invoiceCount: -1
-    },
-    {
-      customerId: invoice.customerId,
-      date: invoice.date,
-      totalSales: invoice.totalSales,
-      totalProfit: invoice.totalProfit,
-      invoiceCount: 1
-    }
-  ]);
-
   const affectedCustomerIds = [existingInvoice?.customerId, invoice.customerId].filter((customerId): customerId is string => Boolean(customerId));
-  await Promise.all([...new Set(affectedCustomerIds)].map((customerId) => syncCustomerFinancialSummary(customerId)));
-  await awardInvoicePcOnce(invoiceId);
+  const postProcessing = await runTransactionPostProcessing({
+    recordLabel: 'Invoice',
+    monthlyDeltas: [
+      {
+        customerId: existingInvoice.customerId,
+        date: existingInvoice.date,
+        totalSales: -existingInvoice.totalSales,
+        totalProfit: -existingInvoice.totalProfit,
+        invoiceCount: -1
+      },
+      {
+        customerId: invoice.customerId,
+        date: invoice.date,
+        totalSales: invoice.totalSales,
+        totalProfit: invoice.totalProfit,
+        invoiceCount: 1
+      }
+    ],
+    customerIds: [...new Set(affectedCustomerIds)],
+    invoiceIds: options?.deferPcAward ? [] : [invoiceId]
+  });
   invalidateTransactionCaches(affectedCustomerIds, [existingInvoice.date, invoice.date]);
+  return { invoiceId, ...postProcessing };
 };
 
 export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUser) => {
@@ -1672,51 +1716,69 @@ const assertAdvanceCanBeCreated = async (
   }
 };
 
-const awardInvoicePcOnce = async (invoiceId: string) => {
-  if (!invoiceId) return;
+const awardInvoicePcOnce = async (invoiceId: string): Promise<InvoicePcAwardResult> => {
+  if (!invoiceId) return { invoiceId, status: 'not_applicable', points: 0 };
 
   const invoiceSnapshot = await getDoc(doc(db, INVOICES, invoiceId));
-  if (!invoiceSnapshot.exists()) return;
+  if (!invoiceSnapshot.exists()) return { invoiceId, status: 'not_applicable', points: 0 };
 
   const invoice = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data());
-  if (!invoice.customerId || isOpeningBalanceInvoice(invoice)) return;
+  if (!invoice.customerId || isOpeningBalanceInvoice(invoice)) {
+    return { invoiceId, status: 'not_applicable', points: 0 };
+  }
   const ledgerRef = doc(db, LOYALTY_LEDGER, `${invoice.customerId}_${invoice.id}_invoice_pc`);
 
   // Most edit/delete calls hit an already-posted invoice. Stop after one
   // ledger read instead of reloading its customer, payments, and settings.
   const postedLedgerSnapshot = await getDoc(ledgerRef);
-  if (postedLedgerSnapshot.exists()) return;
+  if (postedLedgerSnapshot.exists()) {
+    return {
+      invoiceId,
+      status: 'already_finalized',
+      points: Math.max(0, Math.round(numberOrZero(postedLedgerSnapshot.data().points)))
+    };
+  }
 
   const [customer, payments, settings] = await Promise.all([
     getCustomerById(invoice.customerId),
     getPaymentsByInvoiceId(invoice.id),
     getAppSettings()
   ]);
-  if (!customer) return;
+  if (!customer) return { invoiceId, status: 'not_applicable', points: 0 };
 
   const settlementPayment = getInvoiceFullPaymentEvent(invoice, payments);
-  if (!settlementPayment) return;
+  if (!settlementPayment) return { invoiceId, status: 'not_fully_paid', points: 0 };
   const award = calculateInvoiceApcInfo(invoice, payments, customer.tier, settings);
   const recalculatedPoints = Math.max(0, Math.round(award.earnedApc));
 
   const timestamp = nowIso();
   const balanceRef = doc(db, PC_BALANCES, customer.id);
 
-  await runTransaction(db, async (transaction) => {
+  return runTransaction(db, async (transaction): Promise<InvoicePcAwardResult> => {
     const ledgerSnapshot = await transaction.get(ledgerRef);
     const decision = decideImmutableInvoicePcAward(
       ledgerSnapshot.exists(),
       ledgerSnapshot.exists() ? ledgerSnapshot.data().points : undefined,
       recalculatedPoints
     );
-    if (decision.action === 'keep') return;
+    if (decision.action === 'keep') {
+      return {
+        invoiceId,
+        status: 'already_finalized',
+        points: decision.awardedPoints
+      };
+    }
 
     const balanceSnapshot = await transaction.get(balanceRef);
     const balance = balanceSnapshot.exists()
       ? mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data())
       : undefined;
 
-    if (!canPostInvoicePcForSettlement(invoice, settlementPayment, balance?.protectedAt)) return;
+    if (!canPostInvoicePcForSettlement(invoice, settlementPayment, balance?.protectedAt)) {
+      return { invoiceId, status: 'not_eligible', points: 0 };
+    }
+
+    const nextAvailablePc = (balance?.availablePc ?? 0) + decision.pointsToAdd;
 
     if (decision.action === 'award') {
       if (balance) {
@@ -1752,10 +1814,81 @@ const awardInvoicePcOnce = async (invoiceId: string) => {
       month: settlementPayment.date.slice(0, 7),
       createdAt: timestamp
     });
+
+    return {
+      invoiceId,
+      status: decision.action === 'award' ? 'credited' : 'finalized_zero',
+      points: decision.awardedPoints,
+      availablePc: nextAvailablePc
+    };
   });
 };
 
-export const createPayment = async (payment: PaymentFormData, auditUser?: AuditUser) => {
+interface TransactionPostProcessingOptions {
+  recordLabel: 'Invoice' | 'Payment';
+  monthlyDeltas: MonthlySnapshotDelta[];
+  customerIds: string[];
+  invoiceIds: string[];
+}
+
+const buildTransactionPostProcessingWarning = (
+  recordLabel: TransactionPostProcessingOptions['recordLabel'],
+  area: TransactionPostProcessingWarning['area'],
+  referenceId?: string
+): TransactionPostProcessingWarning => {
+  const messages: Record<TransactionPostProcessingWarning['area'], string> = {
+    monthly_snapshot: `${recordLabel} was saved, but the monthly summary refresh is pending.`,
+    financial_summary: `${recordLabel} was saved, but the customer outstanding summary refresh is pending.`,
+    pc: `${recordLabel} was saved, but PC posting is pending. Admin can retry it from the PC page.`
+  };
+
+  return { area, message: messages[area], referenceId };
+};
+
+const runTransactionPostProcessing = async ({
+  recordLabel,
+  monthlyDeltas,
+  customerIds,
+  invoiceIds
+}: TransactionPostProcessingOptions) => {
+  const tasks: Array<{
+    area: TransactionPostProcessingWarning['area'];
+    referenceId?: string;
+    run: () => Promise<unknown>;
+  }> = [
+    {
+      area: 'monthly_snapshot',
+      run: () => applyMonthlySnapshotDeltas(monthlyDeltas)
+    },
+    ...customerIds.map((customerId) => ({
+      area: 'financial_summary' as const,
+      referenceId: customerId,
+      run: () => syncCustomerFinancialSummary(customerId)
+    })),
+    ...invoiceIds.map((invoiceId) => ({
+      area: 'pc' as const,
+      referenceId: invoiceId,
+      run: () => awardInvoicePcOnce(invoiceId)
+    }))
+  ];
+  const settledTasks = await Promise.allSettled(tasks.map((task) => task.run()));
+  const pcAwards: InvoicePcAwardResult[] = [];
+  const warnings: TransactionPostProcessingWarning[] = [];
+
+  settledTasks.forEach((result, index) => {
+    const task = tasks[index];
+    if (result.status === 'fulfilled') {
+      if (task.area === 'pc') pcAwards.push(result.value as InvoicePcAwardResult);
+      return;
+    }
+
+    warnings.push(buildTransactionPostProcessingWarning(recordLabel, task.area, task.referenceId));
+  });
+
+  return { pcAwards, warnings };
+};
+
+export const createPayment = async (payment: PaymentFormData, auditUser?: AuditUser): Promise<PaymentSaveResult> => {
   const paymentRef = doc(collection(db, PAYMENTS));
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
@@ -1785,18 +1918,28 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     });
   });
 
-  await applyMonthlySnapshotDeltas([{
-    customerId: allocatedPayment.customerId,
-    date: allocatedPayment.date,
-    paymentsReceived: allocatedPayment.amount
-  }]);
-  await syncCustomerFinancialSummary(payment.customerId);
-  await awardInvoicePcOnce(allocatedPayment.invoiceId);
+  const postProcessing = await runTransactionPostProcessing({
+    recordLabel: 'Payment',
+    monthlyDeltas: [{
+      customerId: allocatedPayment.customerId,
+      date: allocatedPayment.date,
+      paymentsReceived: allocatedPayment.amount
+    }],
+    customerIds: [payment.customerId],
+    invoiceIds: [allocatedPayment.invoiceId].filter(Boolean)
+  });
   invalidateTransactionCaches([payment.customerId], [allocatedPayment.date]);
-  return paymentRef;
+  return {
+    paymentId: paymentRef.id,
+    ...postProcessing
+  };
 };
 
-export const updatePaymentRecord = async (paymentId: string, payment: PaymentFormData, auditUser?: AuditUser) => {
+export const updatePaymentRecord = async (
+  paymentId: string,
+  payment: PaymentFormData,
+  auditUser?: AuditUser
+): Promise<PaymentSaveResult> => {
   const paymentRef = doc(db, PAYMENTS, paymentId);
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
@@ -1903,25 +2046,31 @@ export const updatePaymentRecord = async (paymentId: string, payment: PaymentFor
     });
   });
 
-  await applyMonthlySnapshotDeltas([
-    ...(previousPayment ? [{
-      customerId: previousPayment.customerId,
-      date: previousPayment.date,
-      paymentsReceived: -previousPayment.amount
-    }] : []),
-    {
-      customerId: allocatedPayment.customerId,
-      date: allocatedPayment.date,
-      paymentsReceived: allocatedPayment.amount
-    }
-  ]);
-
-  await Promise.all(affectedCustomerIds.map((customerId) => syncCustomerFinancialSummary(customerId)));
-  await Promise.all(affectedInvoiceIds.map((invoiceId) => awardInvoicePcOnce(invoiceId)));
+  const postProcessing = await runTransactionPostProcessing({
+    recordLabel: 'Payment',
+    monthlyDeltas: [
+      ...(previousPayment ? [{
+        customerId: previousPayment.customerId,
+        date: previousPayment.date,
+        paymentsReceived: -previousPayment.amount
+      }] : []),
+      {
+        customerId: allocatedPayment.customerId,
+        date: allocatedPayment.date,
+        paymentsReceived: allocatedPayment.amount
+      }
+    ],
+    customerIds: affectedCustomerIds,
+    invoiceIds: affectedInvoiceIds
+  });
   invalidateTransactionCaches(
     affectedCustomerIds,
     [previousPayment?.date, allocatedPayment.date].filter((date): date is string => Boolean(date))
   );
+  return {
+    paymentId,
+    ...postProcessing
+  };
 };
 
 export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUser) => {
@@ -2372,6 +2521,27 @@ const requireAdminAudit = (auditUser?: AuditUser) => {
   if (auditUser?.role !== 'Admin') throw new Error('Only Admin users can change protected PC balances.');
 };
 
+export const retryInvoicePcAwards = async (invoiceIds: string[], auditUser?: AuditUser) => {
+  requireAdminAudit(auditUser);
+  const results: InvoicePcAwardResult[] = [];
+  const failures: InvoicePcRetryFailure[] = [];
+
+  for (const invoiceId of [...new Set(invoiceIds.filter(Boolean))]) {
+    try {
+      results.push(await awardInvoicePcOnce(invoiceId));
+    } catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+      const message = error instanceof Error ? error.message : '';
+      failures.push({
+        invoiceId,
+        permissionDenied: code.includes('permission-denied') || /missing or insufficient permissions/i.test(message)
+      });
+    }
+  }
+
+  return { results, failures };
+};
+
 export const protectCustomerPcBalance = async (
   customerId: string,
   currentBalance: number,
@@ -2430,21 +2600,23 @@ export const adjustCustomerPcBalance = async (
   const timestamp = nowIso();
   const delta = direction === 'add' ? cleanPoints : -cleanPoints;
 
-  await runTransaction(db, async (transaction) => {
+  const result = await runTransaction(db, async (transaction) => {
     const balanceSnapshot = await transaction.get(balanceRef);
     if (!balanceSnapshot.exists()) throw new Error('Protect this customer PC balance before adjusting it.');
     const balance = mapPcBalanceRecord(balanceSnapshot.id, balanceSnapshot.data());
     const nextAvailable = balance.availablePc + delta;
     if (nextAvailable < 0) throw new Error('PC deduction cannot exceed the available balance.');
 
-    transaction.update(balanceRef, {
+    const nextBalance: PcBalanceRecord = {
+      ...balance,
       availablePc: nextAvailable,
       incomingPc: balance.incomingPc + (delta > 0 ? delta : 0),
       redeemedPc: balance.redeemedPc + (delta < 0 ? Math.abs(delta) : 0),
       lastMutationReferenceId: entryRef.id,
       updatedAt: timestamp
-    });
-    transaction.set(entryRef, {
+    };
+    const ledgerEntry: LoyaltyLedgerEntry = {
+      id: entryRef.id,
       customerId,
       type: 'manual_adjustment',
       points: delta,
@@ -2452,11 +2624,30 @@ export const adjustCustomerPcBalance = async (
       referenceId: entryRef.id,
       month: timestamp.slice(0, 7),
       createdAt: timestamp
+    };
+
+    transaction.update(balanceRef, {
+      availablePc: nextBalance.availablePc,
+      incomingPc: nextBalance.incomingPc,
+      redeemedPc: nextBalance.redeemedPc,
+      lastMutationReferenceId: nextBalance.lastMutationReferenceId,
+      updatedAt: nextBalance.updatedAt
     });
+    transaction.set(entryRef, {
+      customerId: ledgerEntry.customerId,
+      type: ledgerEntry.type,
+      points: ledgerEntry.points,
+      reason: ledgerEntry.reason,
+      referenceId: ledgerEntry.referenceId,
+      month: ledgerEntry.month,
+      createdAt: ledgerEntry.createdAt
+    });
+
+    return { balance: nextBalance, ledgerEntry };
   });
 
   clearFirestoreSessionCache();
-  return getCustomerPcBalanceRecord(customerId);
+  return result;
 };
 
 export const getOverduePcRequests = async (limitCount = DEFAULT_LIST_LIMIT) => {

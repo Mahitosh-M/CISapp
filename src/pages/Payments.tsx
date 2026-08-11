@@ -11,17 +11,20 @@ import {
   getPayments,
   getPaymentsByInvoiceIds,
   getPaymentsByCustomerId,
-  updatePaymentRecord
+  updatePaymentRecord,
+  type PaymentSaveResult
 } from '../services/firestoreService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { Customer, Invoice, Payment, PaymentFormData } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
+import { formatPc } from '../utils/loyalty';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../utils/openingBalance';
 import { allocateReceiptOldestFirst } from '../utils/paymentAllocation';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { summarizePaymentSaveResults } from '../utils/paymentSaveResult';
 
 const LIST_PAGE_SIZE = 1;
 const CUSTOMER_LIST_PAGE_SIZE = 3;
@@ -73,6 +76,7 @@ const Payments = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [warning, setWarning] = useState('');
   const [error, setError] = useState('');
   const { canDeleteRecords, userProfile } = useAuth();
   const isMobile = useIsMobile();
@@ -367,63 +371,77 @@ const Payments = () => {
     try {
       setSaving(true);
       setError('');
+      setMessage('');
+      setWarning('');
       const previousCustomerId = editingPaymentId
         ? payments.find((payment) => payment.id === editingPaymentId)?.customerId
         : undefined;
+      const saveResults: PaymentSaveResult[] = [];
+      let successMessage = '';
 
       if (editingPaymentId) {
         const amountAppliedToInvoice = Math.min(
           formData.amount,
           Math.max(0, selectedInvoiceOutstanding - formData.cashDiscount)
         );
-        await updatePaymentRecord(editingPaymentId, { ...formData, amountAppliedToInvoice }, auditUser);
-        setMessage(`Payment updated. ${formatMoney(formData.amount)} received; ${formatMoney(amountAppliedToInvoice)} applied to ${formData.invoiceNumber}.`);
+        saveResults.push(await updatePaymentRecord(editingPaymentId, { ...formData, amountAppliedToInvoice }, auditUser));
+        successMessage = `Payment updated. ${formatMoney(formData.amount)} received; ${formatMoney(amountAppliedToInvoice)} applied to ${formData.invoiceNumber}.`;
       } else {
         const payableAllocations = allocationPreview.filter((allocation) => allocation.appliedTotal > 0);
         const splitPaymentGroupId = payableAllocations.length > 1 ? createSplitPaymentGroupId() : '';
         if (payableAllocations.length > 0) {
           for (const [index, allocation] of payableAllocations.entries()) {
-            await createPayment({
-                ...formData,
-                invoiceId: allocation.invoice.id,
-                invoiceNumber: allocation.invoice.invoiceNumber,
-                customerId: allocation.invoice.customerId,
-                customerName: allocation.invoice.customerName,
-                amount: allocation.amount,
-                amountAppliedToInvoice: allocation.amountAppliedToInvoice,
-                cashDiscount: allocation.cashDiscount,
-                splitPaymentGroupId: splitPaymentGroupId || undefined,
-                splitPaymentTotalAmount: payableAllocations.length > 1 ? formData.amount : undefined,
-                splitPaymentPart: payableAllocations.length > 1 ? index + 1 : undefined,
-                splitPaymentCount: payableAllocations.length > 1 ? payableAllocations.length : undefined,
-                notes:
-                  payableAllocations.length > 1
+            saveResults.push(await createPayment({
+              ...formData,
+              invoiceId: allocation.invoice.id,
+              invoiceNumber: allocation.invoice.invoiceNumber,
+              customerId: allocation.invoice.customerId,
+              customerName: allocation.invoice.customerName,
+              amount: allocation.amount,
+              amountAppliedToInvoice: allocation.amountAppliedToInvoice,
+              cashDiscount: allocation.cashDiscount,
+              splitPaymentGroupId: splitPaymentGroupId || undefined,
+              splitPaymentTotalAmount: payableAllocations.length > 1 ? formData.amount : undefined,
+              splitPaymentPart: payableAllocations.length > 1 ? index + 1 : undefined,
+              splitPaymentCount: payableAllocations.length > 1 ? payableAllocations.length : undefined,
+              notes:
+                payableAllocations.length > 1
                   ? [formData.notes, `Split payment ${index + 1}/${payableAllocations.length}`].filter(Boolean).join(' | ')
                   : formData.notes
-              }, auditUser);
+            }, auditUser));
           }
         } else {
-          await createPayment({
+          saveResults.push(await createPayment({
             ...formData,
             invoiceId: '',
             invoiceNumber: '',
             amountAppliedToInvoice: 0,
             cashDiscount: 0,
             notes: [formData.notes, 'Advance payment'].filter(Boolean).join(' | ')
-          }, auditUser);
+          }, auditUser));
         }
         const appliedAmount = payableAllocations.reduce((sum, allocation) => sum + allocation.appliedTotal, 0);
         const advanceAmount = allocationResult.advanceAmount;
-        setMessage(
+        successMessage = (
           `Payment added. ${formatMoney(formData.amount)} received; ${formatMoney(appliedAmount)} applied across ${payableAllocations.length} invoice(s)` +
           (advanceAmount > 0 ? `; ${formatMoney(advanceAmount)} stored as advance.` : '.')
         );
       }
 
-      await Promise.all(
+      const derivedResults = await Promise.allSettled(
         [...new Set([previousCustomerId, formData.customerId].filter((customerId): customerId is string => Boolean(customerId)))]
           .map((customerId) => recalculateCustomerDerivedData(customerId, editingPaymentId ? 'payment_edited' : 'payment_created'))
       );
+      const saveSummary = summarizePaymentSaveResults(saveResults);
+      const pcConfirmation = saveSummary.creditedPc > 0
+        ? ` ${formatPc(saveSummary.creditedPc)} PC credited${saveSummary.availablePc !== undefined ? `; confirmed Available PC: ${formatPc(saveSummary.availablePc)}` : ''}.`
+        : '';
+      const derivedWarning = derivedResults.some((result) => result.status === 'rejected')
+        ? 'Payment was saved, but customer scoring and credit refresh is pending.'
+        : '';
+
+      setMessage(`${successMessage}${pcConfirmation}`);
+      setWarning([...saveSummary.warnings, derivedWarning].filter(Boolean).join(' '));
       resetForm();
       await loadData();
     } catch (err) {
@@ -667,6 +685,7 @@ const Payments = () => {
           </div>
         ) : null}
         {message ? <div style={{ color: '#1B7F3A', marginTop: 12 }}>{message}</div> : null}
+        {warning ? <div style={{ color: '#B7791F', marginTop: 12, fontWeight: 800 }}>{warning}</div> : null}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
           <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>

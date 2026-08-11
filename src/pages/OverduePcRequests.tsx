@@ -2,17 +2,46 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { adjustCustomerPcBalance, approveReferralBonus, generateBonusPcRequests, getAppSettings, getApprovedBonusPcRequestsForCustomer, getApprovedOverduePcRequestsForCustomer, getBonusPcRequests, getCustomerPcBalanceRecord, getCustomerPcLedgerEntries, getCustomers, getInvoicesByCustomerId, getOverduePcRequests, getPaymentsByCustomerId, getRedemptionRequestsForCustomer, protectCustomerPcBalance, reviewBonusPcRequest, reviewOverduePcRequest } from '../services/firestoreService';
-import type { AppSettings, BonusPcRequest, Customer, Invoice, LoyaltyLedgerEntry, OverduePcRequest, Payment, RedemptionRequest } from '../types';
+import {
+  adjustCustomerPcBalance,
+  approveReferralBonus,
+  generateBonusPcRequests,
+  getAppSettings,
+  getApprovedBonusPcRequestsForCustomer,
+  getApprovedOverduePcRequestsForCustomer,
+  getBonusPcRequests,
+  getCustomerPcBalanceRecord,
+  getCustomerPcLedgerEntries,
+  getCustomers,
+  getInvoicesByCustomerId,
+  getOverduePcRequests,
+  getPaymentsByCustomerId,
+  getRedemptionRequestsForCustomer,
+  protectCustomerPcBalance,
+  retryInvoicePcAwards,
+  reviewBonusPcRequest,
+  reviewOverduePcRequest
+} from '../services/firestoreService';
+import type {
+  AppSettings,
+  BonusPcRequest,
+  Customer,
+  Invoice,
+  LoyaltyLedgerEntry,
+  OverduePcRequest,
+  Payment,
+  RedemptionRequest
+} from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
-import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate } from '../utils/customerPortal';
+import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate, getInvoiceFullPaymentEvent } from '../utils/customerPortal';
 import { getBusinessInvoices, getInvoiceDisplayNumber } from '../utils/openingBalance';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { buildCustomerPortalPcBalance } from '../utils/pcBalance';
+import { canPostInvoicePcForSettlement } from '../utils/pcAwardPolicy';
 
 interface PcHistoryItem {
   id: string;
@@ -29,6 +58,7 @@ interface CustomerPcView {
   incomingPc: number;
   redeemedPc: number;
   protected: boolean;
+  protectedAt: string;
 }
 
 interface PcHistorySources {
@@ -39,7 +69,15 @@ interface PcHistorySources {
   overdueRequests: OverduePcRequest[];
   redemptions: RedemptionRequest[];
   performanceBonus: number;
+  ledgerEntries: LoyaltyLedgerEntry[];
 }
+
+const getPcWriteError = (error: unknown, fallback: string) => {
+  const message = error instanceof Error ? error.message : '';
+  return /permission-denied|missing or insufficient permissions/i.test(message)
+    ? 'PC write is blocked because the production Firestore rules are not synchronized with this app version.'
+    : message || fallback;
+};
 
 const ledgerHistoryTitle = (entry: LoyaltyLedgerEntry) => {
   if (entry.type === 'opening_balance') return 'Protected opening balance';
@@ -123,6 +161,25 @@ const OverduePcRequests = () => {
 
   const sortedPendingRequests = useMemo(() => sortNewestFirst(requests, ['generatedAt', 'reviewedAt']), [requests]);
   const sortedPendingBonusRequests = useMemo(() => sortNewestFirst(bonusRequests, ['generatedAt', 'reviewedAt']), [bonusRequests]);
+  const recoverableInvoiceIds = useMemo(() => {
+    if (!customerPcView || !pcHistorySources) return [];
+    const finalizedInvoiceIds = new Set(
+      pcHistorySources.ledgerEntries
+        .filter((entry) => entry.type === 'on_time_payment')
+        .map((entry) => entry.referenceId)
+    );
+
+    return pcHistorySources.invoices
+      .filter((invoice) => {
+        if (finalizedInvoiceIds.has(invoice.id)) return false;
+        const settlementPayment = getInvoiceFullPaymentEvent(invoice, pcHistorySources.payments);
+        return Boolean(
+          settlementPayment
+          && canPostInvoicePcForSettlement(invoice, settlementPayment, customerPcView.protectedAt)
+        );
+      })
+      .map((invoice) => invoice.id);
+  }, [customerPcView, pcHistorySources]);
 
   const handleReview = async (request: OverduePcRequest, status: 'Approved' | 'Rejected') => {
     try {
@@ -244,7 +301,8 @@ const OverduePcRequests = () => {
         availablePc: protectedBalance?.availablePc ?? pcBalance.availablePc,
         incomingPc: protectedBalance?.incomingPc ?? pcBalance.incomingPc,
         redeemedPc: protectedBalance?.redeemedPc ?? pcBalance.redeemedPc,
-        protected: Boolean(protectedBalance)
+        protected: Boolean(protectedBalance),
+        protectedAt: protectedBalance?.protectedAt ?? ''
       });
       setSavedPcHistory(protectedBalance ? mapLedgerHistory(ledgerEntries) : null);
       setPcHistorySources({
@@ -254,7 +312,8 @@ const OverduePcRequests = () => {
         bonusRequests: approvedBonusRows,
         overdueRequests: approvedOverdueRows,
         redemptions: redemptionRows,
-        performanceBonus: pcBalance.performanceBonusPc
+        performanceBonus: pcBalance.performanceBonusPc,
+        ledgerEntries
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load customer PC details.');
@@ -342,7 +401,48 @@ const OverduePcRequests = () => {
       setMessage('Current PC is protected. Future invoice changes cannot reduce this balance.');
       await handlePcCustomerChange(customerPcView.customer.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to protect this PC balance.');
+      setError(getPcWriteError(err, 'Unable to protect this PC balance.'));
+    } finally {
+      setSavingId('');
+    }
+  };
+
+  const handleRetryMissingPc = async () => {
+    if (!customerPcView || recoverableInvoiceIds.length === 0) return;
+    const customerId = customerPcView.customer.id;
+
+    try {
+      setSavingId('retry-pc');
+      setError('');
+      setMessage('');
+      const { results, failures } = await retryInvoicePcAwards(recoverableInvoiceIds, auditUser);
+      const creditedResults = results.filter((result) => result.status === 'credited');
+      const creditedPc = creditedResults.reduce((sum, result) => sum + result.points, 0);
+      const confirmedAvailablePc = [...creditedResults]
+        .reverse()
+        .find((result) => result.availablePc !== undefined)?.availablePc;
+      const zeroFinalizedCount = results.filter((result) => result.status === 'finalized_zero').length;
+
+      await handlePcCustomerChange(customerId);
+      if (creditedPc > 0) {
+        setMessage(
+          `${formatPc(creditedPc)} missing PC posted from ${creditedResults.length} fully paid invoice(s).` +
+          (confirmedAvailablePc !== undefined ? ` Confirmed Available PC: ${formatPc(confirmedAvailablePc)}.` : '')
+        );
+      } else if (zeroFinalizedCount > 0) {
+        setMessage(`${zeroFinalizedCount} fully paid invoice(s) were permanently finalized at 0 PC.`);
+      } else if (failures.length === 0) {
+        setMessage('No eligible missing invoice PC remained to post.');
+      } else {
+        setMessage('No missing invoice PC was posted.');
+      }
+      if (failures.length > 0) {
+        setError(failures.some((failure) => failure.permissionDenied)
+          ? 'Some PC writes are blocked because the production Firestore rules are not synchronized with this app version.'
+          : `${failures.length} invoice PC posting attempt(s) could not be completed.`);
+      }
+    } catch (err) {
+      setError(getPcWriteError(err, 'Unable to retry missing invoice PC.'));
     } finally {
       setSavingId('');
     }
@@ -357,13 +457,47 @@ const OverduePcRequests = () => {
       setSavingId('adjust-pc');
       setError('');
       setMessage('');
-      await adjustCustomerPcBalance(adjustmentCustomerId, adjustmentDirection, Number(adjustmentPoints), adjustmentReason, auditUser);
-      setMessage(`PC ${adjustmentDirection === 'add' ? 'added' : 'deducted'} and recorded in permanent history.`);
+      const adjustedCustomer = customers.find((customer) => customer.id === adjustmentCustomerId);
+      if (!adjustedCustomer) throw new Error('Selected customer no longer exists.');
+      const wasSelectedCustomer = selectedPcCustomerId === adjustmentCustomerId;
+      const result = await adjustCustomerPcBalance(
+        adjustmentCustomerId,
+        adjustmentDirection,
+        Number(adjustmentPoints),
+        adjustmentReason,
+        auditUser
+      );
+      const historyItem = mapLedgerHistory([result.ledgerEntry])[0];
+
+      setShowPcViewer(true);
+      setSelectedPcCustomerId(adjustmentCustomerId);
+      setCustomerPcView({
+        customer: adjustedCustomer,
+        availablePc: result.balance.availablePc,
+        incomingPc: result.balance.incomingPc,
+        redeemedPc: result.balance.redeemedPc,
+        protected: true,
+        protectedAt: result.balance.protectedAt
+      });
+      setSavedPcHistory((current) => (
+        wasSelectedCustomer && current
+          ? [historyItem, ...current.filter((item) => item.id !== historyItem.id)]
+          : [historyItem]
+      ));
+      setPcHistory((current) => (
+        current && wasSelectedCustomer
+          ? [historyItem, ...current.filter((item) => item.id !== historyItem.id)]
+          : null
+      ));
+      setPcHistorySources((current) => wasSelectedCustomer ? current : null);
+      setMessage(
+        `${adjustmentDirection === 'add' ? 'Added' : 'Deducted'} ${formatPc(Math.abs(result.ledgerEntry.points))} PC for ${adjustedCustomer.name}. ` +
+        `Confirmed Available PC: ${formatPc(result.balance.availablePc)}. Permanent history recorded.`
+      );
       setAdjustmentPoints('');
       setAdjustmentReason('');
-      await handlePcCustomerChange(adjustmentCustomerId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to adjust PC.');
+      setError(getPcWriteError(err, 'Unable to adjust PC.'));
     } finally {
       setSavingId('');
     }
@@ -473,6 +607,15 @@ const OverduePcRequests = () => {
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
                       <button type="button" disabled={Boolean(savingId)} onClick={handleProtectPc} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }}>
                         {savingId === 'protect-pc' ? 'Protecting...' : 'Protect Current PC'}
+                      </button>
+                    </div>
+                  ) : null}
+                  {recoverableInvoiceIds.length > 0 ? (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+                      <button type="button" disabled={Boolean(savingId)} onClick={handleRetryMissingPc} style={{ ...buttonStyle, background: '#166534', color: '#FFFFFF' }}>
+                        {savingId === 'retry-pc'
+                          ? 'Posting Missing PC...'
+                          : `Post Missing Invoice PC (${recoverableInvoiceIds.length})`}
                       </button>
                     </div>
                   ) : null}
