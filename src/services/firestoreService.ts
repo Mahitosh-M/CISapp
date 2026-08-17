@@ -2581,12 +2581,16 @@ export const createUserProfile = async (profile: Omit<UserProfile, 'id' | 'creat
   return profileRef;
 };
 
-export const updateUserProfileRecord = async (profileId: string, profile: Partial<Pick<UserProfile, 'name' | 'email' | 'customerId' | 'customerName' | 'active'>>, auditUser?: AuditUser) => {
+export const updateUserProfileRecord = async (profileId: string, profile: Partial<Pick<UserProfile, 'name' | 'email' | 'customerId' | 'customerName' | 'shopId' | 'active'>>, auditUser?: AuditUser) => {
   await updateDoc(doc(db, USERS, profileId), {
     ...withoutUndefined(profile),
     updatedAt: nowIso()
   });
 
+};
+
+export const deleteUserProfileRecord = async (profileId: string) => {
+  await deleteDoc(doc(db, USERS, profileId));
 };
 
 export const getOffers = async () => {

@@ -1605,9 +1605,11 @@ service cloud.firestore {
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.role == resource.data.role;
 
-      // Authentication and profile deletion must stay synchronized through
-      // the Admin-only deleteManagedUser Cloud Function.
-      allow delete: if false;
+      // Profile removal revokes app access without requiring a paid backend.
+      // Firebase Authentication credential cleanup remains a Console action.
+      allow delete: if isAdmin()
+        && resource.data.uid != request.auth.uid
+        && resource.data.role in ['Staff', 'customer', 'Medical'];
     }
 
     match /settings/{settingId} {

@@ -77,6 +77,72 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     });
   };
 
+  const seedManagedUser = async (
+    profileId: string,
+    role: 'Admin' | 'Staff' | 'customer' | 'Medical',
+    shopId?: 'SHOP_A' | 'SHOP_S',
+    uid = profileId
+  ) => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', profileId), {
+        uid,
+        email: `${profileId}@example.com`,
+        name: profileId,
+        role,
+        ...(shopId ? { shopId } : {}),
+        active: true,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+    });
+  };
+
+  it('allows Admin to assign an existing Staff profile to a shop', async () => {
+    await seed('Admin');
+    await seedManagedUser('staff-user', 'Staff');
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(updateDoc(doc(database, 'users', 'staff-user'), {
+      shopId: 'SHOP_A',
+      updatedAt: '2026-08-17T00:00:00.000Z'
+    }));
+    expect((await getDoc(doc(database, 'users', 'staff-user'))).data()?.shopId).toBe('SHOP_A');
+  });
+
+  it('denies Staff from assigning user profiles to shops', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedManagedUser('other-staff', 'Staff');
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertFails(updateDoc(doc(database, 'users', 'other-staff'), {
+      shopId: 'SHOP_S',
+      updatedAt: '2026-08-17T00:00:00.000Z'
+    }));
+  });
+
+  it('allows Admin to remove a non-Admin app profile', async () => {
+    await seed('Admin');
+    await seedManagedUser('staff-user', 'Staff', 'SHOP_A');
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(deleteDoc(doc(database, 'users', 'staff-user')));
+  });
+
+  it('denies Staff profile removal and protects Admin profiles', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedManagedUser('customer-user', 'customer');
+    const staffDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(deleteDoc(doc(staffDatabase, 'users', 'customer-user')));
+
+    await seed('Admin');
+    await seedManagedUser('other-admin', 'Admin');
+    await seedManagedUser('self-alias', 'Staff', 'SHOP_A', 'team-user');
+    const adminDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(deleteDoc(doc(adminDatabase, 'users', 'other-admin')));
+    await assertFails(deleteDoc(doc(adminDatabase, 'users', 'team-user')));
+    await assertFails(deleteDoc(doc(adminDatabase, 'users', 'self-alias')));
+  });
+
   const addInvoicePcToBatch = (
     testDatabase: unknown,
     points: number,

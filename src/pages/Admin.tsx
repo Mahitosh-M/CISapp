@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { KeyRound, Mail, ShieldCheck, Stethoscope, Trash2, UserPlus, Users } from 'lucide-react';
+import { KeyRound, Mail, ShieldCheck, Stethoscope, UserMinus, UserPlus, Users } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { createCustomerAuthAccount, createMedicalAuthAccount, createStaffAuthAccount, deleteManagedUserAccount, sendUserPasswordResetEmail } from '../services/authService';
+import { createCustomerAuthAccount, createMedicalAuthAccount, createStaffAuthAccount, sendUserPasswordResetEmail } from '../services/authService';
 import {
+  deleteUserProfileRecord,
   getCustomers,
   getUserProfiles,
   updateUserProfileRecord,
@@ -172,6 +173,25 @@ const Admin = () => {
     await loadAdminData();
   };
 
+  const handleStaffShopChange = async (user: UserProfile, shopId: ShopId) => {
+    if (user.role !== 'Staff') return;
+
+    try {
+      setSaving(true);
+      setAdminError('');
+      setMessage('');
+      await updateUserProfileRecord(user.id, { shopId }, auditUser);
+      setUsers((current) => current.map((row) => row.id === user.id
+        ? { ...row, shopId, updatedAt: new Date().toISOString() }
+        : row));
+      setMessage(`${user.name} can now use ${getShopName(shopId)} in Cash App.`);
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Unable to assign this staff shop.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSendPasswordReset = async (user: UserProfile) => {
     if (!user.email) {
       setAdminError('This user does not have an email address.');
@@ -192,11 +212,15 @@ const Admin = () => {
 
   const handleDeleteUserAccess = async (user: UserProfile) => {
     if (user.uid === userProfile?.uid || user.email === userProfile?.email) {
-      setAdminError('You cannot delete your own active admin login.');
+      setAdminError('You cannot remove your own active admin access.');
+      return;
+    }
+    if (user.role === 'Admin') {
+      setAdminError('Admin access cannot be removed from this page.');
       return;
     }
 
-    const confirmed = window.confirm('Delete ERP access for ' + user.email + '? This permanently removes the Firebase Authentication account, password, and ERP user profile.');
+    const confirmed = window.confirm('Remove app access for ' + user.email + '? They will no longer be able to use CISapp or Cash App. Their Firebase Authentication sign-in record will remain until it is removed manually in Firebase Console.');
 
     if (!confirmed) {
       return;
@@ -205,9 +229,10 @@ const Admin = () => {
     try {
       setSaving(true);
       setAdminError('');
-      await deleteManagedUserAccount(user.id, user.uid);
-      setMessage('ERP access and login credentials deleted for ' + user.email + '. The email can now be reused for a new Admin-created account.');
-      await loadAdminData();
+      setMessage('');
+      await deleteUserProfileRecord(user.id);
+      setUsers((current) => current.filter((row) => row.id !== user.id));
+      setMessage('App access removed for ' + user.email + '. The Firebase Authentication sign-in record was not deleted.');
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Unable to delete user access.');
     } finally {
@@ -440,7 +465,20 @@ const Admin = () => {
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>
                 <td style={cellStyle}><strong>{user.role === 'customer' ? 'Customer' : user.role}</strong></td>
-                <td style={cellStyle}>{user.role === 'Staff' ? getShopName(user.shopId) : '-'}</td>
+                <td style={cellStyle}>
+                  {user.role === 'Staff' ? (
+                    <select
+                      aria-label={`Assigned shop for ${user.name}`}
+                      disabled={saving}
+                      value={user.shopId ?? ''}
+                      onChange={(event) => void handleStaffShopChange(user, event.target.value as ShopId)}
+                      style={{ width: 150, boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1px solid #D8DEE9', background: '#FFFFFF', color: '#11185A', fontWeight: 800 }}
+                    >
+                      <option value="" disabled>Assign shop</option>
+                      {SHOP_OPTIONS.map((shop) => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+                    </select>
+                  ) : '-'}
+                </td>
                 <td style={cellStyle}>{user.customerName || '-'}</td>
                 <td style={cellStyle}><span className={user.active ? 'admin-status active' : 'admin-status inactive'}>{user.active ? 'Yes' : 'No'}</span></td>
                 <td style={cellStyle}>
@@ -450,9 +488,11 @@ const Admin = () => {
                   <button className="admin-button admin-button-soft" type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginRight: 8 }} onClick={() => handleToggleUserActive(user)}>
                     {user.active ? 'Disable' : 'Enable'}
                   </button>
-                  <button className="admin-button admin-button-danger" type="button" disabled={saving || user.uid === userProfile?.uid || user.email === userProfile?.email} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>
-                    <Trash2 size={15} />Delete User
-                  </button>
+                  {user.role !== 'Admin' ? (
+                    <button className="admin-button admin-button-danger" type="button" disabled={saving} style={{ ...buttonStyle, background: '#B42318', color: '#FFFFFF' }} onClick={() => handleDeleteUserAccess(user)}>
+                      <UserMinus size={15} />Remove Access
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}

@@ -11,8 +11,7 @@ import {
   signOut
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
-import { auth, firebaseConfig, functions } from '../firebase';
+import { auth, firebaseConfig } from '../firebase';
 import {
   createUserProfile,
   getUserProfileByUid
@@ -154,11 +153,6 @@ export const createCustomerAuthAccount = (email: string, password: string, custo
 
 export const createMedicalAuthAccount = (email: string, password: string, customerId: string, customerName: string) =>
   createCustomerPortalAuthAccount(email, password, customerId, customerName, 'Medical');
-
-export const deleteManagedUserAccount = async (profileId: string, uid: string) => {
-  const callable = httpsCallable<{ profileId: string; uid: string }, { ok: boolean }>(functions, 'deleteManagedUser');
-  return (await callable({ profileId, uid })).data;
-};
 
 export const sendUserPasswordResetEmail = async (email: string) => {
   // Firebase Auth never exposes existing passwords. Admin can safely help a user
