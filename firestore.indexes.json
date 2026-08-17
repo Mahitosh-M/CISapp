@@ -33,6 +33,15 @@
       ]
     },
     {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "shopId", "order": "ASCENDING" },
+        { "fieldPath": "affectsShopCash", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "bonusPcRequests",
       "queryScope": "COLLECTION",
       "fields": [

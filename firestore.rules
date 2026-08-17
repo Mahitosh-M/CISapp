@@ -430,7 +430,6 @@ service cloud.firestore {
           'lastCashOperationType',
           'updatedAt'
         ])
-        && request.resource.data.availableBalance >= 0
         && request.resource.data.availableBalance
           == resource.data.availableBalance - expenseAfter.data.amount
         && cashNumber(request.resource.data, 'totalExpenses')

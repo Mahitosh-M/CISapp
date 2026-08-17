@@ -673,13 +673,23 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     expect(summarySnapshot.data()?.totalCollections).toBe(12_000);
   });
 
-  it('denies expense writes for another branch, mismatched deltas, and negative results', async () => {
+  it('allows an audited Staff expense to take the available balance below zero', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(addExpenseBatch(database, 'SHOP_A', 11_000, 'staff-pocket-expense').commit());
+    const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(summarySnapshot.data()?.availableBalance).toBe(-1_000);
+    expect(summarySnapshot.data()?.totalExpenses).toBe(13_000);
+  });
+
+  it('denies expense writes for another branch and mismatched deltas', async () => {
     await seed('Staff', true, 'SHOP_A');
     await seedInitializedShops();
     const database = testEnvironment.authenticatedContext('team-user').firestore();
 
     await assertFails(addExpenseBatch(database, 'SHOP_S').commit());
-    await assertFails(addExpenseBatch(database, 'SHOP_A', 11_000, 'expense-too-large').commit());
 
     const mismatched = writeBatch(database);
     mismatched.set(doc(database, 'cashExpenses', 'expense-mismatch'), {
