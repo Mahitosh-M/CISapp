@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppSettings, Customer, Invoice, Payment } from '../types';
 import {
   buildCustomerScores,
+  applyCurrentCustomerRanks,
   calculateInvoiceMarginProfitScore,
   calculateProfitScore,
   calculateWeightedPaymentDisciplineScore
@@ -94,6 +95,27 @@ const createEstablishedInvoices = (totalSales: number, marginPercent = 20) => {
     createInvoice('INV-4', '2026-08-05', invoiceSales, marginPercent)
   ];
 };
+
+describe('customer display ranking', () => {
+  it('replaces stale stored ranks with deterministic current positions', () => {
+    const storedScores = [
+      { customerId: 'charlie', customerName: 'Charlie', intelligenceScore: 72, totalProfit: 900, totalSales: 10000, rank: 16 },
+      { customerId: 'alpha', customerName: 'Alpha', intelligenceScore: 90, totalProfit: 800, totalSales: 9000, rank: 16 },
+      { customerId: 'bravo', customerName: 'Bravo', intelligenceScore: 72, totalProfit: 1200, totalSales: 8000, rank: 4 },
+      { customerId: 'delta', customerName: 'Delta', intelligenceScore: 72, totalProfit: 900, totalSales: 12000, rank: 1 }
+    ];
+
+    const rankedScores = applyCurrentCustomerRanks(storedScores);
+
+    expect(rankedScores.map(({ customerId, rank }) => ({ customerId, rank }))).toEqual([
+      { customerId: 'alpha', rank: 1 },
+      { customerId: 'bravo', rank: 2 },
+      { customerId: 'delta', rank: 3 },
+      { customerId: 'charlie', rank: 4 }
+    ]);
+    expect(storedScores.map((score) => score.rank)).toEqual([16, 16, 4, 1]);
+  });
+});
 
 describe('invoice margin profit scoring', () => {
   it.each([

@@ -1037,6 +1037,28 @@ export const buildMonthlyRankings = (
   });
 };
 
+type RankableCustomerScore = Pick<
+  CustomerScore,
+  'customerId' | 'customerName' | 'intelligenceScore' | 'totalProfit' | 'totalSales' | 'rank'
+>;
+
+const getRankingMetric = (value: number) => Number.isFinite(value) ? value : 0;
+
+export const applyCurrentCustomerRanks = <T extends RankableCustomerScore>(customerScores: readonly T[]): T[] => {
+  return [...customerScores]
+    .sort((left, right) =>
+      getRankingMetric(right.intelligenceScore) - getRankingMetric(left.intelligenceScore)
+      || getRankingMetric(right.totalProfit) - getRankingMetric(left.totalProfit)
+      || getRankingMetric(right.totalSales) - getRankingMetric(left.totalSales)
+      || left.customerName.localeCompare(right.customerName)
+      || left.customerId.localeCompare(right.customerId)
+    )
+    .map((score, index) => ({
+      ...score,
+      rank: index + 1
+    }));
+};
+
 export const buildIntelligenceSummary = (customerScores: CustomerScore[]): IntelligenceSummary => {
   const emptySummary = {
     totalSales: 0,

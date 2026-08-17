@@ -9,7 +9,7 @@ import TierBadge from '../components/TierBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { getIntelligenceSummariesPage, type IntelligencePageCursor } from '../services/derivedDataService';
-import { buildIntelligenceSummary } from '../utils/customerAnalytics';
+import { applyCurrentCustomerRanks, buildIntelligenceSummary } from '../utils/customerAnalytics';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { formatMoney } from '../utils/formatters';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
@@ -33,11 +33,12 @@ const Intelligence = () => {
   const isMobile = useIsMobile();
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [activeSection, setActiveSection] = useState<IntelligenceSection | null>(null);
-  const summary = useMemo(() => buildIntelligenceSummary(customerScores), [customerScores]);
+  const rankedCustomerScores = useMemo(() => applyCurrentCustomerRanks(customerScores), [customerScores]);
+  const summary = useMemo(() => buildIntelligenceSummary(rankedCustomerScores), [rankedCustomerScores]);
   const formatWholeOrders = (value: number) => String(Math.round(value));
   const isStaff = userProfile?.role === 'Staff';
-  const selectedCustomerScore = customerScores.find((customer) => customer.customerId === selectedCustomerId);
-  const storedRanking = useMemo(() => customerScores.map((score) => ({
+  const selectedCustomerScore = rankedCustomerScores.find((customer) => customer.customerId === selectedCustomerId);
+  const storedRanking = useMemo(() => rankedCustomerScores.map((score) => ({
     customerId: score.customerId,
     customerName: score.customerName,
     customerArea: score.customerArea,
@@ -47,7 +48,7 @@ const Intelligence = () => {
     totalSales: score.totalSales,
     totalProfit: score.totalProfit,
     giftBudget: score.giftBudget
-  })), [customerScores]);
+  })), [rankedCustomerScores]);
 
   const loadSummaries = async (append = false) => {
     try {
@@ -68,7 +69,7 @@ const Intelligence = () => {
     void loadSummaries(false);
   }, []);
 
-  const topCustomers = customerScores;
+  const topCustomers = rankedCustomerScores;
 
   const metricGridStyle: CSSProperties = {
     display: 'grid',
@@ -251,7 +252,7 @@ const Intelligence = () => {
         <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 12 }}>Select Customer</div>
         <select style={inputStyle} value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)}>
           <option value="">Select customer</option>
-          {customerScores.map((customer) => (
+          {rankedCustomerScores.map((customer) => (
             <option key={customer.customerId} value={customer.customerId}>{formatCustomerSelectLabel(customer)}</option>
           ))}
         </select>
@@ -275,8 +276,8 @@ const Intelligence = () => {
               <div style={panelStyle}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                     <div>
-                      <div style={{ color: '#D4AF37', fontWeight: 800 }}>Latest stored ranking</div>
-                      <div style={mutedTextStyle}>Updated only for affected customers</div>
+                      <div style={{ color: '#D4AF37', fontWeight: 800 }}>Current score ranking</div>
+                      <div style={mutedTextStyle}>Ranked by score, profit, and sales</div>
                     </div>
                     <div style={{ color: '#BFC8D9', fontWeight: 700 }}>{storedRanking.length} ranked</div>
                   </div>
