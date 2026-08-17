@@ -372,6 +372,63 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     return batch;
   };
 
+  const seedExistingTransfer = async (
+    fromShopId: 'SHOP_A' | 'SHOP_S' = 'SHOP_A',
+    toShopId: 'SHOP_A' | 'SHOP_S' = 'SHOP_S',
+    amount = 200,
+    transferId = 'existing-transfer'
+  ) => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'shopTransfers', transferId), {
+        fromShopId,
+        toShopId,
+        amount,
+        note: 'Original transfer',
+        createdAt: Timestamp.fromDate(new Date('2026-08-10T08:00:00.000Z')),
+        createdBy: 'team-user'
+      });
+    });
+  };
+
+  const editTransferBatch = (
+    testDatabase: unknown,
+    nextAmount: number,
+    previousAmount = 200,
+    transferId = 'existing-transfer',
+    senderBalanceDelta = -(nextAmount - previousAmount),
+    receiverBalanceDelta = nextAmount - previousAmount,
+    includeReceiver = true
+  ) => {
+    const database = testDatabase as Firestore;
+    const amountDelta = nextAmount - previousAmount;
+    const batch = writeBatch(database);
+    batch.update(doc(database, 'shopTransfers', transferId), {
+      amount: nextAmount,
+      note: 'Corrected transfer',
+      updatedAt: serverTimestamp(),
+      updatedBy: 'team-user'
+    });
+    if (amountDelta !== 0) {
+      batch.update(doc(database, 'shopCash', 'SHOP_A'), {
+        availableBalance: increment(senderBalanceDelta),
+        totalTransferredOut: increment(amountDelta),
+        lastCashOperationId: transferId,
+        lastCashOperationType: 'transfer_edit',
+        updatedAt: timestamp
+      });
+      if (includeReceiver) {
+        batch.update(doc(database, 'shopCash', 'SHOP_S'), {
+          availableBalance: increment(receiverBalanceDelta),
+          totalTransferredIn: increment(amountDelta),
+          lastCashOperationId: transferId,
+          lastCashOperationType: 'transfer_edit',
+          updatedAt: timestamp
+        });
+      }
+    }
+    return batch;
+  };
+
   const addAdjustmentBatch = (
     testDatabase: unknown,
     shopId: 'SHOP_A' | 'SHOP_S',
@@ -770,6 +827,70 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
       updatedAt: timestamp
     });
     await assertFails(incomplete.commit());
+  });
+
+  it('allows the sending Staff shop to edit a transfer by applying only the amount difference', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    await seedExistingTransfer();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(editTransferBatch(database, 250).commit());
+
+    const transfer = await getDoc(doc(database, 'shopTransfers', 'existing-transfer'));
+    const sender = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(transfer.data()?.amount).toBe(250);
+    expect(transfer.data()?.updatedBy).toBe('team-user');
+    expect(sender.data()?.availableBalance).toBe(9_950);
+    expect(sender.data()?.totalTransferredOut).toBe(550);
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const receiver = await getDoc(doc(context.firestore(), 'shopCash', 'SHOP_S'));
+      expect(receiver.data()?.availableBalance).toBe(20_050);
+      expect(receiver.data()?.totalTransferredIn).toBe(550);
+    });
+  });
+
+  it('allows a note-only transfer correction without changing either shop summary', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    await seedExistingTransfer();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(editTransferBatch(database, 200).commit());
+    const sender = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(sender.data()?.availableBalance).toBe(10_000);
+    expect(sender.data()?.totalTransferredOut).toBe(500);
+  });
+
+  it('denies incoming-shop and mismatched transfer edits', async () => {
+    await seed('Staff', true, 'SHOP_S');
+    await seedInitializedShops();
+    await seedExistingTransfer();
+    const incomingDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(editTransferBatch(incomingDatabase, 250).commit());
+
+    await seed('Staff', true, 'SHOP_A');
+    const senderDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(editTransferBatch(senderDatabase, 250, 200, 'existing-transfer', -40).commit());
+    await assertFails(editTransferBatch(senderDatabase, 250, 200, 'existing-transfer', -50, 50, false).commit());
+  });
+
+  it('allows a transfer reduction to correct the receiving balance below zero', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    await seedExistingTransfer();
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'shopCash', 'SHOP_S'), { availableBalance: 100 });
+    });
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(editTransferBatch(database, 50).commit());
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const receiver = await getDoc(doc(context.firestore(), 'shopCash', 'SHOP_S'));
+      expect(receiver.data()?.availableBalance).toBe(-50);
+      expect(receiver.data()?.totalTransferredIn).toBe(350);
+    });
   });
 
   it('allows Admin to add or deduct an exact audited amount without changing collections', async () => {

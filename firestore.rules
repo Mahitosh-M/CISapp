@@ -208,7 +208,7 @@ service cloud.firestore {
             && data.lastCashOperationId.size() > 0
             && data.lastCashOperationId.size() <= 160
             && data.lastCashOperationType in [
-              'payment', 'invoice_delete', 'expense', 'transfer', 'adjustment', 'initialization'
+              'payment', 'invoice_delete', 'expense', 'transfer', 'transfer_edit', 'adjustment', 'initialization'
             ])
         )
         && (
@@ -474,6 +474,75 @@ service cloud.firestore {
         && receiverAfter.data.lastCashOperationType == 'transfer';
     }
 
+    function transferEditSummaryMatches(transferId, shopId, balanceDelta, totalField, totalDelta) {
+      let summaryPath = cashSummaryPath(shopId);
+      let summaryAfter = getAfter(summaryPath);
+      return exists(summaryPath)
+        && existsAfter(summaryPath)
+        && summaryAfter.data.lastCashOperationId == transferId
+        && summaryAfter.data.lastCashOperationType == 'transfer_edit'
+        && summaryAfter.data.availableBalance - get(summaryPath).data.availableBalance == balanceDelta
+        && cashNumber(summaryAfter.data, totalField)
+          - cashNumber(get(summaryPath).data, totalField) == totalDelta;
+    }
+
+    function validShopTransferUpdate(transferId) {
+      return validCashActor(resource.data.fromShopId)
+        && transferId.size() > 0
+        && transferId.size() <= 160
+        && request.resource.data.keys().hasAll([
+          'fromShopId', 'toShopId', 'amount', 'note', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'fromShopId', 'toShopId', 'amount', 'note', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.fromShopId == resource.data.fromShopId
+        && request.resource.data.toShopId == resource.data.toShopId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.amount is int
+        && request.resource.data.amount > 0
+        && request.resource.data.amount <= 100000000
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 160
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy is string
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedBy.size() <= 160
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'amount', 'note', 'updatedAt', 'updatedBy'
+        ])
+        && (
+          request.resource.data.amount != resource.data.amount
+          || request.resource.data.note != resource.data.note
+        );
+    }
+
+    function validTransferAuditUpdate(transferId) {
+      let amountDelta = request.resource.data.amount - resource.data.amount;
+      let senderPath = cashSummaryPath(resource.data.fromShopId);
+      return validShopTransferUpdate(transferId)
+        && (
+          amountDelta == 0
+          || (transferEditSummaryMatches(
+                transferId,
+                resource.data.fromShopId,
+                -amountDelta,
+                'totalTransferredOut',
+                amountDelta
+              )
+            && transferEditSummaryMatches(
+                transferId,
+                resource.data.toShopId,
+                amountDelta,
+                'totalTransferredIn',
+                amountDelta
+              )
+            && (amountDelta < 0 || getAfter(senderPath).data.availableBalance >= 0))
+        );
+    }
+
     function validTransferShopCashUpdate(shopId) {
       let transferId = request.resource.data.lastCashOperationId;
       let transferPath = shopTransferPath(transferId);
@@ -507,6 +576,46 @@ service cloud.firestore {
               == resource.data.availableBalance + transferAfter.data.amount
             && cashNumber(request.resource.data, 'totalTransferredIn')
               == cashNumber(resource.data, 'totalTransferredIn') + transferAfter.data.amount)
+        );
+    }
+
+    function validTransferEditShopCashUpdate(shopId) {
+      let transferId = request.resource.data.lastCashOperationId;
+      let transferPath = shopTransferPath(transferId);
+      let transferBefore = get(transferPath);
+      let transferAfter = getAfter(transferPath);
+      let amountDelta = transferAfter.data.amount - transferBefore.data.amount;
+      return exists(transferPath)
+        && existsAfter(transferPath)
+        && validCashActor(transferBefore.data.fromShopId)
+        && transferAfter.data.fromShopId == transferBefore.data.fromShopId
+        && transferAfter.data.toShopId == transferBefore.data.toShopId
+        && amountDelta != 0
+        && isInitializedShopCash(resource.data)
+        && (
+          (shopId == transferBefore.data.fromShopId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'availableBalance',
+              'totalTransferredOut',
+              'lastCashOperationId',
+              'lastCashOperationType',
+              'updatedAt'
+            ])
+            && request.resource.data.availableBalance - resource.data.availableBalance == -amountDelta
+            && cashNumber(request.resource.data, 'totalTransferredOut')
+              - cashNumber(resource.data, 'totalTransferredOut') == amountDelta
+            && (amountDelta < 0 || request.resource.data.availableBalance >= 0))
+          || (shopId == transferBefore.data.toShopId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'availableBalance',
+              'totalTransferredIn',
+              'lastCashOperationId',
+              'lastCashOperationType',
+              'updatedAt'
+            ])
+            && request.resource.data.availableBalance - resource.data.availableBalance == amountDelta
+            && cashNumber(request.resource.data, 'totalTransferredIn')
+              - cashNumber(resource.data, 'totalTransferredIn') == amountDelta)
         );
     }
 
@@ -1676,6 +1785,8 @@ service cloud.firestore {
             && validExpenseShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'transfer'
             && validTransferShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'transfer_edit'
+            && validTransferEditShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'adjustment'
             && validAdjustmentShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'initialization'
@@ -1698,7 +1809,8 @@ service cloud.firestore {
       allow read: if hasAssignedShop()
         && resource.data.toShopId == profile().shopId;
       allow create: if validTransferAuditCreate(transferId);
-      allow update, delete: if false;
+      allow update: if validTransferAuditUpdate(transferId);
+      allow delete: if false;
     }
 
     match /cashAdjustments/{adjustmentId} {
