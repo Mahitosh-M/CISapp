@@ -20,7 +20,7 @@ import {
 } from '../services/firestoreService';
 import { getCustomerCreditSummary } from '../services/creditService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
-import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode } from '../types';
+import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
@@ -30,6 +30,7 @@ import { getInvoiceDisplayNumber } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { summarizePaymentSaveResults, type PaymentSaveResultLike } from '../utils/paymentSaveResult';
 import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
+import { BRANCH_SYSTEM_VERSION, getAssignedStaffShopId, getShopName, isBranchAwareRecord, isShopId, SHOP_OPTIONS } from '../utils/shops';
 
 const buildEmptyInvoiceForm = (): InvoiceFormData => ({
   customerId: '',
@@ -113,6 +114,7 @@ const Invoices = () => {
   const [sameDayPaymentAmount, setSameDayPaymentAmount] = useState(0);
   const [sameDayCashDiscount, setSameDayCashDiscount] = useState(0);
   const [sameDayPaymentMode, setSameDayPaymentMode] = useState<PaymentMode>('Cash');
+  const [sameDayPaymentAlreadyAccounted, setSameDayPaymentAlreadyAccounted] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
@@ -128,8 +130,23 @@ const Invoices = () => {
   const auditUser = {
     userId: userProfile?.uid,
     userEmail: userProfile?.email,
-    role: userProfile?.role
+    role: userProfile?.role,
+    shopId: userProfile?.shopId
   };
+  const assignedStaffShopId = getAssignedStaffShopId(userProfile);
+  const isAdmin = userProfile?.role === 'Admin';
+  const formIsBranchAware = isBranchAwareRecord(formData);
+  const transactionShopId = assignedStaffShopId ?? (isShopId(formData.shopId) ? formData.shopId : undefined);
+  const editingInvoiceCreationPayment = editingInvoiceId
+    ? payments.find((payment) => payment.invoiceId === editingInvoiceId && payment.notes === invoiceCreationPaymentNote)
+    : undefined;
+  const sameDayPaymentShopId = isBranchAwareRecord(editingInvoiceCreationPayment)
+    ? editingInvoiceCreationPayment.shopId
+    : transactionShopId;
+  const adminNeedsSameDayPaymentShop = isAdmin
+    && Boolean(editingInvoiceId)
+    && sameDayPaymentAmount > 0
+    && !editingInvoiceCreationPayment;
 
   const loadData = async () => {
     try {
@@ -285,10 +302,16 @@ const Invoices = () => {
     setSameDayPaymentAmount(0);
     setSameDayCashDiscount(0);
     setSameDayPaymentMode('Cash');
+    setSameDayPaymentAlreadyAccounted(false);
     setEditingInvoiceId('');
   };
 
-  const canEditInvoice = (_invoice: Invoice) => true;
+  const canEditInvoice = (invoice: Invoice) => {
+    if (!assignedStaffShopId) return true;
+    if (isBranchAwareRecord(invoice) && invoice.shopId !== assignedStaffShopId) return false;
+    const creationPayment = getInvoiceCreationPayment(invoice.id);
+    return !isBranchAwareRecord(creationPayment) || creationPayment.shopId === assignedStaffShopId;
+  };
 
   function getInvoiceCreationPayment(invoiceId: string, paymentRows = payments) {
     return paymentRows.find((payment) => payment.invoiceId === invoiceId && payment.notes === invoiceCreationPaymentNote);
@@ -304,6 +327,16 @@ const Invoices = () => {
 
     if (!formData.date || !formData.dueDate) {
       setError('Invoice date and due date must be valid dates.');
+      return;
+    }
+
+    if (isAdmin && !editingInvoiceId && !isShopId(formData.shopId)) {
+      setError('Select a shop before creating this invoice.');
+      return;
+    }
+
+    if (adminNeedsSameDayPaymentShop && !isShopId(formData.shopId)) {
+      setError('Select a shop for the new payment.');
       return;
     }
 
@@ -351,7 +384,12 @@ const Invoices = () => {
             amountAppliedToInvoice,
             cashDiscount: cashDiscountApplied,
             mode: sameDayPaymentMode,
-            notes: invoiceCreationPaymentNote
+            notes: invoiceCreationPaymentNote,
+            ...(sameDayPaymentShopId ? {
+              shopId: sameDayPaymentShopId,
+              branchSystemVersion: BRANCH_SYSTEM_VERSION,
+              affectsShopCash: !sameDayPaymentAlreadyAccounted
+            } : {})
           };
 
           if (invoiceCreationPayment) {
@@ -383,7 +421,12 @@ const Invoices = () => {
             amountAppliedToInvoice,
             cashDiscount: cashDiscountApplied,
             mode: sameDayPaymentMode,
-            notes: invoiceCreationPaymentNote
+            notes: invoiceCreationPaymentNote,
+            ...(sameDayPaymentShopId ? {
+              shopId: sameDayPaymentShopId,
+              branchSystemVersion: BRANCH_SYSTEM_VERSION,
+              affectsShopCash: !sameDayPaymentAlreadyAccounted
+            } : {})
           }, auditUser));
         }
 
@@ -425,6 +468,7 @@ const Invoices = () => {
     setSameDayPaymentAmount(invoiceCreationPayment?.amount ?? 0);
     setSameDayCashDiscount(invoiceCreationPayment?.cashDiscount ?? 0);
     setSameDayPaymentMode(invoiceCreationPayment?.mode ?? 'Cash');
+    setSameDayPaymentAlreadyAccounted(invoiceCreationPayment?.affectsShopCash === false && isBranchAwareRecord(invoiceCreationPayment));
     setFormData({
       customerId: invoice.customerId,
       customerName: invoice.customerName,
@@ -436,7 +480,11 @@ const Invoices = () => {
       totalSales: invoice.totalSales,
       totalCost: invoice.totalCost,
       totalProfit: invoice.totalProfit,
-      notes: invoice.notes
+      notes: invoice.notes,
+      ...(isBranchAwareRecord(invoice) ? {
+        shopId: invoice.shopId,
+        branchSystemVersion: BRANCH_SYSTEM_VERSION
+      } : {})
     });
     void loadCustomerCreditLimit(invoice.customerId);
     setMessage('');
@@ -646,6 +694,35 @@ const Invoices = () => {
             </select>
           </label>
 
+          {isAdmin && (!editingInvoiceId || formIsBranchAware || adminNeedsSameDayPaymentShop) ? <label style={labelStyle}>
+            Shop
+            <select
+              style={inputStyle}
+              required={!editingInvoiceId || adminNeedsSameDayPaymentShop}
+              disabled={Boolean(editingInvoiceId) && formIsBranchAware}
+              value={formData.shopId ?? ''}
+              onChange={(event) => handleFieldChange('shopId', event.target.value as ShopId)}
+            >
+              <option value="">Select shop</option>
+              {SHOP_OPTIONS.map((shop) => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+            </select>
+          </label> : assignedStaffShopId ? <div style={labelStyle}>
+            Shop
+            <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
+              {getShopName(assignedStaffShopId)}
+            </div>
+          </div> : formIsBranchAware ? <div style={labelStyle}>
+            Shop
+            <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
+              {getShopName(formData.shopId)}
+            </div>
+          </div> : isBranchAwareRecord(editingInvoiceCreationPayment) ? <div style={labelStyle}>
+            Payment Shop
+            <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
+              {getShopName(editingInvoiceCreationPayment.shopId)}
+            </div>
+          </div> : null}
+
           <label style={labelStyle}>
             Invoice Date
             <input style={inputStyle} type="date" required value={formData.date} onChange={(event) => handleFieldChange('date', event.target.value)} />
@@ -712,6 +789,15 @@ const Invoices = () => {
               onChange={(event) => setSameDayCashDiscount(Number(event.target.value) || 0)}
             />
           </label>
+
+          {sameDayPaymentAmount > 0 && sameDayPaymentShopId ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
+            <input
+              type="checkbox"
+              checked={sameDayPaymentAlreadyAccounted}
+              onChange={(event) => setSameDayPaymentAlreadyAccounted(event.target.checked)}
+            />
+            Already accounted in shop cash
+          </label> : null}
 
         </div>
 

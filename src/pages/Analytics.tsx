@@ -16,6 +16,14 @@ import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
+import {
+  filterRecordsForShopScope,
+  getContributionPercent,
+  getShopName,
+  isBranchAwareRecord,
+  SHOP_OPTIONS,
+  type AnalyticsShopScope
+} from '../utils/shops';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
 type AnalyticsSection = 'overview' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
@@ -106,6 +114,7 @@ const Analytics = () => {
   const [activeToDate, setActiveToDate] = useState(defaultRange.toDate);
   const [contributionGroup, setContributionGroup] = useState<ContributionGroup>('top5');
   const [activeSection, setActiveSection] = useState<AnalyticsSection | null>(null);
+  const [analyticsScope, setAnalyticsScope] = useState<AnalyticsShopScope>('overall');
   const [customerCount, setCustomerCount] = useState(0);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -153,6 +162,7 @@ const Analytics = () => {
     if (snapshotRangeLoaded !== activeRangeKey) return;
     const needsDetailedData = !completeMonthRange
       || !monthlySnapshotsReady
+      || analyticsScope !== 'overall'
       || Boolean(activeSection && ['contribution', 'insights', 'briefing'].includes(activeSection));
     if (!needsDetailedData || detailedDataLoaded) return;
     let active = true;
@@ -172,24 +182,42 @@ const Analytics = () => {
       .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load detailed analytics.'))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [activeFromDate, activeRangeKey, activeSection, activeToDate, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
+  }, [activeFromDate, activeRangeKey, activeSection, activeToDate, analyticsScope, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
   const allocatedFixedCost = useMemo(
     () => selectedDateKeys.reduce((sum, date) => sum + getDailyFixedCost(settings.fixedMonthlyCosts, date), 0),
     [selectedDateKeys, settings.fixedMonthlyCosts]
   );
 
   const filteredInvoices = useMemo(() => {
-    return getBusinessInvoices(invoices).filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
-  }, [activeFromDate, activeToDate, invoices]);
+    const dateRows = getBusinessInvoices(invoices).filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
+    return filterRecordsForShopScope(dateRows, analyticsScope);
+  }, [activeFromDate, activeToDate, analyticsScope, invoices]);
 
   const filteredPayments = useMemo(() => {
-    return payments.filter((payment) => isDateInRange(payment.date, activeFromDate, activeToDate));
-  }, [activeFromDate, activeToDate, payments]);
+    const dateRows = payments.filter((payment) => isDateInRange(payment.date, activeFromDate, activeToDate));
+    return filterRecordsForShopScope(dateRows, analyticsScope);
+  }, [activeFromDate, activeToDate, analyticsScope, payments]);
+
+  const branchContribution = useMemo(() => {
+    if (analyticsScope === 'overall') return undefined;
+    const allBranchInvoices = getBusinessInvoices(invoices)
+      .filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate))
+      .filter(isBranchAwareRecord);
+    const branchAwareSales = allBranchInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+    const branchAwareProfit = allBranchInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+    const shopSales = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
+    const shopProfit = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+
+    return {
+      salesPercent: getContributionPercent(shopSales, branchAwareSales),
+      profitPercent: getContributionPercent(shopProfit, branchAwareProfit)
+    };
+  }, [activeFromDate, activeToDate, analyticsScope, filteredInvoices, invoices]);
 
   const invoiceIds = useMemo(() => new Set(filteredInvoices.map((invoice) => invoice.id)), [filteredInvoices]);
 
   const analysis = useMemo(() => {
-    if (!detailedDataLoaded && completeMonthRange) {
+    if (analyticsScope === 'overall' && !detailedDataLoaded && completeMonthRange) {
       const sales = monthlySnapshots.reduce((sum, row) => sum + row.totalSales, 0);
       const profit = monthlySnapshots.reduce((sum, row) => sum + row.totalProfit, 0);
       const collected = monthlySnapshots.reduce((sum, row) => sum + row.paymentsReceived, 0);
@@ -258,7 +286,7 @@ const Analytics = () => {
       negativeProfitCount: negativeProfitInvoices.length,
       negativeProfitAmount: negativeProfitInvoices.reduce((sum, invoice) => sum + Math.abs(invoice.totalProfit), 0)
     };
-  }, [allocatedFixedCost, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots]);
+  }, [allocatedFixedCost, analyticsScope, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots]);
 
   const customerAnalysis = useMemo(() => {
     const rows = new Map<string, { customer: string; sales: number; profit: number; invoices: number }>();
@@ -579,13 +607,24 @@ const Analytics = () => {
     <div>
       <SectionHeader
         title="Business Analytics"
-        description={`Consultant-style business analysis for ${formatDate(activeFromDate)} to ${formatDate(activeToDate)}.`}
+        description={`${analyticsScope === 'overall' ? 'Overall' : getShopName(analyticsScope)} business analysis for ${formatDate(activeFromDate)} to ${formatDate(activeToDate)}.`}
       />
 
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
 
       <div style={{ ...cardStyle, marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
+          <label style={{ fontWeight: 800 }}>
+            View
+            <select
+              style={{ ...inputStyle, display: 'block', marginTop: 6 }}
+              value={analyticsScope}
+              onChange={(event) => setAnalyticsScope(event.target.value as AnalyticsShopScope)}
+            >
+              <option value="overall">Overall</option>
+              {SHOP_OPTIONS.map((shop) => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+            </select>
+          </label>
           <label style={{ fontWeight: 800 }}>
             From Date
             <input type="date" style={{ ...inputStyle, display: 'block', marginTop: 6 }} value={fromDate} onChange={(event) => handleFromDateChange(event.target.value)} />
@@ -631,6 +670,20 @@ const Analytics = () => {
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
               <div style={{ color: '#D7DEEA', marginTop: 6 }}>Sales less receipts in range</div>
             </div>
+            {branchContribution ? <div style={cardStyle}>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Sales Contribution</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>
+                {branchContribution.salesPercent === undefined ? 'Not available' : formatPercent(branchContribution.salesPercent)}
+              </div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Share of branch-aware sales</div>
+            </div> : null}
+            {branchContribution ? <div style={cardStyle}>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Profit Contribution</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>
+                {branchContribution.profitPercent === undefined ? 'Not available' : formatPercent(branchContribution.profitPercent)}
+              </div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Share of branch-aware gross profit</div>
+            </div> : null}
           </div> : null}
 
           {activeSection === 'breakeven' ? <div style={{ ...cardStyle, marginBottom: 18 }}>

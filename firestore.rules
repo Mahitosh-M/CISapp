@@ -21,6 +21,11 @@ rules_version = '2';
 // creditAuditLogs/{logId}: immutable admin audit entry containing customerId,
 // customerName, action, adminUid, timestamp, oldValue, newValue, and reason.
 // Clients never write these documents.
+//
+// shopCash/{SHOP_A|SHOP_S}: shared branch summary. CRM payment writes update
+// collections; Cash App batches update expenses/transfers through immutable
+// audit records. Admin-only cashAdjustments/{adjustmentId} records manual
+// additions/deductions. cashInitializations/{shopId} records opening cash.
 // ===============================================================
 
 service cloud.firestore {
@@ -79,6 +84,604 @@ service cloud.firestore {
 
     function ownsCustomerRecord(data) {
       return isCustomer() && (ownsCustomerId(data) || ownsCustomerName(data));
+    }
+
+    function validShopId(shopId) {
+      return shopId in ['SHOP_A', 'SHOP_S'];
+    }
+
+    function hasAssignedShop() {
+      return isStaff() && ('shopId' in profile()) && validShopId(profile().shopId);
+    }
+
+    function isBranchAware(data) {
+      return ('branchSystemVersion' in data)
+        && data.branchSystemVersion == 1
+        && ('shopId' in data)
+        && validShopId(data.shopId);
+    }
+
+    function hasNoBranchFields(data) {
+      return !('branchSystemVersion' in data) && !('shopId' in data);
+    }
+
+    function validBranchEnvelope(data) {
+      return hasNoBranchFields(data) || isBranchAware(data);
+    }
+
+    function validBranchCreateForActor(data) {
+      return validBranchEnvelope(data)
+        && (
+          isAdmin()
+          || (hasAssignedShop()
+            ? isBranchAware(data) && data.shopId == profile().shopId
+            : hasNoBranchFields(data))
+        );
+    }
+
+    function validInvoiceBranchUpdateForActor() {
+      return validBranchEnvelope(request.resource.data)
+        && (
+          (hasNoBranchFields(resource.data) && hasNoBranchFields(request.resource.data))
+          || (isBranchAware(resource.data)
+            && isBranchAware(request.resource.data)
+            && request.resource.data.shopId == resource.data.shopId
+            && (isAdmin() || !hasAssignedShop() || resource.data.shopId == profile().shopId))
+        );
+    }
+
+    function validPaymentBranchUpdateForActor() {
+      return validBranchEnvelope(request.resource.data)
+        && (
+          (hasNoBranchFields(resource.data) && hasNoBranchFields(request.resource.data))
+          || (isBranchAware(resource.data)
+            && isBranchAware(request.resource.data)
+            && (
+              isAdmin()
+              || (hasAssignedShop()
+                ? resource.data.shopId == profile().shopId
+                  && request.resource.data.shopId == profile().shopId
+                : request.resource.data.shopId == resource.data.shopId)
+            ))
+        );
+    }
+
+    function validPaymentCashFields(data) {
+      return isBranchAware(data)
+        ? ('affectsShopCash' in data)
+          && data.affectsShopCash is bool
+          && ('cashSyncedAmount' in data)
+          && data.cashSyncedAmount is number
+          && data.cashSyncedAmount >= 0
+          && ('amount' in data)
+          && data.amount is number
+          && data.amount >= 0
+          && ((('paymentKind' in data) && data.paymentKind == 'advance_application') || data.affectsShopCash == false
+            ? data.cashSyncedAmount == 0
+            : data.cashSyncedAmount == data.amount)
+        : !('affectsShopCash' in data) && !('cashSyncedAmount' in data);
+    }
+
+    function validOptionalCashNumber(data, field) {
+      return !(field in data)
+        || (data[field] is number && data[field] >= 0 && data[field] <= 1000000000000);
+    }
+
+    function cashNumber(data, field) {
+      return field in data ? data[field] : 0;
+    }
+
+    function validShopCash(data, shopId) {
+      return data.keys().hasAll(['shopId', 'availableBalance', 'totalCollections', 'updatedAt'])
+        && data.keys().hasOnly([
+          'shopId',
+          'availableBalance',
+          'totalCollections',
+          'totalExpenses',
+          'totalTransferredIn',
+          'totalTransferredOut',
+          'openingBalance',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'initializedAt',
+          'initializedBy',
+          'updatedAt'
+        ])
+        && data.shopId == shopId
+        && validShopId(data.shopId)
+        && data.availableBalance is number
+        && data.availableBalance >= -1000000000000
+        && data.availableBalance <= 1000000000000
+        && data.totalCollections is number
+        && data.totalCollections >= 0
+        && data.totalCollections <= 1000000000000
+        && validOptionalCashNumber(data, 'totalExpenses')
+        && validOptionalCashNumber(data, 'totalTransferredIn')
+        && validOptionalCashNumber(data, 'totalTransferredOut')
+        && validOptionalCashNumber(data, 'openingBalance')
+        && data.updatedAt is string
+        && data.updatedAt.size() > 0
+        && data.updatedAt.size() <= 40
+        && (
+          (!('lastCashOperationId' in data) && !('lastCashOperationType' in data))
+          || (data.lastCashOperationId is string
+            && data.lastCashOperationId.size() > 0
+            && data.lastCashOperationId.size() <= 160
+            && data.lastCashOperationType in [
+              'payment', 'invoice_delete', 'expense', 'transfer', 'adjustment', 'initialization'
+            ])
+        )
+        && (
+          (!('initializedAt' in data) && !('initializedBy' in data) && !('openingBalance' in data))
+          || (data.initializedAt is timestamp
+            && data.initializedBy is string
+            && data.initializedBy.size() > 0
+            && data.initializedBy.size() <= 160
+            && 'openingBalance' in data)
+        );
+    }
+
+    function isInitializedShopCash(data) {
+      return 'initializedAt' in data
+        && 'initializedBy' in data
+        && 'openingBalance' in data
+        && 'totalExpenses' in data
+        && 'totalTransferredIn' in data
+        && 'totalTransferredOut' in data;
+    }
+
+    function canWritePaymentShopCash(shopId) {
+      return isAdmin()
+        || (isStaff() && (!hasAssignedShop() || profile().shopId == shopId));
+    }
+
+    function paymentPath(paymentId) {
+      return /databases/$(database)/documents/payments/$(paymentId);
+    }
+
+    function paymentCashAmountForShop(data, shopId) {
+      return isBranchAware(data)
+          && data.shopId == shopId
+          && ('cashSyncedAmount' in data)
+          && data.cashSyncedAmount is number
+        ? data.cashSyncedAmount
+        : 0;
+    }
+
+    function paymentCashDelta(paymentId, shopId) {
+      let path = paymentPath(paymentId);
+      let beforeAmount = exists(path)
+        ? paymentCashAmountForShop(get(path).data, shopId)
+        : 0;
+      let afterAmount = existsAfter(path)
+        ? paymentCashAmountForShop(getAfter(path).data, shopId)
+        : 0;
+      return afterAmount - beforeAmount;
+    }
+
+    function paymentSummaryDeltaMatches(paymentId, shopId) {
+      let path = cashSummaryPath(shopId);
+      let delta = paymentCashDelta(paymentId, shopId);
+      let afterSummary = getAfter(path);
+      return delta == 0
+        || (existsAfter(path)
+          && afterSummary.data.lastCashOperationId == paymentId
+          && afterSummary.data.lastCashOperationType == 'payment'
+          && (exists(path)
+            ? afterSummary.data.availableBalance - get(path).data.availableBalance == delta
+              && afterSummary.data.totalCollections - get(path).data.totalCollections == delta
+            : afterSummary.data.availableBalance == delta
+              && afterSummary.data.totalCollections == delta));
+    }
+
+    function validPaymentCashMutation(paymentId) {
+      return paymentSummaryDeltaMatches(paymentId, 'SHOP_A')
+        && paymentSummaryDeltaMatches(paymentId, 'SHOP_S');
+    }
+
+    function validPaymentShopCashCreate(shopId) {
+      let paymentId = request.resource.data.lastCashOperationId;
+      let delta = paymentCashDelta(paymentId, shopId);
+      return canWritePaymentShopCash(shopId)
+        && request.resource.data.keys().hasOnly([
+          'shopId',
+          'availableBalance',
+          'totalCollections',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'updatedAt'
+        ])
+        && request.resource.data.lastCashOperationType == 'payment'
+        && delta > 0
+        && request.resource.data.availableBalance == delta
+        && request.resource.data.totalCollections == delta;
+    }
+
+    function validPaymentShopCashUpdate(shopId) {
+      let paymentId = request.resource.data.lastCashOperationId;
+      let delta = paymentCashDelta(paymentId, shopId);
+      return canWritePaymentShopCash(shopId)
+        && request.resource.data.lastCashOperationType == 'payment'
+        && delta != 0
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'availableBalance',
+          'totalCollections',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'updatedAt'
+        ])
+        && request.resource.data.availableBalance - resource.data.availableBalance
+          == delta
+        && request.resource.data.totalCollections - resource.data.totalCollections
+          == delta;
+    }
+
+    function hasInvoiceDeleteSummaryMarker(invoiceId, shopId, paymentAmount) {
+      let summaryPath = cashSummaryPath(shopId);
+      let summaryAfter = getAfter(summaryPath);
+      return paymentAmount == 0
+        || (exists(summaryPath)
+          && existsAfter(summaryPath)
+          && summaryAfter.data.lastCashOperationId == invoiceId
+          && summaryAfter.data.lastCashOperationType == 'invoice_delete'
+          && summaryAfter.data.availableBalance - get(summaryPath).data.availableBalance <= -paymentAmount
+          && summaryAfter.data.totalCollections - get(summaryPath).data.totalCollections <= -paymentAmount);
+    }
+
+    function validInvoiceDeletePaymentCashMutation() {
+      let shopAAmount = paymentCashAmountForShop(resource.data, 'SHOP_A');
+      let shopSAmount = paymentCashAmountForShop(resource.data, 'SHOP_S');
+      return (shopAAmount == 0 && shopSAmount == 0)
+        || (isAdmin()
+          && ('invoiceId' in resource.data)
+          && resource.data.invoiceId is string
+          && resource.data.invoiceId.size() > 0
+          && exists(invoicePath(resource.data.invoiceId))
+          && !existsAfter(invoicePath(resource.data.invoiceId))
+          && hasInvoiceDeleteSummaryMarker(resource.data.invoiceId, 'SHOP_A', shopAAmount)
+          && hasInvoiceDeleteSummaryMarker(resource.data.invoiceId, 'SHOP_S', shopSAmount));
+    }
+
+    function validInvoiceDeleteShopCashUpdate(shopId) {
+      let invoiceId = request.resource.data.lastCashOperationId;
+      let delta = request.resource.data.availableBalance - resource.data.availableBalance;
+      return isAdmin()
+        && request.resource.data.shopId == shopId
+        && request.resource.data.lastCashOperationType == 'invoice_delete'
+        && exists(invoicePath(invoiceId))
+        && !existsAfter(invoicePath(invoiceId))
+        && delta < 0
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'availableBalance',
+          'totalCollections',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'updatedAt'
+        ])
+        && request.resource.data.totalCollections - resource.data.totalCollections == delta;
+    }
+
+    function cashSummaryPath(shopId) {
+      return /databases/$(database)/documents/shopCash/$(shopId);
+    }
+
+    function cashExpensePath(expenseId) {
+      return /databases/$(database)/documents/cashExpenses/$(expenseId);
+    }
+
+    function shopTransferPath(transferId) {
+      return /databases/$(database)/documents/shopTransfers/$(transferId);
+    }
+
+    function cashAdjustmentPath(adjustmentId) {
+      return /databases/$(database)/documents/cashAdjustments/$(adjustmentId);
+    }
+
+    function cashInitializationPath(shopId) {
+      return /databases/$(database)/documents/cashInitializations/$(shopId);
+    }
+
+    function validCashActor(shopId) {
+      return isAdmin() || (hasAssignedShop() && profile().shopId == shopId);
+    }
+
+    function validCashExpense(data, expenseId) {
+      return data.keys().hasOnly(['shopId', 'amount', 'description', 'createdAt', 'createdBy'])
+        && expenseId.size() > 0
+        && expenseId.size() <= 160
+        && validShopId(data.shopId)
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 100000000
+        && data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 160
+        && data.description.matches('.*[^ ].*')
+        && data.createdAt is timestamp
+        && data.createdAt == request.time
+        && data.createdBy is string
+        && data.createdBy == request.auth.uid
+        && data.createdBy.size() <= 160;
+    }
+
+    function validExpenseAuditCreate(expenseId) {
+      let summaryPath = cashSummaryPath(request.resource.data.shopId);
+      let summaryAfter = getAfter(summaryPath);
+      return validCashExpense(request.resource.data, expenseId)
+        && validCashActor(request.resource.data.shopId)
+        && exists(summaryPath)
+        && existsAfter(summaryPath)
+        && summaryAfter.data.lastCashOperationId == expenseId
+        && summaryAfter.data.lastCashOperationType == 'expense';
+    }
+
+    function validExpenseShopCashUpdate(shopId) {
+      let expenseId = request.resource.data.lastCashOperationId;
+      let expensePath = cashExpensePath(expenseId);
+      let expenseAfter = getAfter(expensePath);
+      return !exists(expensePath)
+        && existsAfter(expensePath)
+        && expenseAfter.data.shopId == shopId
+        && isInitializedShopCash(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'availableBalance',
+          'totalExpenses',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'updatedAt'
+        ])
+        && request.resource.data.availableBalance >= 0
+        && request.resource.data.availableBalance
+          == resource.data.availableBalance - expenseAfter.data.amount
+        && cashNumber(request.resource.data, 'totalExpenses')
+          == cashNumber(resource.data, 'totalExpenses') + expenseAfter.data.amount;
+    }
+
+    function validShopTransfer(data, transferId) {
+      return data.keys().hasOnly([
+          'fromShopId', 'toShopId', 'amount', 'note', 'createdAt', 'createdBy'
+        ])
+        && transferId.size() > 0
+        && transferId.size() <= 160
+        && validShopId(data.fromShopId)
+        && validShopId(data.toShopId)
+        && data.fromShopId != data.toShopId
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 100000000
+        && data.note is string
+        && data.note.size() <= 160
+        && data.createdAt is timestamp
+        && data.createdAt == request.time
+        && data.createdBy is string
+        && data.createdBy == request.auth.uid
+        && data.createdBy.size() <= 160;
+    }
+
+    function validTransferAuditCreate(transferId) {
+      let senderPath = cashSummaryPath(request.resource.data.fromShopId);
+      let receiverPath = cashSummaryPath(request.resource.data.toShopId);
+      let senderAfter = getAfter(senderPath);
+      let receiverAfter = getAfter(receiverPath);
+      return validShopTransfer(request.resource.data, transferId)
+        && validCashActor(request.resource.data.fromShopId)
+        && exists(senderPath)
+        && exists(receiverPath)
+        && existsAfter(senderPath)
+        && existsAfter(receiverPath)
+        && senderAfter.data.lastCashOperationId == transferId
+        && senderAfter.data.lastCashOperationType == 'transfer'
+        && receiverAfter.data.lastCashOperationId == transferId
+        && receiverAfter.data.lastCashOperationType == 'transfer';
+    }
+
+    function validTransferShopCashUpdate(shopId) {
+      let transferId = request.resource.data.lastCashOperationId;
+      let transferPath = shopTransferPath(transferId);
+      let transferAfter = getAfter(transferPath);
+      return !exists(transferPath)
+        && existsAfter(transferPath)
+        && isInitializedShopCash(resource.data)
+        && (
+          (shopId == transferAfter.data.fromShopId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'availableBalance',
+              'totalTransferredOut',
+              'lastCashOperationId',
+              'lastCashOperationType',
+              'updatedAt'
+            ])
+            && request.resource.data.availableBalance >= 0
+            && request.resource.data.availableBalance
+              == resource.data.availableBalance - transferAfter.data.amount
+            && cashNumber(request.resource.data, 'totalTransferredOut')
+              == cashNumber(resource.data, 'totalTransferredOut') + transferAfter.data.amount)
+          || (shopId == transferAfter.data.toShopId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'availableBalance',
+              'totalTransferredIn',
+              'lastCashOperationId',
+              'lastCashOperationType',
+              'updatedAt'
+            ])
+            && request.resource.data.availableBalance
+              == resource.data.availableBalance + transferAfter.data.amount
+            && cashNumber(request.resource.data, 'totalTransferredIn')
+              == cashNumber(resource.data, 'totalTransferredIn') + transferAfter.data.amount)
+        );
+    }
+
+    function validCashAdjustment(data, adjustmentId) {
+      return data.keys().hasOnly([
+          'shopId', 'amount', 'direction', 'reason', 'createdAt', 'createdBy'
+        ])
+        && adjustmentId.size() > 0
+        && adjustmentId.size() <= 160
+        && validShopId(data.shopId)
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 100000000
+        && data.direction in ['add', 'deduct']
+        && data.reason is string
+        && data.reason.size() > 0
+        && data.reason.size() <= 160
+        && data.reason.matches('.*[^ ].*')
+        && data.createdAt is timestamp
+        && data.createdAt == request.time
+        && data.createdBy is string
+        && data.createdBy == request.auth.uid
+        && data.createdBy.size() <= 160;
+    }
+
+    function validAdjustmentAuditCreate(adjustmentId) {
+      let summaryPath = cashSummaryPath(request.resource.data.shopId);
+      let summaryBefore = get(summaryPath);
+      let summaryAfter = getAfter(summaryPath);
+      return isAdmin()
+        && validCashAdjustment(request.resource.data, adjustmentId)
+        && exists(summaryPath)
+        && existsAfter(summaryPath)
+        && summaryAfter.data.lastCashOperationId == adjustmentId
+        && summaryAfter.data.lastCashOperationType == 'adjustment'
+        && summaryAfter.data.availableBalance
+          == summaryBefore.data.availableBalance
+            + (request.resource.data.direction == 'add'
+              ? request.resource.data.amount
+              : -request.resource.data.amount);
+    }
+
+    function validAdjustmentShopCashUpdate(shopId) {
+      let adjustmentId = request.resource.data.lastCashOperationId;
+      let adjustmentPath = cashAdjustmentPath(adjustmentId);
+      let adjustmentAfter = getAfter(adjustmentPath);
+      return isAdmin()
+        && !exists(adjustmentPath)
+        && existsAfter(adjustmentPath)
+        && adjustmentAfter.data.shopId == shopId
+        && isInitializedShopCash(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'availableBalance',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'updatedAt'
+        ])
+        && request.resource.data.availableBalance >= 0
+        && request.resource.data.availableBalance
+          == resource.data.availableBalance
+            + (adjustmentAfter.data.direction == 'add'
+              ? adjustmentAfter.data.amount
+              : -adjustmentAfter.data.amount);
+    }
+
+    function validCashInitialization(data, shopId) {
+      return data.keys().hasOnly(['shopId', 'openingBalance', 'createdAt', 'createdBy'])
+        && data.shopId == shopId
+        && validShopId(data.shopId)
+        && data.openingBalance is number
+        && data.openingBalance >= 0
+        && data.openingBalance <= 100000000
+        && data.createdAt is timestamp
+        && data.createdAt == request.time
+        && data.createdBy is string
+        && data.createdBy == request.auth.uid
+        && data.createdBy.size() <= 160;
+    }
+
+    function validNewInitializationSummary(initialization, summary) {
+      return summary.keys().hasOnly([
+          'shopId',
+          'availableBalance',
+          'totalCollections',
+          'totalExpenses',
+          'totalTransferredIn',
+          'totalTransferredOut',
+          'openingBalance',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'initializedAt',
+          'initializedBy',
+          'updatedAt'
+        ])
+        && summary.availableBalance == initialization.openingBalance
+        && summary.totalCollections == 0
+        && summary.totalExpenses == 0
+        && summary.totalTransferredIn == 0
+        && summary.totalTransferredOut == 0;
+    }
+
+    function validExistingInitializationSummary(initialization, beforeSummary, afterSummary) {
+      return !isInitializedShopCash(beforeSummary)
+        && afterSummary.diff(beforeSummary).affectedKeys().hasOnly([
+          'availableBalance',
+          'totalExpenses',
+          'totalTransferredIn',
+          'totalTransferredOut',
+          'openingBalance',
+          'lastCashOperationId',
+          'lastCashOperationType',
+          'initializedAt',
+          'initializedBy',
+          'updatedAt'
+        ])
+        && afterSummary.availableBalance
+          == beforeSummary.availableBalance + initialization.openingBalance
+        && afterSummary.totalCollections == beforeSummary.totalCollections
+        && cashNumber(afterSummary, 'totalExpenses') == cashNumber(beforeSummary, 'totalExpenses')
+        && cashNumber(afterSummary, 'totalTransferredIn') == cashNumber(beforeSummary, 'totalTransferredIn')
+        && cashNumber(afterSummary, 'totalTransferredOut') == cashNumber(beforeSummary, 'totalTransferredOut');
+    }
+
+    function validInitializationSummaryIdentity(shopId, initialization, summary) {
+      return isInitializedShopCash(summary)
+        && summary.availableBalance >= 0
+        && summary.openingBalance == initialization.openingBalance
+        && summary.lastCashOperationId == shopId
+        && summary.lastCashOperationType == 'initialization'
+        && summary.initializedAt == request.time
+        && summary.initializedBy == initialization.createdBy;
+    }
+
+    function validInitializationAuditCreate(shopId) {
+      let summaryPath = cashSummaryPath(shopId);
+      let summaryAfter = getAfter(summaryPath);
+      return isAdmin()
+        && validCashInitialization(request.resource.data, shopId)
+        && existsAfter(summaryPath)
+        && validInitializationSummaryIdentity(
+          shopId,
+          request.resource.data,
+          summaryAfter.data
+        );
+    }
+
+    function validInitializationShopCashWrite(shopId) {
+      let initializationPath = cashInitializationPath(shopId);
+      let initializationAfter = getAfter(initializationPath);
+      return isAdmin()
+        && !exists(initializationPath)
+        && existsAfter(initializationPath)
+        && validCashInitialization(initializationAfter.data, shopId)
+        && validInitializationSummaryIdentity(
+          shopId,
+          initializationAfter.data,
+          request.resource.data
+        );
+    }
+
+    function validInitializationShopCashCreate(shopId) {
+      let initialization = getAfter(cashInitializationPath(shopId)).data;
+      return validInitializationShopCashWrite(shopId)
+        && validNewInitializationSummary(initialization, request.resource.data);
+    }
+
+    function validInitializationShopCashUpdate(shopId) {
+      let initialization = getAfter(cashInitializationPath(shopId)).data;
+      return validInitializationShopCashWrite(shopId)
+        && validExistingInitializationSummary(
+          initialization,
+          resource.data,
+          request.resource.data
+        );
     }
 
     function isPartnerLevel(level) {
@@ -592,6 +1195,7 @@ service cloud.firestore {
           'role',
           'customerId',
           'customerName',
+          'shopId',
           'active',
           'createdAt',
           'updatedAt'
@@ -612,7 +1216,8 @@ service cloud.firestore {
         && data.updatedAt is string
         && data.updatedAt.size() <= 40
         && validOptionalString(data, 'customerId', 160)
-        && validOptionalString(data, 'customerName', 140);
+        && validOptionalString(data, 'customerName', 140)
+        && (!('shopId' in data) || (data.role == 'Staff' && validShopId(data.shopId)));
     }
 
     function validCreditOverride(data) {
@@ -1018,16 +1623,94 @@ service cloud.firestore {
 
     match /invoices/{invoiceId} {
       allow read: if isTeam() || ownsCustomerRecord(resource.data);
-      allow create: if isTeam() && validInvoicePcPolicyVersionOnCreate();
-      allow update: if isTeam() && preservesInvoicePcPolicyVersion();
+      allow create: if isTeam()
+        && validInvoicePcPolicyVersionOnCreate()
+        && validBranchCreateForActor(request.resource.data);
+      allow update: if isTeam()
+        && preservesInvoicePcPolicyVersion()
+        && validInvoiceBranchUpdateForActor();
       allow delete: if isAdmin();
     }
 
     match /payments/{paymentId} {
       allow read: if isTeam() || ownsCustomerRecord(resource.data);
-      allow create: if isTeam() && validPaymentPcPolicyVersionOnCreate();
-      allow update: if isTeam() && preservesPaymentPcPolicyVersion();
-      allow delete: if isAdmin();
+      allow create: if isTeam()
+        && validPaymentPcPolicyVersionOnCreate()
+        && validBranchCreateForActor(request.resource.data)
+        && validPaymentCashFields(request.resource.data)
+        && validPaymentCashMutation(paymentId);
+      allow update: if isTeam()
+        && preservesPaymentPcPolicyVersion()
+        && validPaymentBranchUpdateForActor()
+        && validPaymentCashFields(request.resource.data)
+        && validPaymentCashMutation(paymentId);
+      allow delete: if isAdmin()
+        && (validInvoiceDeletePaymentCashMutation() || validPaymentCashMutation(paymentId));
+    }
+
+    match /shopCash/{shopId} {
+      allow get: if isAdmin() || (hasAssignedShop() && profile().shopId == shopId);
+      allow list: if false;
+      allow create: if validShopCash(request.resource.data, shopId)
+        && request.resource.data.keys().hasAll([
+          'lastCashOperationId', 'lastCashOperationType'
+        ])
+        && (
+          (request.resource.data.lastCashOperationType == 'payment'
+            && validPaymentShopCashCreate(shopId))
+          || (request.resource.data.lastCashOperationType == 'initialization'
+            && validInitializationShopCashCreate(shopId))
+        );
+      allow update: if validShopCash(request.resource.data, shopId)
+        && request.resource.data.shopId == resource.data.shopId
+        && request.resource.data.keys().hasAll([
+          'lastCashOperationId', 'lastCashOperationType'
+        ])
+        && (
+          (request.resource.data.lastCashOperationType == 'payment'
+            && validPaymentShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'invoice_delete'
+            && validInvoiceDeleteShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'expense'
+            && validExpenseShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'transfer'
+            && validTransferShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'adjustment'
+            && validAdjustmentShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'initialization'
+            && validInitializationShopCashUpdate(shopId))
+        );
+      allow delete: if false;
+    }
+
+    match /cashExpenses/{expenseId} {
+      allow read: if isAdmin()
+        || (hasAssignedShop() && resource.data.shopId == profile().shopId);
+      allow create: if validExpenseAuditCreate(expenseId);
+      allow update, delete: if false;
+    }
+
+    match /shopTransfers/{transferId} {
+      allow read: if isAdmin();
+      allow read: if hasAssignedShop()
+        && resource.data.fromShopId == profile().shopId;
+      allow read: if hasAssignedShop()
+        && resource.data.toShopId == profile().shopId;
+      allow create: if validTransferAuditCreate(transferId);
+      allow update, delete: if false;
+    }
+
+    match /cashAdjustments/{adjustmentId} {
+      allow read: if isAdmin()
+        || (hasAssignedShop() && resource.data.shopId == profile().shopId);
+      allow create: if validAdjustmentAuditCreate(adjustmentId);
+      allow update, delete: if false;
+    }
+
+    match /cashInitializations/{shopId} {
+      allow read: if isAdmin();
+      allow create: if validInitializationAuditCreate(shopId);
+      allow update, delete: if false;
     }
 
     match /counters/{counterId} {

@@ -17,7 +17,8 @@ import {
   createUserProfile,
   getUserProfileByUid
 } from './firestoreService';
-import type { UserProfile, UserRole } from '../types';
+import type { ShopId, UserProfile, UserRole } from '../types';
+import { isShopId } from '../utils/shops';
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -65,7 +66,17 @@ export const loadUserProfile = async (user: User): Promise<UserProfile> => {
   return profile;
 };
 
-export const createStaffAuthAccount = async (email: string, password: string, name: string, role: Extract<UserRole, 'Admin' | 'Staff'>) => {
+export const createStaffAuthAccount = async (
+  email: string,
+  password: string,
+  name: string,
+  role: Extract<UserRole, 'Admin' | 'Staff'>,
+  shopId?: ShopId
+) => {
+  if (role === 'Staff' && !isShopId(shopId)) {
+    throw new Error('Select an assigned shop for the new staff account.');
+  }
+
   // A secondary Firebase app prevents staff creation from logging out the current Admin session.
   const secondaryApp = initializeApp(firebaseConfig, `staff-admin-${Date.now()}`);
   const normalizedEmail = normalizeEmail(email);
@@ -80,6 +91,7 @@ export const createStaffAuthAccount = async (email: string, password: string, na
         email: normalizedEmail,
         name: name.trim(),
         role,
+        ...(role === 'Staff' && shopId ? { shopId } : {}),
         active: true
       });
     } catch (err) {

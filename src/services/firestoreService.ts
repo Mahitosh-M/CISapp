@@ -6,6 +6,7 @@ import {
   getCountFromServer,
   getDoc,
   getDocs,
+  increment,
   limit as firestoreLimit,
   onSnapshot,
   orderBy,
@@ -17,6 +18,7 @@ import {
   where,
   writeBatch
 } from 'firebase/firestore';
+import type { Transaction } from 'firebase/firestore';
 import { db } from '../firebase';
 import type {
   Customer,
@@ -47,6 +49,7 @@ import type {
   RewardItem,
   RedemptionRequest,
   RedemptionStatus,
+  ShopId,
   UserProfile,
   UserRole
 } from '../types';
@@ -80,6 +83,15 @@ import {
   isInvoiceFullyPaidThrough,
   isValidBonusInvoice
 } from '../utils/bonusPc';
+import {
+  BRANCH_SYSTEM_VERSION,
+  buildShopCashAdjustments,
+  getNextCashSyncedAmount,
+  isBranchAwareRecord,
+  isShopId,
+  resolveNewRecordShopId,
+  type ShopCashAdjustment
+} from '../utils/shops';
 
 const CUSTOMERS = 'customers';
 const INVOICES = 'invoices';
@@ -100,6 +112,7 @@ const BONUS_PC_REQUESTS = 'bonusPcRequests';
 const COUNTERS = 'counters';
 const CUSTOMER_MONTHLY_SNAPSHOTS = 'customerMonthlySnapshots';
 const BUSINESS_MONTHLY_SNAPSHOTS = 'businessMonthlySnapshots';
+const SHOP_CASH = 'shopCash';
 const DEFAULT_LIST_LIMIT = 50;
 const ACTIVE_OFFER_LIMIT = 20;
 const ACTIVE_REWARD_LIMIT = 50;
@@ -109,6 +122,7 @@ export interface AuditUser {
   userId?: string;
   userEmail?: string;
   role?: UserRole;
+  shopId?: ShopId;
 }
 
 export type InvoicePcAwardStatus =
@@ -365,6 +379,141 @@ const withoutUndefined = <T extends Record<string, unknown>>(payload: T) => {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined)) as Partial<T>;
 };
 
+const omitInvoiceBranchFields = (invoice: InvoiceFormData) => {
+  const { shopId: _shopId, branchSystemVersion: _branchSystemVersion, ...legacyFields } = invoice;
+  return legacyFields;
+};
+
+const omitPaymentBranchFields = (payment: PaymentFormData) => {
+  const {
+    shopId: _shopId,
+    branchSystemVersion: _branchSystemVersion,
+    affectsShopCash: _affectsShopCash,
+    cashSyncedAmount: _cashSyncedAmount,
+    ...legacyFields
+  } = payment;
+  return legacyFields;
+};
+
+const getNewRecordShopId = (
+  selectedShopId: ShopId | undefined,
+  auditUser: AuditUser | undefined,
+  recordLabel: 'invoice' | 'payment'
+) => {
+  const resolvedShopId = resolveNewRecordShopId(auditUser?.role, auditUser?.shopId, selectedShopId);
+
+  if (auditUser?.role === 'Admin') {
+    if (!resolvedShopId) {
+      throw new Error(`Select a shop before saving this ${recordLabel}.`);
+    }
+  }
+
+  return resolvedShopId;
+};
+
+const prepareNewInvoicePayload = (invoice: InvoiceFormData, auditUser?: AuditUser): InvoiceFormData => {
+  const legacyFields = omitInvoiceBranchFields(invoice);
+  const shopId = getNewRecordShopId(invoice.shopId, auditUser, 'invoice');
+
+  return shopId
+    ? { ...legacyFields, shopId, branchSystemVersion: BRANCH_SYSTEM_VERSION }
+    : legacyFields;
+};
+
+const prepareExistingInvoicePayload = (
+  existingInvoice: Invoice,
+  invoice: InvoiceFormData,
+  auditUser?: AuditUser
+): InvoiceFormData => {
+  const legacyFields = omitInvoiceBranchFields(invoice);
+  if (!isBranchAwareRecord(existingInvoice)) return legacyFields;
+
+  if (auditUser?.role === 'Staff' && isShopId(auditUser.shopId) && auditUser.shopId !== existingInvoice.shopId) {
+    throw new Error('This invoice belongs to another shop and cannot be edited by this staff account.');
+  }
+
+  return {
+    ...legacyFields,
+    shopId: existingInvoice.shopId,
+    branchSystemVersion: BRANCH_SYSTEM_VERSION
+  };
+};
+
+const prepareNewPaymentPayload = (payment: PaymentFormData, auditUser?: AuditUser): PaymentFormData => {
+  const legacyFields = omitPaymentBranchFields(payment);
+  const shopId = getNewRecordShopId(payment.shopId, auditUser, 'payment');
+
+  return shopId
+    ? {
+        ...legacyFields,
+        shopId,
+        branchSystemVersion: BRANCH_SYSTEM_VERSION,
+        affectsShopCash: payment.affectsShopCash !== false
+      }
+    : legacyFields;
+};
+
+const prepareExistingPaymentPayload = (
+  existingPayment: Payment,
+  payment: PaymentFormData,
+  auditUser?: AuditUser
+): PaymentFormData => {
+  const legacyFields = omitPaymentBranchFields(payment);
+  if (!isBranchAwareRecord(existingPayment)) return legacyFields;
+
+  let shopId = existingPayment.shopId;
+  if (auditUser?.role === 'Admin') {
+    if (!isShopId(payment.shopId)) throw new Error('Select a shop before updating this payment.');
+    shopId = payment.shopId;
+  } else if (auditUser?.role === 'Staff' && isShopId(auditUser.shopId)) {
+    if (auditUser.shopId !== existingPayment.shopId) {
+      throw new Error('This payment belongs to another shop and cannot be edited by this staff account.');
+    }
+    shopId = auditUser.shopId;
+  }
+
+  return {
+    ...legacyFields,
+    shopId,
+    branchSystemVersion: BRANCH_SYSTEM_VERSION,
+    affectsShopCash: payment.affectsShopCash ?? existingPayment.affectsShopCash ?? true
+  };
+};
+
+const combineShopCashAdjustments = (adjustments: ShopCashAdjustment[]) => {
+  const totals = adjustments.reduce((result, adjustment) => {
+    result.set(adjustment.shopId, (result.get(adjustment.shopId) ?? 0) + adjustment.amount);
+    return result;
+  }, new Map<ShopId, number>());
+
+  return [...totals.entries()]
+    .map(([shopId, amount]) => ({ shopId, amount }))
+    .filter((adjustment) => adjustment.amount !== 0);
+};
+
+type ShopCashCrmOperation = {
+  id: string;
+  type: 'payment' | 'invoice_delete';
+};
+
+const applyShopCashAdjustments = (
+  transaction: Transaction,
+  adjustments: ShopCashAdjustment[],
+  timestamp: string,
+  operation: ShopCashCrmOperation
+) => {
+  combineShopCashAdjustments(adjustments).forEach(({ shopId, amount }) => {
+    transaction.set(doc(db, SHOP_CASH, shopId), {
+      shopId,
+      availableBalance: increment(amount),
+      totalCollections: increment(amount),
+      lastCashOperationId: operation.id,
+      lastCashOperationType: operation.type,
+      updatedAt: timestamp
+    }, { merge: true });
+  });
+};
+
 const buildOpeningBalanceInvoicePayload = (customerId: string, customer: CustomerFormData, amount: number, createdAt: string) => {
   const customerCreationDate = createdAt.slice(0, 10);
 
@@ -527,7 +676,9 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     totalProfit,
     notes: String(data.notes || ''),
     createdAt: String(data.createdAt || ''),
-    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
+    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+    shopId: isShopId(data.shopId) ? data.shopId : undefined,
+    branchSystemVersion: data.branchSystemVersion === undefined ? undefined : numberOrZero(data.branchSystemVersion)
   };
 };
 
@@ -564,7 +715,11 @@ const mapPaymentDoc = (id: string, data: Record<string, unknown>): Payment => {
     mode: (data.mode as Payment['mode']) || 'Cash',
     notes: String(data.notes || ''),
     createdAt: String(data.createdAt || ''),
-    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
+    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+    shopId: isShopId(data.shopId) ? data.shopId : undefined,
+    branchSystemVersion: data.branchSystemVersion === undefined ? undefined : numberOrZero(data.branchSystemVersion),
+    affectsShopCash: data.affectsShopCash === undefined ? undefined : data.affectsShopCash === true,
+    cashSyncedAmount: data.cashSyncedAmount === undefined ? undefined : Math.max(0, numberOrZero(data.cashSyncedAmount))
   };
 };
 
@@ -1001,6 +1156,7 @@ export const mapUserProfileDoc = (id: string, data: Record<string, unknown>): Us
   role: parseUserRole(data.role),
   customerId: data.customerId ? String(data.customerId) : undefined,
   customerName: data.customerName ? String(data.customerName) : undefined,
+  shopId: isShopId(data.shopId) ? data.shopId : undefined,
   active: data.active !== false,
   createdAt: String(data.createdAt || ''),
   updatedAt: data.updatedAt ? String(data.updatedAt) : undefined
@@ -1304,6 +1460,7 @@ export const getNextInvoiceNumber = async (settings?: AppSettings, invoiceDate?:
 };
 
 export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditUser) => {
+  invoice = prepareNewInvoicePayload(invoice, auditUser);
   // Rebuild first so legacy overpayments are available as advance before this invoice is created.
   await syncCustomerFinancialSummary(invoice.customerId);
   const activeSettings = await getAppSettings();
@@ -1373,6 +1530,12 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
         cashDiscount: 0,
         mode: 'Other',
         notes: 'Automatically adjusted from customer advance',
+        ...(isBranchAwareRecord(invoice) ? {
+          shopId: invoice.shopId,
+          branchSystemVersion: BRANCH_SYSTEM_VERSION,
+          affectsShopCash: false,
+          cashSyncedAmount: 0
+        } : {}),
         createdAt: timestamp,
         updatedAt: timestamp
       });
@@ -1414,6 +1577,7 @@ export const updateInvoiceRecord = async (
   const existingInvoice = existingInvoiceSnapshot.exists() ? mapInvoiceDoc(existingInvoiceSnapshot.id, existingInvoiceSnapshot.data()) : undefined;
   if (!existingInvoice) throw new Error('Invoice record no longer exists. Refresh the list and try again.');
   if (!customer) throw new Error('Selected customer no longer exists.');
+  invoice = prepareExistingInvoicePayload(existingInvoice, invoice, auditUser);
   if (existingInvoice.customerId && existingInvoice.customerId !== invoice.customerId) {
     const postedPcSnapshot = await getDoc(doc(
       db,
@@ -1544,6 +1708,13 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
         });
       }
     });
+
+    applyShopCashAdjustments(
+      transaction,
+      paymentsToDelete.flatMap((payment) => buildShopCashAdjustments(payment)),
+      timestamp,
+      { id: invoiceId, type: 'invoice_delete' }
+    );
 
     paymentSnapshots.forEach((paymentSnapshot) => {
       if (paymentSnapshot.exists()) {
@@ -1889,6 +2060,7 @@ const runTransactionPostProcessing = async ({
 };
 
 export const createPayment = async (payment: PaymentFormData, auditUser?: AuditUser): Promise<PaymentSaveResult> => {
+  payment = prepareNewPaymentPayload(payment, auditUser);
   const paymentRef = doc(collection(db, PAYMENTS));
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
@@ -1901,7 +2073,12 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     const previousOutstandingAmount = customerSnapshot.exists() ? numberOrZero(customerSnapshot.data().previousOutstandingAmount) : 0;
     const allocation = buildAllocatedPaymentPayload(payment, previousOutstandingAmount);
 
-    allocatedPayment = allocation.payload;
+    allocatedPayment = {
+      ...allocation.payload,
+      ...(isBranchAwareRecord(allocation.payload) ? {
+        cashSyncedAmount: getNextCashSyncedAmount(allocation.payload)
+      } : {})
+    };
 
     if (customerSnapshot.exists() && allocation.payload.advanceCreatedAmount > 0) {
       transaction.update(customerRef, {
@@ -1916,6 +2093,12 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
       createdAt: timestamp,
       updatedAt: timestamp
     });
+    applyShopCashAdjustments(
+      transaction,
+      buildShopCashAdjustments(undefined, allocatedPayment),
+      timestamp,
+      { id: paymentRef.id, type: 'payment' }
+    );
   });
 
   const postProcessing = await runTransactionPostProcessing({
@@ -1952,6 +2135,7 @@ export const updatePaymentRecord = async (
   await runTransaction(db, async (transaction) => {
     const paymentSnapshot = await transaction.get(paymentRef);
     const existingPayment = paymentSnapshot.exists() ? mapPaymentDoc(paymentSnapshot.id, paymentSnapshot.data()) : undefined;
+    if (!existingPayment) throw new Error('Payment record no longer exists. Refresh the list and try again.');
     previousPayment = existingPayment;
 
     if (existingPayment?.paymentKind === 'advance_application') {
@@ -1991,11 +2175,17 @@ export const updatePaymentRecord = async (
         : newCustomerSnapshot?.exists()
           ? numberOrZero(newCustomerSnapshot.data().previousOutstandingAmount)
           : 0;
-    const allocation = buildAllocatedPaymentPayload(payment, newCustomerOldBalanceBeforePayment);
+    const preparedPayment = prepareExistingPaymentPayload(existingPayment, payment, auditUser);
+    const allocation = buildAllocatedPaymentPayload(preparedPayment, newCustomerOldBalanceBeforePayment);
     const oldAdvanceCreated = existingPayment?.advanceCreatedAmount ?? 0;
     const newAdvanceCreated = allocation.payload.advanceCreatedAmount;
 
-    allocatedPayment = allocation.payload;
+    allocatedPayment = {
+      ...allocation.payload,
+      ...(isBranchAwareRecord(allocation.payload) ? {
+        cashSyncedAmount: getNextCashSyncedAmount(allocation.payload)
+      } : {})
+    };
 
     if (oldCustomerId === payment.customerId) {
       const currentAdvance = newCustomerSnapshot?.exists()
@@ -2044,6 +2234,12 @@ export const updatePaymentRecord = async (
       ...allocatedPayment,
       updatedAt: timestamp
     });
+    applyShopCashAdjustments(
+      transaction,
+      buildShopCashAdjustments(existingPayment, allocatedPayment),
+      timestamp,
+      { id: paymentId, type: 'payment' }
+    );
   });
 
   const postProcessing = await runTransactionPostProcessing({
@@ -2075,6 +2271,7 @@ export const updatePaymentRecord = async (
 
 export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUser) => {
   const paymentRef = doc(db, PAYMENTS, paymentId);
+  const timestamp = nowIso();
   let deletedPayment: Payment | undefined;
 
   await runTransaction(db, async (transaction) => {
@@ -2105,11 +2302,17 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
         transaction.update(customerRef, {
           previousOutstandingAmount: Math.max(0, numberOrZero(customerSnapshot.data().previousOutstandingAmount) + oldBalanceAllocation),
           advanceBalance: nextAdvance,
-          updatedAt: nowIso()
+          updatedAt: timestamp
         });
       }
     }
 
+    applyShopCashAdjustments(
+      transaction,
+      buildShopCashAdjustments(deletedPayment),
+      timestamp,
+      { id: paymentId, type: 'payment' }
+    );
     transaction.delete(paymentRef);
   });
 

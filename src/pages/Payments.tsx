@@ -15,7 +15,7 @@ import {
   type PaymentSaveResult
 } from '../services/firestoreService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
-import type { Customer, Invoice, Payment, PaymentFormData } from '../types';
+import type { Customer, Invoice, Payment, PaymentFormData, ShopId } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
@@ -25,6 +25,7 @@ import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../ut
 import { allocateReceiptOldestFirst } from '../utils/paymentAllocation';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { summarizePaymentSaveResults } from '../utils/paymentSaveResult';
+import { BRANCH_SYSTEM_VERSION, getAssignedStaffShopId, getShopName, isBranchAwareRecord, isShopId, SHOP_OPTIONS } from '../utils/shops';
 
 const LIST_PAGE_SIZE = 1;
 const CUSTOMER_LIST_PAGE_SIZE = 3;
@@ -83,8 +84,16 @@ const Payments = () => {
   const auditUser = {
     userId: userProfile?.uid,
     userEmail: userProfile?.email,
-    role: userProfile?.role
+    role: userProfile?.role,
+    shopId: userProfile?.shopId
   };
+  const assignedStaffShopId = getAssignedStaffShopId(userProfile);
+  const isAdmin = userProfile?.role === 'Admin';
+  const formIsBranchAware = isBranchAwareRecord(formData);
+  const selectedShopId = isShopId(formData.shopId) ? formData.shopId : undefined;
+  const paymentUsesBranchCash = editingPaymentId
+    ? formIsBranchAware
+    : Boolean(assignedStaffShopId || selectedShopId);
 
   const loadData = async () => {
     try {
@@ -352,13 +361,26 @@ const Payments = () => {
     }));
   };
 
-  const canEditPayment = (payment: Payment) => payment.paymentKind !== 'advance_application';
+  const canEditPayment = (payment: Payment) => {
+    if (payment.paymentKind === 'advance_application') return false;
+    return !assignedStaffShopId || !isBranchAwareRecord(payment) || payment.shopId === assignedStaffShopId;
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
     if (!formData.customerId || formData.amount <= 0) {
       setError('Customer and payment amount are required.');
+      return;
+    }
+
+    if (isAdmin && !editingPaymentId && !selectedShopId) {
+      setError('Select a shop before adding this payment.');
+      return;
+    }
+
+    if (isAdmin && editingPaymentId && formIsBranchAware && !selectedShopId) {
+      setError('Select a shop before updating this payment.');
       return;
     }
 
@@ -464,7 +486,12 @@ const Payments = () => {
       amountAppliedToInvoice: payment.amountAppliedToInvoice,
       cashDiscount: payment.cashDiscount,
       mode: payment.mode,
-      notes: payment.notes
+      notes: payment.notes,
+      ...(isBranchAwareRecord(payment) ? {
+        shopId: payment.shopId,
+        branchSystemVersion: BRANCH_SYSTEM_VERSION,
+        affectsShopCash: payment.affectsShopCash ?? true
+      } : {})
     });
     setMessage('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -600,6 +627,29 @@ const Payments = () => {
             </select>
           </label>
 
+          {isAdmin && (!editingPaymentId || formIsBranchAware) ? <label style={labelStyle}>
+            Shop
+            <select
+              style={inputStyle}
+              required
+              value={formData.shopId ?? ''}
+              onChange={(event) => handleFieldChange('shopId', event.target.value as ShopId)}
+            >
+              <option value="">Select shop</option>
+              {SHOP_OPTIONS.map((shop) => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+            </select>
+          </label> : assignedStaffShopId && (!editingPaymentId || formIsBranchAware) ? <div style={labelStyle}>
+            Shop
+            <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
+              {getShopName(assignedStaffShopId)}
+            </div>
+          </div> : formIsBranchAware ? <div style={labelStyle}>
+            Shop
+            <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
+              {getShopName(formData.shopId)}
+            </div>
+          </div> : null}
+
           {formData.customerId && loadingCustomerPayments ? (
             <div style={{ gridColumn: '1 / -1', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12, background: 'var(--role-card-subtle)', color: '#D7DEEA', fontWeight: 800 }}>
               Loading customer payment history...
@@ -671,6 +721,15 @@ const Payments = () => {
             Payment Date
             <input style={inputStyle} type="date" value={formData.date} onChange={(event) => handleFieldChange('date', event.target.value)} />
           </label>
+
+          {paymentUsesBranchCash ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
+            <input
+              type="checkbox"
+              checked={formData.affectsShopCash === false}
+              onChange={(event) => setFormData((current) => ({ ...current, affectsShopCash: !event.target.checked }))}
+            />
+            Already accounted in shop cash
+          </label> : null}
 
           <label style={labelStyle}>
             Notes

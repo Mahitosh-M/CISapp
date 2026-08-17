@@ -9,9 +9,10 @@ import {
   getUserProfiles,
   updateUserProfileRecord,
 } from '../services/firestoreService';
-import type { Customer, UserProfile, UserRole } from '../types';
+import type { Customer, ShopId, UserProfile, UserRole } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { getShopName, SHOP_OPTIONS } from '../utils/shops';
 
 type AdminPanel = 'staff' | 'customers' | 'medicals' | null;
 
@@ -26,6 +27,7 @@ const Admin = () => {
   const [staffPassword, setStaffPassword] = useState('');
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [staffRole, setStaffRole] = useState<Extract<UserRole, 'Admin' | 'Staff'>>('Staff');
+  const [staffShopId, setStaffShopId] = useState<ShopId | ''>('');
   const [customerLoginId, setCustomerLoginId] = useState('');
   const [customerLoginEmail, setCustomerLoginEmail] = useState('');
   const [customerLoginPassword, setCustomerLoginPassword] = useState('');
@@ -78,8 +80,10 @@ const Admin = () => {
     const cleanName = staffName.trim();
     const cleanEmail = staffEmail.trim().toLowerCase();
 
-    if (!cleanName || !cleanEmail || !staffPassword) {
-      setAdminError('Name, email, and password are required.');
+    if (!cleanName || !cleanEmail || !staffPassword || (staffRole === 'Staff' && !staffShopId)) {
+      setAdminError(staffRole === 'Staff'
+        ? 'Name, email, password, and assigned shop are required.'
+        : 'Name, email, and password are required.');
       return;
     }
 
@@ -87,11 +91,12 @@ const Admin = () => {
       setSaving(true);
       setAdminError('');
       setMessage('');
-      await createStaffAuthAccount(cleanEmail, staffPassword, cleanName, staffRole);
+      await createStaffAuthAccount(cleanEmail, staffPassword, cleanName, staffRole, staffShopId || undefined);
       setStaffName('');
       setStaffEmail('');
       setStaffPassword('');
       setStaffRole('Staff');
+      setStaffShopId('');
       setMessage('Staff account created.');
       await loadAdminData();
     } catch (err) {
@@ -355,6 +360,13 @@ const Admin = () => {
               <option value="Admin">Admin</option>
             </select>
           </label>
+          {staffRole === 'Staff' ? <label style={{ fontWeight: 800 }}>
+            Assigned Shop
+            <select style={inputStyle} required value={staffShopId} onChange={(event) => setStaffShopId(event.target.value as ShopId | '')}>
+              <option value="">Select shop</option>
+              {SHOP_OPTIONS.map((shop) => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
+            </select>
+          </label> : null}
         </div>
         <button className="admin-button admin-button-primary" type="submit" disabled={saving} style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginTop: 16 }}>
           <UserPlus size={16} />Create User
@@ -421,13 +433,14 @@ const Admin = () => {
         <div className="admin-card-title"><Users size={18} />{activePanel === 'staff' ? 'Existing Staff & Admins' : activePanel === 'customers' ? 'Existing Customers' : 'Existing Medicals'}</div>
         <div style={{ color: '#D7DEEA', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
         {renderTable(
-          ['Name', 'Email', 'Role', 'Linked Customer', 'Active', 'Actions'],
+          ['Name', 'Email', 'Role', 'Shop', 'Linked Customer', 'Active', 'Actions'],
           <>
             {(activePanel === 'staff' ? sortedStaffUsers : activePanel === 'customers' ? sortedCustomerUsers : sortedMedicalUsers).map((user) => (
               <tr className="admin-table-row" key={user.id}>
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>
                 <td style={cellStyle}><strong>{user.role === 'customer' ? 'Customer' : user.role}</strong></td>
+                <td style={cellStyle}>{user.role === 'Staff' ? getShopName(user.shopId) : '-'}</td>
                 <td style={cellStyle}>{user.customerName || '-'}</td>
                 <td style={cellStyle}><span className={user.active ? 'admin-status active' : 'admin-status inactive'}>{user.active ? 'Yes' : 'No'}</span></td>
                 <td style={cellStyle}>

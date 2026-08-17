@@ -8,6 +8,8 @@ export type OnboardingStage = 'None' | 'Stage A' | 'Stage B' | 'Stage C' | 'Stag
 
 export type PaymentMode = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Card' | 'Other';
 
+export type ShopId = 'SHOP_A' | 'SHOP_S';
+
 export type UserRole = 'Admin' | 'Staff' | 'customer' | 'Medical';
 
 export type CreditStatus = 'starter' | 'active' | 'hold' | 'disabled';
@@ -184,6 +186,8 @@ export interface Invoice {
   notes: string;
   createdAt: string;
   updatedAt?: string;
+  shopId?: ShopId;
+  branchSystemVersion?: number;
 }
 
 export interface Payment {
@@ -214,6 +218,10 @@ export interface Payment {
   notes: string;
   createdAt: string;
   updatedAt?: string;
+  shopId?: ShopId;
+  branchSystemVersion?: number;
+  affectsShopCash?: boolean;
+  cashSyncedAmount?: number;
 }
 
 export interface UserProfile {
@@ -224,6 +232,7 @@ export interface UserProfile {
   role: UserRole;
   customerId?: string;
   customerName?: string;
+  shopId?: ShopId;
   active: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -419,6 +428,8 @@ export interface InvoiceFormData {
   totalCost: number;
   totalProfit: number;
   notes: string;
+  shopId?: ShopId;
+  branchSystemVersion?: number;
 }
 
 export interface PaymentFormData {
@@ -436,6 +447,10 @@ export interface PaymentFormData {
   splitPaymentCount?: number;
   mode: PaymentMode;
   notes: string;
+  shopId?: ShopId;
+  branchSystemVersion?: number;
+  affectsShopCash?: boolean;
+  cashSyncedAmount?: number;
 }
 
 export interface ScoreBreakdownItem {
