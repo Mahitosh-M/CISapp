@@ -208,7 +208,8 @@ service cloud.firestore {
             && data.lastCashOperationId.size() > 0
             && data.lastCashOperationId.size() <= 160
             && data.lastCashOperationType in [
-              'payment', 'invoice_delete', 'expense', 'transfer', 'transfer_edit', 'adjustment', 'initialization'
+              'payment', 'invoice_delete', 'expense', 'transfer', 'transfer_edit', 'transfer_delete',
+              'adjustment', 'initialization'
             ])
         )
         && (
@@ -616,6 +617,113 @@ service cloud.firestore {
             && request.resource.data.availableBalance - resource.data.availableBalance == amountDelta
             && cashNumber(request.resource.data, 'totalTransferredIn')
               - cashNumber(resource.data, 'totalTransferredIn') == amountDelta)
+        );
+    }
+
+    function transferDeleteSummaryMatches(transferId, shopId, balanceDelta, totalField, totalDelta) {
+      let summaryPath = cashSummaryPath(shopId);
+      let summaryAfter = getAfter(summaryPath);
+      return exists(summaryPath)
+        && existsAfter(summaryPath)
+        && isInitializedShopCash(get(summaryPath).data)
+        && summaryAfter.data.lastCashOperationId == transferId
+        && summaryAfter.data.lastCashOperationType == 'transfer_delete'
+        && summaryAfter.data.availableBalance - get(summaryPath).data.availableBalance == balanceDelta
+        && cashNumber(summaryAfter.data, totalField)
+          - cashNumber(get(summaryPath).data, totalField) == totalDelta;
+    }
+
+    function validStoredTransferForDelete(data, transferId) {
+      return transferId.size() > 0
+        && transferId.size() <= 160
+        && data.keys().hasAll([
+          'fromShopId', 'toShopId', 'amount', 'note', 'createdAt', 'createdBy'
+        ])
+        && data.keys().hasOnly([
+          'fromShopId', 'toShopId', 'amount', 'note', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && validShopId(data.fromShopId)
+        && validShopId(data.toShopId)
+        && data.fromShopId != data.toShopId
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 100000000
+        && data.note is string
+        && data.note.size() <= 160
+        && data.createdAt is timestamp
+        && data.createdBy is string
+        && data.createdBy.size() > 0
+        && data.createdBy.size() <= 160
+        && (
+          (!('updatedAt' in data) && !('updatedBy' in data))
+          || (data.updatedAt is timestamp
+            && data.updatedBy is string
+            && data.updatedBy.size() > 0
+            && data.updatedBy.size() <= 160)
+        );
+    }
+
+    function validTransferAuditDelete(transferId) {
+      let transfer = resource.data;
+      let senderPath = cashSummaryPath(transfer.fromShopId);
+      let receiverPath = cashSummaryPath(transfer.toShopId);
+      return isAdmin()
+        && validStoredTransferForDelete(transfer, transferId)
+        && !existsAfter(shopTransferPath(transferId))
+        && transferDeleteSummaryMatches(
+          transferId,
+          transfer.fromShopId,
+          transfer.amount,
+          'totalTransferredOut',
+          -transfer.amount
+        )
+        && transferDeleteSummaryMatches(
+          transferId,
+          transfer.toShopId,
+          -transfer.amount,
+          'totalTransferredIn',
+          -transfer.amount
+        )
+        && cashNumber(getAfter(senderPath).data, 'totalTransferredOut') >= 0
+        && cashNumber(getAfter(receiverPath).data, 'totalTransferredIn') >= 0;
+    }
+
+    function validTransferDeleteShopCashUpdate(shopId) {
+      let transferId = request.resource.data.lastCashOperationId;
+      let transferPath = shopTransferPath(transferId);
+      let transferBefore = get(transferPath);
+      return isAdmin()
+        && exists(transferPath)
+        && !existsAfter(transferPath)
+        && validStoredTransferForDelete(transferBefore.data, transferId)
+        && isInitializedShopCash(resource.data)
+        && (
+          (shopId == transferBefore.data.fromShopId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'availableBalance',
+              'totalTransferredOut',
+              'lastCashOperationId',
+              'lastCashOperationType',
+              'updatedAt'
+            ])
+            && request.resource.data.availableBalance - resource.data.availableBalance
+              == transferBefore.data.amount
+            && cashNumber(request.resource.data, 'totalTransferredOut')
+              - cashNumber(resource.data, 'totalTransferredOut') == -transferBefore.data.amount
+            && cashNumber(request.resource.data, 'totalTransferredOut') >= 0)
+          || (shopId == transferBefore.data.toShopId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'availableBalance',
+              'totalTransferredIn',
+              'lastCashOperationId',
+              'lastCashOperationType',
+              'updatedAt'
+            ])
+            && request.resource.data.availableBalance - resource.data.availableBalance
+              == -transferBefore.data.amount
+            && cashNumber(request.resource.data, 'totalTransferredIn')
+              - cashNumber(resource.data, 'totalTransferredIn') == -transferBefore.data.amount
+            && cashNumber(request.resource.data, 'totalTransferredIn') >= 0)
         );
     }
 
@@ -1787,6 +1895,8 @@ service cloud.firestore {
             && validTransferShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'transfer_edit'
             && validTransferEditShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'transfer_delete'
+            && validTransferDeleteShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'adjustment'
             && validAdjustmentShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'initialization'
@@ -1810,7 +1920,7 @@ service cloud.firestore {
         && resource.data.toShopId == profile().shopId;
       allow create: if validTransferAuditCreate(transferId);
       allow update: if validTransferAuditUpdate(transferId);
-      allow delete: if false;
+      allow delete: if validTransferAuditDelete(transferId);
     }
 
     match /cashAdjustments/{adjustmentId} {

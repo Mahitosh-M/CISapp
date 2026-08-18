@@ -429,6 +429,36 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     return batch;
   };
 
+  const deleteTransferBatch = (
+    testDatabase: unknown,
+    amount = 200,
+    transferId = 'existing-transfer',
+    senderBalanceDelta = amount,
+    receiverBalanceDelta = -amount,
+    includeReceiver = true
+  ) => {
+    const database = testDatabase as Firestore;
+    const batch = writeBatch(database);
+    batch.update(doc(database, 'shopCash', 'SHOP_A'), {
+      availableBalance: increment(senderBalanceDelta),
+      totalTransferredOut: increment(-amount),
+      lastCashOperationId: transferId,
+      lastCashOperationType: 'transfer_delete',
+      updatedAt: timestamp
+    });
+    if (includeReceiver) {
+      batch.update(doc(database, 'shopCash', 'SHOP_S'), {
+        availableBalance: increment(receiverBalanceDelta),
+        totalTransferredIn: increment(-amount),
+        lastCashOperationId: transferId,
+        lastCashOperationType: 'transfer_delete',
+        updatedAt: timestamp
+      });
+    }
+    batch.delete(doc(database, 'shopTransfers', transferId));
+    return batch;
+  };
+
   const addAdjustmentBatch = (
     testDatabase: unknown,
     shopId: 'SHOP_A' | 'SHOP_S',
@@ -835,6 +865,7 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await seedExistingTransfer();
     const database = testEnvironment.authenticatedContext('team-user').firestore();
 
+    await assertFails(getDoc(doc(database, 'shopCash', 'SHOP_S')));
     await assertSucceeds(editTransferBatch(database, 250).commit());
 
     const transfer = await getDoc(doc(database, 'shopTransfers', 'existing-transfer'));
@@ -891,6 +922,36 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
       expect(receiver.data()?.availableBalance).toBe(-50);
       expect(receiver.data()?.totalTransferredIn).toBe(350);
     });
+  });
+
+  it('allows Admin to delete a transfer only while atomically reversing both shop summaries', async () => {
+    await seed('Admin');
+    await seedInitializedShops();
+    await seedExistingTransfer();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(deleteTransferBatch(database).commit());
+
+    expect((await getDoc(doc(database, 'shopTransfers', 'existing-transfer'))).exists()).toBe(false);
+    const sender = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    const receiver = await getDoc(doc(database, 'shopCash', 'SHOP_S'));
+    expect(sender.data()?.availableBalance).toBe(10_200);
+    expect(sender.data()?.totalTransferredOut).toBe(300);
+    expect(receiver.data()?.availableBalance).toBe(19_800);
+    expect(receiver.data()?.totalTransferredIn).toBe(300);
+  });
+
+  it('denies Staff and incomplete or mismatched transfer deletions', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    await seedExistingTransfer();
+    const staffDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(deleteTransferBatch(staffDatabase).commit());
+
+    await seed('Admin');
+    const adminDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(deleteTransferBatch(adminDatabase, 200, 'existing-transfer', 200, -200, false).commit());
+    await assertFails(deleteTransferBatch(adminDatabase, 200, 'existing-transfer', 199).commit());
   });
 
   it('allows Admin to add or deduct an exact audited amount without changing collections', async () => {
