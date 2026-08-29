@@ -7,6 +7,8 @@ import { getTodayDateString } from '../../utils/dateUtils';
 import { calculateCustomerTotalOutstanding, calculateInvoiceApcInfo, getInvoiceFullPaymentDate, isCurrentMonth } from '../../utils/customerPortal';
 import { formatApc } from '../../utils/loyalty';
 import { getBusinessInvoices, getInvoiceDisplayNumber } from '../../utils/openingBalance';
+import { getInvoicePaymentEffect } from '../../utils/paymentUtils';
+import type { Invoice, Payment } from '../../types';
 
 type PcHistoryFilter = 'all' | 'purchase' | 'bonus' | 'overdue';
 
@@ -19,6 +21,122 @@ interface PcHistoryItem {
   date: string;
 }
 
+interface OutstandingHistoryItem {
+  id: string;
+  date: string;
+  paymentAmount: number;
+  previousOutstanding: number;
+  currentOutstanding: number;
+}
+
+interface PaymentLedgerEvent {
+  id: string;
+  type: 'payment';
+  date: string;
+  createdAt?: string;
+  order: number;
+  amount: number;
+}
+
+const splitPaymentPattern = /Split payment\s+(\d+)\/(\d+)/i;
+
+const getPaymentOutstandingEffect = (payment: Payment) => (
+  getInvoicePaymentEffect(payment) + Math.max(0, payment.amountUsedForOldBalance ?? 0)
+);
+
+const getPaymentGroupKey = (payment: Payment) => {
+  if (payment.splitPaymentGroupId) return `split:${payment.splitPaymentGroupId}`;
+
+  const splitMatch = payment.notes.match(splitPaymentPattern);
+  if (!splitMatch) return `payment:${payment.id}`;
+
+  const baseNotes = payment.notes.replace(/\s*\|?\s*Split payment\s+\d+\/\d+/i, '').trim();
+  return `legacy-split:${payment.customerId}|${payment.date}|${payment.mode}|${baseNotes}|${splitMatch[2]}`;
+};
+
+const buildPaymentLedgerEvents = (payments: Payment[]) => {
+  const groupedEvents = new Map<string, PaymentLedgerEvent>();
+
+  payments.forEach((payment) => {
+    const groupKey = getPaymentGroupKey(payment);
+    const existingEvent = groupedEvents.get(groupKey);
+    const paymentEffect = getPaymentOutstandingEffect(payment);
+
+    if (existingEvent) {
+      existingEvent.amount += paymentEffect;
+
+      if ((payment.createdAt ?? '') > (existingEvent.createdAt ?? '')) {
+        existingEvent.createdAt = payment.createdAt;
+      }
+      return;
+    }
+
+    groupedEvents.set(groupKey, {
+      id: groupKey,
+      type: 'payment',
+      date: payment.date,
+      createdAt: payment.createdAt,
+      order: 1,
+      amount: paymentEffect
+    });
+  });
+
+  return Array.from(groupedEvents.values());
+};
+
+const compareLedgerDates = (
+  left: { date: string; createdAt?: string; id: string; order: number },
+  right: { date: string; createdAt?: string; id: string; order: number }
+) => (
+  left.date.localeCompare(right.date)
+  || (left.createdAt ?? '').localeCompare(right.createdAt ?? '')
+  || left.order - right.order
+  || left.id.localeCompare(right.id)
+);
+
+export const buildOutstandingHistory = (
+  invoices: Invoice[],
+  payments: Payment[],
+  currentOutstanding: number
+): OutstandingHistoryItem[] => {
+  const events = [
+    ...invoices.map((invoice) => ({
+      id: invoice.id,
+      type: 'invoice' as const,
+      date: invoice.date,
+      createdAt: invoice.createdAt,
+      order: 0,
+      amount: Math.max(0, invoice.totalSales || invoice.salesAmount)
+    })),
+    ...buildPaymentLedgerEvents(payments)
+  ].sort(compareLedgerDates).reverse();
+
+  let runningOutstanding = Math.max(0, currentOutstanding);
+  const history: OutstandingHistoryItem[] = [];
+
+  for (const event of events) {
+    if (event.type === 'invoice') {
+      runningOutstanding = Math.max(0, runningOutstanding - event.amount);
+      continue;
+    }
+
+    if (event.amount <= 0) continue;
+
+    history.push({
+      id: event.id,
+      date: event.date,
+      paymentAmount: event.amount,
+      previousOutstanding: runningOutstanding + event.amount,
+      currentOutstanding: runningOutstanding
+    });
+    runningOutstanding += event.amount;
+
+    if (history.length === 3) break;
+  }
+
+  return history;
+};
+
 const CustomerDashboard = () => {
   const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests, refreshPcBalance } = useCustomerPortalContext();
   const navigate = useNavigate();
@@ -30,8 +148,6 @@ const CustomerDashboard = () => {
   const [pcBalanceChange, setPcBalanceChange] = useState<number | null>(null);
   const [showCurrentMonthBonusCredit, setShowCurrentMonthBonusCredit] = useState(false);
   const totalOutstanding = customer?.totalOutstandingAmount ?? calculateCustomerTotalOutstanding(customer, invoiceViews);
-  const overdueInvoices = invoiceViews.filter((invoice) => invoice.outstandingAmount > 0 && invoice.daysRemaining < 0);
-  const overdueAmount = overdueInvoices.reduce((sum, invoice) => sum + invoice.outstandingAmount, 0);
   const currentMonthBonusRequests = bonusPcRequests.filter((request) => isCurrentMonth((request.reviewedAt || request.generatedAt).slice(0, 10)));
   const currentMonthBonusPc = currentMonthBonusRequests.reduce((sum, request) => sum + request.approvedCoins, 0);
   const currentMonthBonusNoticeKey = customer?.id
@@ -42,7 +158,6 @@ const CustomerDashboard = () => {
     [currentMonthBonusRequests]
   );
   const pcBalance = apcSummary?.apcBalance ?? 0;
-  const pcProgressPercent = apcSummary?.progressPercent ?? 0;
   const currentMonthPcHistory: PcHistoryItem[] = [
     ...(customer
       ? getBusinessInvoices(invoices)
@@ -84,6 +199,10 @@ const CustomerDashboard = () => {
   ].filter((item) => item.points > 0).sort((left, right) => right.date.localeCompare(left.date));
   const currentMonthTotalPc = currentMonthPcHistory.reduce((sum, item) => sum + item.points, 0);
   const visiblePcHistory = pcHistoryFilter === 'all' ? currentMonthPcHistory : currentMonthPcHistory.filter((item) => item.type === pcHistoryFilter);
+  const outstandingHistory = useMemo(
+    () => buildOutstandingHistory(invoices, payments, totalOutstanding),
+    [invoices, payments, totalOutstanding]
+  );
   const pcHistoryFilters: { key: PcHistoryFilter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'purchase', label: 'Purchase' },
@@ -235,30 +354,12 @@ const CustomerDashboard = () => {
           </button>
         </div>
 
-        <div style={{ position: 'relative', marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#DDE6F2', fontSize: 12, fontWeight: 900, marginBottom: 7 }}>
-            <span>Next level progress</span>
-            <span>{pcProgressPercent}%</span>
-          </div>
-          <div style={{ height: 12, borderRadius: 999, background: 'rgba(255,255,255,0.16)', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${pcProgressPercent}%`,
-                height: '100%',
-                borderRadius: 999,
-                background: 'linear-gradient(90deg, #D4AF37 0%, #FDE68A 100%)',
-                transition: 'width 420ms ease'
-              }}
-            />
-          </div>
-        </div>
-
         <button
           type="button"
           onClick={() => navigate('/customer/partner-points')}
           style={{
             position: 'relative',
-            marginTop: 14,
+            marginTop: 12,
             width: '100%',
             border: 0,
             borderRadius: 16,
@@ -357,11 +458,29 @@ const CustomerDashboard = () => {
       ) : null}
 
       <div style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 12 }}>
-        <div style={{ color: '#D4AF37', fontWeight: 900 }}>Total Outstanding</div>
-        <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{formatMoney(totalOutstanding)}</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, color: overdueInvoices.length > 0 ? '#FCA5A5' : '#BFC8D9' }}>
-          <AlertTriangle size={17} />
-          {overdueInvoices.length} overdue invoice(s), {formatMoney(overdueAmount)}
+        <div style={{ color: '#D4AF37', fontWeight: 900, textAlign: 'center' }}>Total Outstanding</div>
+        <div style={{ color: '#FF7B7B', fontSize: 30, fontWeight: 900, marginTop: 6, textAlign: 'center' }}>{formatMoney(totalOutstanding)}</div>
+
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.18)' }}>
+          <div style={{ color: '#FDE68A', fontSize: 13, fontWeight: 900, marginBottom: 9 }}>Outstanding Record</div>
+          {outstandingHistory.length === 0 ? (
+            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 700 }}>No outstanding transactions found.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {outstandingHistory.map((item) => (
+                <div key={item.id} style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 8, padding: '9px 10px' }}>
+                  <div style={{ color: '#BFC8D9', fontSize: 11, fontWeight: 800, marginBottom: 5 }}>{formatDate(item.date)}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, color: '#FFFFFF', fontSize: 12, fontWeight: 900 }}>
+                    <span>{formatMoney(item.previousOutstanding)}</span>
+                    <span style={{ color: '#FDE68A' }}>-</span>
+                    <span style={{ color: '#BBF7D0' }}>{formatMoney(item.paymentAmount)}</span>
+                    <span style={{ color: '#FDE68A' }}>=</span>
+                    <span style={{ color: '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

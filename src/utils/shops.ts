@@ -26,6 +26,15 @@ export interface ShopCashAdjustment {
   amount: number;
 }
 
+export interface ShopContributionRow {
+  shopId: ShopId;
+  name: string;
+  sales: number;
+  profit: number;
+  salesPercent: number;
+  profitPercent: number;
+}
+
 export const isShopId = (value: unknown): value is ShopId => value === 'SHOP_A' || value === 'SHOP_S';
 
 export const getShopName = (shopId?: ShopId) => {
@@ -57,6 +66,39 @@ export const filterRecordsForShopScope = <T extends BranchRecord>(records: T[], 
 export const getContributionPercent = (part: number, total: number) => {
   if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return undefined;
   return (part / total) * 100;
+};
+
+export const buildShopContributionRows = (
+  records: Array<BranchRecord & { totalSales: number; totalProfit: number }>
+): ShopContributionRow[] => {
+  const totalsByShop = new Map<ShopId, { sales: number; profit: number }>(
+    SHOP_OPTIONS.map(({ id }) => [id, { sales: 0, profit: 0 }])
+  );
+
+  records.forEach((record) => {
+    if (!isBranchAwareRecord(record)) return;
+
+    const current = totalsByShop.get(record.shopId) ?? { sales: 0, profit: 0 };
+    totalsByShop.set(record.shopId, {
+      sales: current.sales + Math.max(0, Number(record.totalSales) || 0),
+      profit: current.profit + (Number(record.totalProfit) || 0)
+    });
+  });
+
+  const totalSales = Array.from(totalsByShop.values()).reduce((sum, row) => sum + row.sales, 0);
+  const totalPositiveProfit = Array.from(totalsByShop.values()).reduce((sum, row) => sum + Math.max(0, row.profit), 0);
+
+  return SHOP_OPTIONS.map(({ id, name }) => {
+    const totals = totalsByShop.get(id) ?? { sales: 0, profit: 0 };
+    return {
+      shopId: id,
+      name,
+      sales: totals.sales,
+      profit: totals.profit,
+      salesPercent: getContributionPercent(totals.sales, totalSales) ?? 0,
+      profitPercent: getContributionPercent(Math.max(0, totals.profit), totalPositiveProfit) ?? 0
+    };
+  });
 };
 
 // V1 treats every real receipt as branch funds. Keeping this policy isolated

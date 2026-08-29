@@ -17,16 +17,24 @@ import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import {
+  buildShopContributionRows,
   filterRecordsForShopScope,
   getContributionPercent,
   getShopName,
-  isBranchAwareRecord,
   SHOP_OPTIONS,
   type AnalyticsShopScope
 } from '../utils/shops';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
 type AnalyticsSection = 'overview' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
+
+interface ShopPieDatum {
+  shopId: string;
+  name: string;
+  value: number;
+  displayValue: number;
+  percent: number;
+}
 
 const analyticsSections = [
   { id: 'overview', label: 'Performance Overview', icon: BarChart3 },
@@ -163,7 +171,7 @@ const Analytics = () => {
     const needsDetailedData = !completeMonthRange
       || !monthlySnapshotsReady
       || analyticsScope !== 'overall'
-      || Boolean(activeSection && ['contribution', 'insights', 'briefing'].includes(activeSection));
+      || Boolean(activeSection && ['overview', 'contribution', 'insights', 'briefing'].includes(activeSection));
     if (!needsDetailedData || detailedDataLoaded) return;
     let active = true;
     setLoading(true);
@@ -198,21 +206,39 @@ const Analytics = () => {
     return filterRecordsForShopScope(dateRows, analyticsScope);
   }, [activeFromDate, activeToDate, analyticsScope, payments]);
 
+  const shopContributionRows = useMemo(() => {
+    const dateRows = getBusinessInvoices(invoices)
+      .filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
+    return buildShopContributionRows(dateRows);
+  }, [activeFromDate, activeToDate, invoices]);
+
   const branchContribution = useMemo(() => {
     if (analyticsScope === 'overall') return undefined;
-    const allBranchInvoices = getBusinessInvoices(invoices)
-      .filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate))
-      .filter(isBranchAwareRecord);
-    const branchAwareSales = allBranchInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-    const branchAwareProfit = allBranchInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
-    const shopSales = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0);
-    const shopProfit = filteredInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0);
+    const selectedShop = shopContributionRows.find((row) => row.shopId === analyticsScope);
+    const branchAwareSales = shopContributionRows.reduce((sum, row) => sum + row.sales, 0);
+    const branchAwareProfit = shopContributionRows.reduce((sum, row) => sum + row.profit, 0);
 
     return {
-      salesPercent: getContributionPercent(shopSales, branchAwareSales),
-      profitPercent: getContributionPercent(shopProfit, branchAwareProfit)
+      salesPercent: getContributionPercent(selectedShop?.sales ?? 0, branchAwareSales),
+      profitPercent: getContributionPercent(selectedShop?.profit ?? 0, branchAwareProfit)
     };
-  }, [activeFromDate, activeToDate, analyticsScope, filteredInvoices, invoices]);
+  }, [analyticsScope, shopContributionRows]);
+
+  const shopSalesPieRows = useMemo<ShopPieDatum[]>(() => shopContributionRows.map((row) => ({
+    shopId: row.shopId,
+    name: row.name,
+    value: Math.max(0, row.sales),
+    displayValue: row.sales,
+    percent: row.salesPercent
+  })), [shopContributionRows]);
+
+  const shopProfitPieRows = useMemo<ShopPieDatum[]>(() => shopContributionRows.map((row) => ({
+    shopId: row.shopId,
+    name: row.name,
+    value: Math.max(0, row.profit),
+    displayValue: row.profit,
+    percent: row.profitPercent
+  })), [shopContributionRows]);
 
   const invoiceIds = useMemo(() => new Set(filteredInvoices.map((invoice) => invoice.id)), [filteredInvoices]);
 
@@ -599,6 +625,88 @@ const Analytics = () => {
     </div>
   );
 
+  const renderShopContributionPie = (
+    title: string,
+    description: string,
+    rows: ShopPieDatum[],
+    gradientPrefix: string
+  ) => {
+    const hasChartData = rows.some((row) => row.value > 0);
+    const combinedValue = rows.reduce((sum, row) => sum + row.displayValue, 0);
+
+    return (
+      <div style={{ ...cardStyle, minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ color: '#D4AF37', fontWeight: 900 }}>{title}</div>
+        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800, marginTop: 4 }}>{description}</div>
+
+        <div style={{ position: 'relative', height: isMobile ? 230 : 270, marginTop: 8 }}>
+          {hasChartData ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <defs>
+                    <linearGradient id={`${gradientPrefix}-ashoka`} x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#FDE68A" />
+                      <stop offset="100%" stopColor="#D4AF37" />
+                    </linearGradient>
+                    <linearGradient id={`${gradientPrefix}-smpa`} x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#56CCF2" />
+                      <stop offset="100%" stopColor="#2F80ED" />
+                    </linearGradient>
+                  </defs>
+                  <Pie
+                    data={rows}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={isMobile ? 58 : 68}
+                    outerRadius={isMobile ? 88 : 104}
+                    paddingAngle={4}
+                    cornerRadius={8}
+                    stroke="rgba(255,255,255,0.18)"
+                    strokeWidth={2}
+                  >
+                    {rows.map((row, index) => (
+                      <Cell
+                        key={row.shopId}
+                        fill={`url(#${gradientPrefix}-${index === 0 ? 'ashoka' : 'smpa'})`}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: '#11185A', border: '1px solid rgba(212,175,55,0.45)', borderRadius: 8, color: '#FFFFFF' }}
+                    formatter={(value, name, item) => [
+                      formatMoney(Number((item.payload as ShopPieDatum).displayValue ?? value)),
+                      `${name} (${formatPercent((item.payload as ShopPieDatum).percent)})`
+                    ]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeContent: 'center', textAlign: 'center', pointerEvents: 'none' }}>
+                <div style={{ color: '#D7DEEA', fontSize: 11, fontWeight: 800 }}>Combined</div>
+                <div style={{ color: '#FFFFFF', fontSize: isMobile ? 15 : 17, fontWeight: 900, marginTop: 3 }}>{formatMoney(combinedValue)}</div>
+              </div>
+            </>
+          ) : (
+            <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No branch-aware data</div>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 2 }}>
+          {rows.map((row, index) => (
+            <div key={row.shopId} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center', gap: 9, minWidth: 0 }}>
+              <span style={{ width: 11, height: 11, borderRadius: '50%', background: index === 0 ? '#D4AF37' : '#56CCF2', boxShadow: `0 0 0 4px ${index === 0 ? 'rgba(212,175,55,0.16)' : 'rgba(86,204,242,0.16)'}` }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: '#FFFFFF', fontSize: 12, fontWeight: 900 }}>{row.name}</div>
+                <div style={{ color: '#D7DEEA', fontSize: 11, fontWeight: 800, marginTop: 2 }}>{formatMoney(row.displayValue)}</div>
+              </div>
+              <div style={{ color: index === 0 ? '#FDE68A' : '#8DDCFA', fontSize: 16, fontWeight: 900 }}>{formatPercent(row.percent)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return <SectionHeader title="Analytics" description="Loading Firestore analytics..." />;
   }
@@ -649,7 +757,8 @@ const Analytics = () => {
 
       <SectionTileNav items={analyticsSections} activeId={activeSection} onSelect={setActiveSection} singleRow />
 
-      {activeSection === 'overview' ? <div style={gridStyle}>
+      {activeSection === 'overview' ? <>
+          <div style={gridStyle}>
             <div style={cardStyle}>
               <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Sales</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.sales)}</div>
@@ -684,7 +793,15 @@ const Analytics = () => {
               </div>
               <div style={{ color: '#D7DEEA', marginTop: 6 }}>Share of branch-aware gross profit</div>
             </div> : null}
-          </div> : null}
+          </div>
+
+          {analyticsScope === 'overall' ? (
+            <div style={{ ...gridStyle, gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))' }}>
+              {renderShopContributionPie('Sales Contribution by Shop', 'Share of branch-aware sales data for the selected period.', shopSalesPieRows, 'shop-sales')}
+              {renderShopContributionPie('Profit Contribution by Shop', 'Share of positive branch-aware gross profit for the selected period.', shopProfitPieRows, 'shop-profit')}
+            </div>
+          ) : null}
+        </> : null}
 
           {activeSection === 'breakeven' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>

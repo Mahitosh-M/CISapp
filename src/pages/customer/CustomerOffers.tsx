@@ -42,9 +42,6 @@ const CustomerOffers = () => {
             <Tags size={18} color="#D4AF37" />
             No active offers
           </div>
-          <div style={{ marginTop: 8, fontSize: 13 }}>
-            Future improvement: Admin can upload offer poster images to Firebase Storage and save the image URL in Firestore.
-          </div>
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollSnapType: 'x mandatory', paddingBottom: 12 }}>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Payment } from '../types';
 import {
   BRANCH_SYSTEM_VERSION,
+  buildShopContributionRows,
   buildShopCashAdjustments,
   filterRecordsForShopScope,
   getContributionPercent,
@@ -97,6 +98,20 @@ describe('shop analytics helpers', () => {
   it('returns no contribution percentage for a zero or invalid denominator', () => {
     expect(getContributionPercent(2500, 10000)).toBe(25);
     expect(getContributionPercent(0, 0)).toBeUndefined();
+  });
+
+  it('builds shop shares from branch-aware records only', () => {
+    const rows = buildShopContributionRows([
+      { shopId: 'SHOP_A', branchSystemVersion: 1, totalSales: 6_000, totalProfit: 1_200 },
+      { shopId: 'SHOP_S', branchSystemVersion: 1, totalSales: 4_000, totalProfit: -200 },
+      { totalSales: 9_000, totalProfit: 9_000 },
+      { shopId: 'SHOP_A', branchSystemVersion: 2, totalSales: 8_000, totalProfit: 8_000 }
+    ]);
+
+    expect(rows).toEqual([
+      { shopId: 'SHOP_A', name: 'ASHOKA', sales: 6_000, profit: 1_200, salesPercent: 60, profitPercent: 100 },
+      { shopId: 'SHOP_S', name: 'SMPA', sales: 4_000, profit: -200, salesPercent: 40, profitPercent: 0 }
+    ]);
   });
 });
 
