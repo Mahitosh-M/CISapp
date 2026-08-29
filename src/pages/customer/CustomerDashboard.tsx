@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, Coins, Gift, ReceiptText, Sparkles, Trophy, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ChevronDown, CircleDollarSign, Coins, Gift, ReceiptText, Sparkles, Trophy, Wallet } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatDate, formatMoney } from '../../utils/formatters';
 import { getTodayDateString } from '../../utils/dateUtils';
 import { calculateCustomerTotalOutstanding, calculateInvoiceApcInfo, getInvoiceFullPaymentDate, isCurrentMonth } from '../../utils/customerPortal';
 import { formatApc } from '../../utils/loyalty';
-import { getBusinessInvoices, getInvoiceDisplayNumber } from '../../utils/openingBalance';
+import { getBusinessInvoices, getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../../utils/openingBalance';
 import { getInvoicePaymentEffect } from '../../utils/paymentUtils';
 import type { Invoice, Payment } from '../../types';
 
@@ -23,8 +23,10 @@ interface PcHistoryItem {
 
 interface OutstandingHistoryItem {
   id: string;
+  type: 'invoice' | 'payment';
   date: string;
-  paymentAmount: number;
+  transactionAmount: number;
+  transactionCount: number;
   previousOutstanding: number;
   currentOutstanding: number;
 }
@@ -94,6 +96,14 @@ const compareLedgerDates = (
   || left.id.localeCompare(right.id)
 );
 
+const outstandingMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const formatOutstandingDate = (dateString: string) => {
+  const [, month = '', day = ''] = dateString.match(/^\d{4}-(\d{2})-(\d{2})/) ?? [];
+  const monthLabel = outstandingMonths[Number(month) - 1];
+  return monthLabel && day ? `${Number(day)} ${monthLabel}` : dateString;
+};
+
 export const buildOutstandingHistory = (
   invoices: Invoice[],
   payments: Payment[],
@@ -102,39 +112,72 @@ export const buildOutstandingHistory = (
   const events = [
     ...invoices.map((invoice) => ({
       id: invoice.id,
-      type: 'invoice' as const,
+      type: isOpeningBalanceInvoice(invoice) ? 'opening_balance' as const : 'invoice' as const,
       date: invoice.date,
       createdAt: invoice.createdAt,
       order: 0,
       amount: Math.max(0, invoice.totalSales || invoice.salesAmount)
     })),
-    ...buildPaymentLedgerEvents(payments)
+    ...buildPaymentLedgerEvents(payments).filter((payment) => payment.amount > 0)
   ].sort(compareLedgerDates).reverse();
 
   let runningOutstanding = Math.max(0, currentOutstanding);
-  const history: OutstandingHistoryItem[] = [];
+  const newestHistory: OutstandingHistoryItem[] = [];
+  let eventIndex = 0;
+  let paymentCount = 0;
 
-  for (const event of events) {
-    if (event.type === 'invoice') {
+  while (eventIndex < events.length) {
+    const event = events[eventIndex];
+
+    if (event.type === 'opening_balance') {
       runningOutstanding = Math.max(0, runningOutstanding - event.amount);
+      eventIndex += 1;
       continue;
     }
 
-    if (event.amount <= 0) continue;
+    if (event.type === 'payment') {
+      if (paymentCount === 3) break;
 
-    history.push({
-      id: event.id,
-      date: event.date,
-      paymentAmount: event.amount,
-      previousOutstanding: runningOutstanding + event.amount,
-      currentOutstanding: runningOutstanding
+      newestHistory.push({
+        id: event.id,
+        type: 'payment',
+        date: event.date,
+        transactionAmount: event.amount,
+        transactionCount: 1,
+        previousOutstanding: runningOutstanding + event.amount,
+        currentOutstanding: runningOutstanding
+      });
+      runningOutstanding += event.amount;
+      paymentCount += 1;
+      eventIndex += 1;
+      continue;
+    }
+
+    const currentAfterInvoices = runningOutstanding;
+    const latestInvoiceDate = event.date;
+    const invoiceIds: string[] = [];
+    let invoiceAmount = 0;
+
+    while (eventIndex < events.length && events[eventIndex].type === 'invoice') {
+      invoiceIds.push(events[eventIndex].id);
+      invoiceAmount += events[eventIndex].amount;
+      eventIndex += 1;
+    }
+
+    const previousBeforeInvoices = Math.max(0, currentAfterInvoices - invoiceAmount);
+    newestHistory.push({
+      id: `invoices:${invoiceIds.join(':')}`,
+      type: 'invoice',
+      date: latestInvoiceDate,
+      transactionAmount: invoiceAmount,
+      transactionCount: invoiceIds.length,
+      previousOutstanding: previousBeforeInvoices,
+      currentOutstanding: currentAfterInvoices
     });
-    runningOutstanding += event.amount;
-
-    if (history.length === 3) break;
+    runningOutstanding = previousBeforeInvoices;
   }
 
-  return history;
+  return newestHistory;
 };
 
 const CustomerDashboard = () => {
@@ -144,6 +187,7 @@ const CustomerDashboard = () => {
   const bonusNoticeKeyRef = useRef('');
   const bonusNoticeVisibleRef = useRef(false);
   const [showPcHistory, setShowPcHistory] = useState(false);
+  const [showOutstandingHistory, setShowOutstandingHistory] = useState(false);
   const [pcHistoryFilter, setPcHistoryFilter] = useState<PcHistoryFilter>('all');
   const [pcBalanceChange, setPcBalanceChange] = useState<number | null>(null);
   const [showCurrentMonthBonusCredit, setShowCurrentMonthBonusCredit] = useState(false);
@@ -359,7 +403,7 @@ const CustomerDashboard = () => {
           onClick={() => navigate('/customer/partner-points')}
           style={{
             position: 'relative',
-            marginTop: 12,
+            marginTop: 18,
             width: '100%',
             border: 0,
             borderRadius: 16,
@@ -459,29 +503,50 @@ const CustomerDashboard = () => {
 
       <div style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 12 }}>
         <div style={{ color: '#D4AF37', fontWeight: 900, textAlign: 'center' }}>Total Outstanding</div>
-        <div style={{ color: '#FF7B7B', fontSize: 30, fontWeight: 900, marginTop: 6, textAlign: 'center' }}>{formatMoney(totalOutstanding)}</div>
+        <button
+          type="button"
+          aria-expanded={showOutstandingHistory}
+          aria-controls="customer-outstanding-history"
+          onClick={() => setShowOutstandingHistory((current) => !current)}
+          style={{ width: '100%', border: 0, background: 'transparent', color: '#FF7B7B', padding: '6px 0 2px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}
+        >
+          <span style={{ fontSize: 30, lineHeight: 1.2, fontWeight: 900 }}>{formatMoney(totalOutstanding)}</span>
+          <ChevronDown size={21} aria-hidden="true" style={{ flex: '0 0 auto', transform: showOutstandingHistory ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }} />
+        </button>
 
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.18)' }}>
-          <div style={{ color: '#FDE68A', fontSize: 13, fontWeight: 900, marginBottom: 9 }}>Outstanding Record</div>
+        {showOutstandingHistory ? <div id="customer-outstanding-history" style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.18)' }}>
+          <div style={{ color: '#FDE68A', fontSize: 16, fontWeight: 900, marginBottom: 10 }}>Outstanding Record</div>
           {outstandingHistory.length === 0 ? (
-            <div style={{ color: '#BFC8D9', fontSize: 12, fontWeight: 700 }}>No outstanding transactions found.</div>
+            <div style={{ color: '#BFC8D9', fontSize: 15, fontWeight: 700 }}>No outstanding transactions found.</div>
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
               {outstandingHistory.map((item) => (
-                <div key={item.id} style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 8, padding: '9px 10px' }}>
-                  <div style={{ color: '#BFC8D9', fontSize: 11, fontWeight: 800, marginBottom: 5 }}>{formatDate(item.date)}</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, color: '#FFFFFF', fontSize: 12, fontWeight: 900 }}>
-                    <span>{formatMoney(item.previousOutstanding)}</span>
-                    <span style={{ color: '#FDE68A' }}>-</span>
-                    <span style={{ color: '#BBF7D0' }}>{formatMoney(item.paymentAmount)}</span>
-                    <span style={{ color: '#FDE68A' }}>=</span>
-                    <span style={{ color: '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
+                <div key={item.id} style={{ background: item.type === 'payment' ? '#166534' : '#090B10', border: item.type === 'payment' ? '1px solid #22C55E' : '1px solid #252932', borderRadius: 8, padding: '12px', overflowX: 'auto' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '88px max-content', justifyContent: 'space-between', alignItems: 'center', gap: 12, minWidth: 'max-content' }}>
+                    {item.type === 'invoice' ? (
+                      <span title={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} aria-label={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#FF7B7B', fontSize: 16, fontWeight: 900 }}>
+                        <ReceiptText size={21} aria-hidden="true" />
+                        {item.transactionCount}
+                      </span>
+                    ) : (
+                      <span title="Payment received" aria-label={`Payment received on ${formatOutstandingDate(item.date)}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#D7DEEA', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>
+                        <CircleDollarSign size={22} aria-hidden="true" style={{ color: '#4ADE80', flex: '0 0 auto' }} />
+                        {formatOutstandingDate(item.date)}
+                      </span>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#FFFFFF', fontSize: 16, lineHeight: 1.35, fontWeight: 900, whiteSpace: 'nowrap' }}>
+                      <span>{formatMoney(item.previousOutstanding)}</span>
+                      <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#FDE68A' }}>{item.type === 'invoice' ? '+' : '-'}</span>
+                      <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#BBF7D0' }}>{formatMoney(item.transactionAmount)}</span>
+                      <span style={{ color: '#FDE68A' }}>=</span>
+                      <span style={{ color: '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </div> : null}
       </div>
 
       {(customer?.advanceBalance ?? 0) > 0 ? (
