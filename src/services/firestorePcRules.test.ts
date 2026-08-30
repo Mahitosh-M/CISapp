@@ -340,6 +340,96 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     return batch;
   };
 
+  const seedExistingExpense = async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'cashExpenses', 'existing-expense'), {
+        shopId: 'SHOP_A',
+        amount: 750,
+        category: 'fuel',
+        description: 'Delivery fuel',
+        createdAt: Timestamp.fromDate(new Date('2026-08-10T08:00:00.000Z')),
+        createdBy: 'staff-user'
+      });
+    });
+  };
+
+  const editExpenseBatch = (
+    testDatabase: unknown,
+    nextAmount = 900,
+    balanceDelta = -(nextAmount - 750),
+    totalDelta = nextAmount - 750,
+    includeCorrection = true,
+    correctionId = 'expense-correction-edit'
+  ) => {
+    const database = testDatabase as Firestore;
+    const batch = writeBatch(database);
+    if (includeCorrection) {
+      batch.set(doc(database, 'cashExpenseCorrections', correctionId), {
+        expenseId: 'existing-expense',
+        shopId: 'SHOP_A',
+        action: 'edit',
+        previousAmount: 750,
+        previousCategory: 'fuel',
+        previousDescription: 'Delivery fuel',
+        nextAmount,
+        nextCategory: 'rent',
+        nextDescription: 'Corrected shop rent',
+        createdAt: serverTimestamp(),
+        createdBy: 'team-user'
+      });
+    }
+    batch.update(doc(database, 'cashExpenses', 'existing-expense'), {
+      amount: nextAmount,
+      category: 'rent',
+      description: 'Corrected shop rent',
+      updatedAt: serverTimestamp(),
+      updatedBy: 'team-user'
+    });
+    batch.update(doc(database, 'shopCash', 'SHOP_A'), {
+      availableBalance: increment(balanceDelta),
+      totalExpenses: increment(totalDelta),
+      lastCashOperationId: correctionId,
+      lastCashOperationType: 'expense_edit',
+      updatedAt: timestamp
+    });
+    return batch;
+  };
+
+  const deleteExpenseBatch = (
+    testDatabase: unknown,
+    balanceDelta = 750,
+    totalDelta = -750,
+    includeCorrection = true,
+    correctionId = 'expense-correction-delete'
+  ) => {
+    const database = testDatabase as Firestore;
+    const batch = writeBatch(database);
+    if (includeCorrection) {
+      batch.set(doc(database, 'cashExpenseCorrections', correctionId), {
+        expenseId: 'existing-expense',
+        shopId: 'SHOP_A',
+        action: 'delete',
+        previousAmount: 750,
+        previousCategory: 'fuel',
+        previousDescription: 'Delivery fuel',
+        nextAmount: 0,
+        nextCategory: 'fuel',
+        nextDescription: 'Delivery fuel',
+        createdAt: serverTimestamp(),
+        createdBy: 'team-user'
+      });
+    }
+    batch.update(doc(database, 'shopCash', 'SHOP_A'), {
+      availableBalance: increment(balanceDelta),
+      totalExpenses: increment(totalDelta),
+      lastCashOperationId: correctionId,
+      lastCashOperationType: 'expense_delete',
+      updatedAt: timestamp
+    });
+    batch.delete(doc(database, 'cashExpenses', 'existing-expense'));
+    return batch;
+  };
+
   const addTransferBatch = (
     testDatabase: unknown,
     fromShopId: 'SHOP_A' | 'SHOP_S',
@@ -776,6 +866,32 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     expect(summarySnapshot.data()?.totalExpenses).toBe(13_000);
   });
 
+  it('allows a purchase category only with its exact atomic cash reduction', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(addExpenseBatch(database, 'SHOP_A', 3_500, 'purchase-1', 'purchases').commit());
+    const purchaseSnapshot = await getDoc(doc(database, 'cashExpenses', 'purchase-1'));
+    const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(purchaseSnapshot.data()?.category).toBe('purchases');
+    expect(summarySnapshot.data()?.availableBalance).toBe(6_500);
+    expect(summarySnapshot.data()?.totalExpenses).toBe(5_500);
+  });
+
+  it('allows an EMI category only with its exact atomic cash reduction', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(addExpenseBatch(database, 'SHOP_A', 2_250, 'emi-1', 'emi').commit());
+    const emiSnapshot = await getDoc(doc(database, 'cashExpenses', 'emi-1'));
+    const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(emiSnapshot.data()?.category).toBe('emi');
+    expect(summarySnapshot.data()?.availableBalance).toBe(7_750);
+    expect(summarySnapshot.data()?.totalExpenses).toBe(4_250);
+  });
+
   it('denies expense writes for another branch and mismatched deltas', async () => {
     await seed('Staff', true, 'SHOP_A');
     await seedInitializedShops();
@@ -809,7 +925,7 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     }));
   });
 
-  it('keeps expense audit records immutable and blocks operation ID replay', async () => {
+  it('keeps expense records immutable to Staff and blocks operation ID replay', async () => {
     await seed('Staff', true, 'SHOP_A');
     await seedInitializedShops();
     const database = testEnvironment.authenticatedContext('team-user').firestore();
@@ -818,6 +934,70 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await assertFails(updateDoc(doc(database, 'cashExpenses', 'expense-1'), { amount: 1 }));
     await assertFails(deleteDoc(doc(database, 'cashExpenses', 'expense-1')));
     await assertFails(addExpenseBatch(database, 'SHOP_A').commit());
+  });
+
+  it('allows Admin to correct a Staff cash outflow with an exact audited summary delta', async () => {
+    await seed('Admin');
+    await seedInitializedShops();
+    await seedExistingExpense();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(editExpenseBatch(database).commit());
+
+    const expense = await getDoc(doc(database, 'cashExpenses', 'existing-expense'));
+    const correction = await getDoc(doc(database, 'cashExpenseCorrections', 'expense-correction-edit'));
+    const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(expense.data()).toMatchObject({ amount: 900, category: 'rent', updatedBy: 'team-user' });
+    expect(correction.data()).toMatchObject({
+      action: 'edit',
+      previousAmount: 750,
+      nextAmount: 900,
+      createdBy: 'team-user'
+    });
+    expect(summarySnapshot.data()?.availableBalance).toBe(9_850);
+    expect(summarySnapshot.data()?.totalExpenses).toBe(2_150);
+  });
+
+  it('denies Staff, unaudited, and mismatched cash outflow corrections', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    await seedExistingExpense();
+    const staffDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(editExpenseBatch(staffDatabase).commit());
+
+    await seed('Admin');
+    const adminDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(editExpenseBatch(adminDatabase, 900, -150, 150, false).commit());
+    await assertFails(editExpenseBatch(adminDatabase, 900, -100, 150).commit());
+  });
+
+  it('allows Admin to delete a Staff cash outflow while restoring the exact amount', async () => {
+    await seed('Admin');
+    await seedInitializedShops();
+    await seedExistingExpense();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(deleteExpenseBatch(database).commit());
+
+    expect((await getDoc(doc(database, 'cashExpenses', 'existing-expense'))).exists()).toBe(false);
+    const correction = await getDoc(doc(database, 'cashExpenseCorrections', 'expense-correction-delete'));
+    const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(correction.data()).toMatchObject({ action: 'delete', previousAmount: 750, nextAmount: 0 });
+    expect(summarySnapshot.data()?.availableBalance).toBe(10_750);
+    expect(summarySnapshot.data()?.totalExpenses).toBe(1_250);
+  });
+
+  it('denies Staff, unaudited, and mismatched cash outflow deletions', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await seedInitializedShops();
+    await seedExistingExpense();
+    const staffDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(deleteExpenseBatch(staffDatabase).commit());
+
+    await seed('Admin');
+    const adminDatabase = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(deleteExpenseBatch(adminDatabase, 750, -750, false).commit());
+    await assertFails(deleteExpenseBatch(adminDatabase, 700, -750).commit());
   });
 
   it('atomically transfers between initialized shops without changing collections', async () => {

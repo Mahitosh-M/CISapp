@@ -208,7 +208,7 @@ service cloud.firestore {
             && data.lastCashOperationId.size() > 0
             && data.lastCashOperationId.size() <= 160
             && data.lastCashOperationType in [
-              'payment', 'invoice_delete', 'expense', 'transfer', 'transfer_edit', 'transfer_delete',
+              'payment', 'invoice_delete', 'expense', 'expense_edit', 'expense_delete', 'transfer', 'transfer_edit', 'transfer_delete',
               'adjustment', 'initialization'
             ])
         )
@@ -370,6 +370,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/cashExpenses/$(expenseId);
     }
 
+    function cashExpenseCorrectionPath(correctionId) {
+      return /databases/$(database)/documents/cashExpenseCorrections/$(correctionId);
+    }
+
     function shopTransferPath(transferId) {
       return /databases/$(database)/documents/shopTransfers/$(transferId);
     }
@@ -396,7 +400,7 @@ service cloud.firestore {
         && data.amount <= 100000000
         && (!('category' in data)
           || data.category in [
-            'salary', 'fuel', 'electricity', 'rent', 'maintenance', 'transport', 'supplies', 'taxes', 'other'
+            'purchases', 'emi', 'salary', 'fuel', 'electricity', 'rent', 'maintenance', 'transport', 'supplies', 'taxes', 'other'
           ])
         && data.description is string
         && data.description.size() > 0
@@ -439,6 +443,206 @@ service cloud.firestore {
           == resource.data.availableBalance - expenseAfter.data.amount
         && cashNumber(request.resource.data, 'totalExpenses')
           == cashNumber(resource.data, 'totalExpenses') + expenseAfter.data.amount;
+    }
+
+    function validExpenseCategory(category) {
+      return category in [
+        'purchases', 'emi', 'salary', 'fuel', 'electricity', 'rent', 'maintenance', 'transport', 'supplies', 'taxes', 'other'
+      ];
+    }
+
+    function storedExpenseCategory(data) {
+      return !('category' in data)
+        ? 'other'
+        : (data.category == 'maintenance' ? 'transport' : data.category);
+    }
+
+    function validStoredCashExpense(data, expenseId) {
+      return expenseId.size() > 0
+        && expenseId.size() <= 160
+        && data.keys().hasAll(['shopId', 'amount', 'description', 'createdAt', 'createdBy'])
+        && data.keys().hasOnly([
+          'shopId', 'amount', 'category', 'description', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && validShopId(data.shopId)
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 100000000
+        && (!('category' in data) || validExpenseCategory(data.category))
+        && data.description is string
+        && data.description.size() > 0
+        && data.description.size() <= 160
+        && data.description.matches('.*[^ ].*')
+        && data.createdAt is timestamp
+        && data.createdBy is string
+        && data.createdBy.size() > 0
+        && data.createdBy.size() <= 160
+        && (
+          (!('updatedAt' in data) && !('updatedBy' in data))
+          || (data.updatedAt is timestamp
+            && data.updatedBy is string
+            && data.updatedBy.size() > 0
+            && data.updatedBy.size() <= 160)
+        );
+    }
+
+    function validEditedCashExpense(afterData, beforeData, expenseId) {
+      return validStoredCashExpense(afterData, expenseId)
+        && afterData.keys().hasAll(['category', 'updatedAt', 'updatedBy'])
+        && afterData.shopId == beforeData.shopId
+        && afterData.createdAt == beforeData.createdAt
+        && afterData.createdBy == beforeData.createdBy
+        && afterData.updatedAt == request.time
+        && afterData.updatedBy == request.auth.uid
+        && afterData.diff(beforeData).affectedKeys().hasOnly([
+          'amount', 'category', 'description', 'updatedAt', 'updatedBy'
+        ])
+        && (
+          afterData.amount != beforeData.amount
+          || storedExpenseCategory(afterData) != storedExpenseCategory(beforeData)
+          || afterData.description != beforeData.description
+        );
+    }
+
+    function validCashExpenseCorrection(data, correctionId) {
+      return correctionId.size() > 0
+        && correctionId.size() <= 160
+        && data.keys().hasAll([
+          'expenseId', 'shopId', 'action',
+          'previousAmount', 'previousCategory', 'previousDescription',
+          'nextAmount', 'nextCategory', 'nextDescription',
+          'createdAt', 'createdBy'
+        ])
+        && data.keys().hasOnly([
+          'expenseId', 'shopId', 'action',
+          'previousAmount', 'previousCategory', 'previousDescription',
+          'nextAmount', 'nextCategory', 'nextDescription',
+          'createdAt', 'createdBy'
+        ])
+        && data.expenseId is string
+        && data.expenseId.size() > 0
+        && data.expenseId.size() <= 160
+        && validShopId(data.shopId)
+        && data.action in ['edit', 'delete']
+        && data.previousAmount is number
+        && data.previousAmount > 0
+        && data.previousAmount <= 100000000
+        && validExpenseCategory(data.previousCategory)
+        && data.previousDescription is string
+        && data.previousDescription.size() > 0
+        && data.previousDescription.size() <= 160
+        && data.nextAmount is number
+        && data.nextAmount >= 0
+        && data.nextAmount <= 100000000
+        && validExpenseCategory(data.nextCategory)
+        && data.nextDescription is string
+        && data.nextDescription.size() > 0
+        && data.nextDescription.size() <= 160
+        && data.createdAt is timestamp
+        && data.createdAt == request.time
+        && data.createdBy is string
+        && data.createdBy == request.auth.uid
+        && data.createdBy.size() <= 160
+        && (
+          (data.action == 'edit' && data.nextAmount > 0)
+          || (data.action == 'delete'
+            && data.nextAmount == 0
+            && data.nextCategory == data.previousCategory
+            && data.nextDescription == data.previousDescription)
+        );
+    }
+
+    function correctionMatchesExpenseBefore(correction, expense) {
+      return correction.shopId == expense.shopId
+        && correction.previousAmount == expense.amount
+        && correction.previousCategory == storedExpenseCategory(expense)
+        && correction.previousDescription == expense.description;
+    }
+
+    function correctionMatchesExpenseAfter(correction, expense) {
+      return correction.nextAmount == expense.amount
+        && correction.nextCategory == storedExpenseCategory(expense)
+        && correction.nextDescription == expense.description;
+    }
+
+    function expenseCorrectionSummaryMatches(correctionId, correction) {
+      let summaryPath = cashSummaryPath(correction.shopId);
+      let summaryBefore = get(summaryPath);
+      let summaryAfter = getAfter(summaryPath);
+      let amountDelta = correction.nextAmount - correction.previousAmount;
+      return exists(summaryPath)
+        && existsAfter(summaryPath)
+        && isInitializedShopCash(summaryBefore.data)
+        && summaryAfter.data.lastCashOperationId == correctionId
+        && summaryAfter.data.lastCashOperationType
+          == (correction.action == 'edit' ? 'expense_edit' : 'expense_delete')
+        && summaryAfter.data.diff(summaryBefore.data).affectedKeys().hasOnly([
+          'availableBalance', 'totalExpenses', 'lastCashOperationId', 'lastCashOperationType', 'updatedAt'
+        ])
+        && summaryAfter.data.availableBalance - summaryBefore.data.availableBalance == -amountDelta
+        && cashNumber(summaryAfter.data, 'totalExpenses')
+          - cashNumber(summaryBefore.data, 'totalExpenses') == amountDelta
+        && cashNumber(summaryAfter.data, 'totalExpenses') >= 0;
+    }
+
+    function validExpenseCorrectionAuditCreate(correctionId) {
+      let correction = request.resource.data;
+      let expensePath = cashExpensePath(correction.expenseId);
+      let expenseBefore = get(expensePath);
+      let expenseAfter = getAfter(expensePath);
+      return isAdmin()
+        && validCashExpenseCorrection(correction, correctionId)
+        && exists(expensePath)
+        && correctionMatchesExpenseBefore(correction, expenseBefore.data)
+        && (
+          (correction.action == 'edit'
+            && existsAfter(expensePath)
+            && correctionMatchesExpenseAfter(correction, expenseAfter.data))
+          || (correction.action == 'delete' && !existsAfter(expensePath))
+        );
+    }
+
+    function validExpenseAuditUpdate(expenseId) {
+      let summaryPath = cashSummaryPath(resource.data.shopId);
+      let summaryAfter = getAfter(summaryPath);
+      let correctionId = summaryAfter.data.lastCashOperationId;
+      let correctionPath = cashExpenseCorrectionPath(correctionId);
+      let correction = getAfter(correctionPath);
+      return isAdmin()
+        && validEditedCashExpense(request.resource.data, resource.data, expenseId)
+        && !exists(correctionPath)
+        && existsAfter(correctionPath)
+        && correction.data.action == 'edit'
+        && correction.data.expenseId == expenseId
+        && correctionMatchesExpenseBefore(correction.data, resource.data)
+        && correctionMatchesExpenseAfter(correction.data, request.resource.data);
+    }
+
+    function validExpenseAuditDelete(expenseId) {
+      let summaryPath = cashSummaryPath(resource.data.shopId);
+      let summaryAfter = getAfter(summaryPath);
+      let correctionId = summaryAfter.data.lastCashOperationId;
+      let correctionPath = cashExpenseCorrectionPath(correctionId);
+      let correction = getAfter(correctionPath);
+      return isAdmin()
+        && !existsAfter(cashExpensePath(expenseId))
+        && !exists(correctionPath)
+        && existsAfter(correctionPath)
+        && correction.data.action == 'delete'
+        && correction.data.expenseId == expenseId
+        && correctionMatchesExpenseBefore(correction.data, resource.data);
+    }
+
+    function validExpenseCorrectionShopCashUpdate(shopId, action) {
+      let correctionId = request.resource.data.lastCashOperationId;
+      let correctionPath = cashExpenseCorrectionPath(correctionId);
+      let correction = getAfter(correctionPath);
+      return isAdmin()
+        && !exists(correctionPath)
+        && existsAfter(correctionPath)
+        && correction.data.shopId == shopId
+        && correction.data.action == action
+        && expenseCorrectionSummaryMatches(correctionId, correction.data);
     }
 
     function validShopTransfer(data, transferId) {
@@ -1894,6 +2098,10 @@ service cloud.firestore {
             && validInvoiceDeleteShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'expense'
             && validExpenseShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'expense_edit'
+            && validExpenseCorrectionShopCashUpdate(shopId, 'edit'))
+          || (request.resource.data.lastCashOperationType == 'expense_delete'
+            && validExpenseCorrectionShopCashUpdate(shopId, 'delete'))
           || (request.resource.data.lastCashOperationType == 'transfer'
             && validTransferShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'transfer_edit'
@@ -1912,6 +2120,13 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (hasAssignedShop() && resource.data.shopId == profile().shopId);
       allow create: if validExpenseAuditCreate(expenseId);
+      allow update: if validExpenseAuditUpdate(expenseId);
+      allow delete: if validExpenseAuditDelete(expenseId);
+    }
+
+    match /cashExpenseCorrections/{correctionId} {
+      allow read: if isAdmin();
+      allow create: if validExpenseCorrectionAuditCreate(correctionId);
       allow update, delete: if false;
     }
 
