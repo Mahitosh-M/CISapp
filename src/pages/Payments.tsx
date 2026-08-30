@@ -722,7 +722,7 @@ const Payments = () => {
             <input style={inputStyle} type="date" value={formData.date} onChange={(event) => handleFieldChange('date', event.target.value)} />
           </label>
 
-          {paymentUsesBranchCash ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
+          {isAdmin && paymentUsesBranchCash ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
             <input
               type="checkbox"
               checked={formData.affectsShopCash === false}
