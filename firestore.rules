@@ -387,13 +387,17 @@ service cloud.firestore {
     }
 
     function validCashExpense(data, expenseId) {
-      return data.keys().hasOnly(['shopId', 'amount', 'description', 'createdAt', 'createdBy'])
+      return data.keys().hasOnly(['shopId', 'amount', 'category', 'description', 'createdAt', 'createdBy'])
         && expenseId.size() > 0
         && expenseId.size() <= 160
         && validShopId(data.shopId)
         && data.amount is number
         && data.amount > 0
         && data.amount <= 100000000
+        && (!('category' in data)
+          || data.category in [
+            'salary', 'fuel', 'electricity', 'rent', 'maintenance', 'transport', 'supplies', 'taxes', 'other'
+          ])
         && data.description is string
         && data.description.size() > 0
         && data.description.size() <= 160
@@ -781,7 +785,6 @@ service cloud.firestore {
           'lastCashOperationType',
           'updatedAt'
         ])
-        && request.resource.data.availableBalance >= 0
         && request.resource.data.availableBalance
           == resource.data.availableBalance
             + (adjustmentAfter.data.direction == 'add'

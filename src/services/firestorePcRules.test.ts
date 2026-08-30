@@ -317,13 +317,15 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     testDatabase: unknown,
     shopId: 'SHOP_A' | 'SHOP_S',
     amount = 750,
-    expenseId = 'expense-1'
+    expenseId = 'expense-1',
+    category = 'fuel'
   ) => {
     const database = testDatabase as Firestore;
     const batch = writeBatch(database);
     batch.set(doc(database, 'cashExpenses', expenseId), {
       shopId,
       amount,
+      category,
       description: 'Delivery fuel',
       createdAt: serverTimestamp(),
       createdBy: 'team-user'
@@ -754,7 +756,9 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     const database = testEnvironment.authenticatedContext('team-user').firestore();
 
     await assertSucceeds(addExpenseBatch(database, 'SHOP_A').commit());
+    const expenseSnapshot = await getDoc(doc(database, 'cashExpenses', 'expense-1'));
     const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
+    expect(expenseSnapshot.data()?.category).toBe('fuel');
     expect(summarySnapshot.data()?.availableBalance).toBe(9_250);
     expect(summarySnapshot.data()?.totalExpenses).toBe(2_750);
     expect(summarySnapshot.data()?.totalCollections).toBe(12_000);
@@ -765,7 +769,8 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await seedInitializedShops();
     const database = testEnvironment.authenticatedContext('team-user').firestore();
 
-    await assertSucceeds(addExpenseBatch(database, 'SHOP_A', 11_000, 'staff-pocket-expense').commit());
+    await assertSucceeds(addExpenseBatch(database, 'SHOP_A', 11_000, 'staff-pocket-expense', 'transport').commit());
+    expect((await getDoc(doc(database, 'cashExpenses', 'staff-pocket-expense'))).data()?.category).toBe('transport');
     const summarySnapshot = await getDoc(doc(database, 'shopCash', 'SHOP_A'));
     expect(summarySnapshot.data()?.availableBalance).toBe(-1_000);
     expect(summarySnapshot.data()?.totalExpenses).toBe(13_000);
@@ -777,6 +782,7 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     const database = testEnvironment.authenticatedContext('team-user').firestore();
 
     await assertFails(addExpenseBatch(database, 'SHOP_S').commit());
+    await assertFails(addExpenseBatch(database, 'SHOP_A', 500, 'expense-invalid-category', 'travel').commit());
 
     const mismatched = writeBatch(database);
     mismatched.set(doc(database, 'cashExpenses', 'expense-mismatch'), {
@@ -968,7 +974,20 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     expect(summarySnapshot.data()?.totalExpenses).toBe(2_000);
   });
 
-  it('denies Staff, mismatched, unaudited, and negative Admin adjustments', async () => {
+  it('allows Admin to adjust a balance below zero and continue adjusting it', async () => {
+    await seed('Admin');
+    await seedInitializedShops();
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertSucceeds(addAdjustmentBatch(database, 'SHOP_A', 'deduct', 11_000, 'adjustment-negative').commit());
+    expect((await getDoc(doc(database, 'shopCash', 'SHOP_A'))).data()?.availableBalance).toBe(-1_000);
+
+    await assertSucceeds(addAdjustmentBatch(database, 'SHOP_A', 'add', 500, 'adjustment-negative-add').commit());
+    await assertSucceeds(addAdjustmentBatch(database, 'SHOP_A', 'deduct', 250, 'adjustment-negative-deduct').commit());
+    expect((await getDoc(doc(database, 'shopCash', 'SHOP_A'))).data()?.availableBalance).toBe(-750);
+  });
+
+  it('denies Staff, mismatched, and unaudited Admin adjustments', async () => {
     await seed('Staff', true, 'SHOP_A');
     await seedInitializedShops();
     const staffDatabase = testEnvironment.authenticatedContext('team-user').firestore();
@@ -977,7 +996,6 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await seed('Admin');
     const adminDatabase = testEnvironment.authenticatedContext('team-user').firestore();
     await assertFails(addAdjustmentBatch(adminDatabase, 'SHOP_A', 'add', 500, 'adjustment-mismatch', 400).commit());
-    await assertFails(addAdjustmentBatch(adminDatabase, 'SHOP_A', 'deduct', 11_000, 'adjustment-too-large').commit());
     await assertFails(updateDoc(doc(adminDatabase, 'shopCash', 'SHOP_A'), {
       availableBalance: increment(500),
       lastCashOperationId: 'missing-adjustment',
