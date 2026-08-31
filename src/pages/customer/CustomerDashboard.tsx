@@ -8,6 +8,7 @@ import { calculateCustomerTotalOutstanding, calculateInvoiceApcInfo, getInvoiceF
 import { formatApc } from '../../utils/loyalty';
 import { getBusinessInvoices, getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../../utils/openingBalance';
 import { getInvoicePaymentEffect } from '../../utils/paymentUtils';
+import { getShopName } from '../../utils/shops';
 import type { Invoice, Payment } from '../../types';
 
 type PcHistoryFilter = 'all' | 'purchase' | 'bonus' | 'overdue';
@@ -29,6 +30,7 @@ interface OutstandingHistoryItem {
   transactionCount: number;
   previousOutstanding: number;
   currentOutstanding: number;
+  shopName?: string;
 }
 
 interface PaymentLedgerEvent {
@@ -38,6 +40,7 @@ interface PaymentLedgerEvent {
   createdAt?: string;
   order: number;
   amount: number;
+  shopName: string;
 }
 
 const splitPaymentPattern = /Split payment\s+(\d+)\/(\d+)/i;
@@ -79,7 +82,8 @@ const buildPaymentLedgerEvents = (payments: Payment[]) => {
       date: payment.date,
       createdAt: payment.createdAt,
       order: 1,
-      amount: paymentEffect
+      amount: paymentEffect,
+      shopName: getShopName(payment.shopId)
     });
   });
 
@@ -145,7 +149,8 @@ export const buildOutstandingHistory = (
         transactionAmount: event.amount,
         transactionCount: 1,
         previousOutstanding: runningOutstanding + event.amount,
-        currentOutstanding: runningOutstanding
+        currentOutstanding: runningOutstanding,
+        shopName: event.shopName
       });
       runningOutstanding += event.amount;
       paymentCount += 1;
@@ -521,26 +526,34 @@ const CustomerDashboard = () => {
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
               {outstandingHistory.map((item) => (
-                <div key={item.id} style={{ background: item.type === 'payment' ? '#166534' : '#090B10', border: item.type === 'payment' ? '1px solid #22C55E' : '1px solid #252932', borderRadius: 8, padding: '12px', overflowX: 'auto' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '88px max-content', justifyContent: 'space-between', alignItems: 'center', gap: 12, minWidth: 'max-content' }}>
+                <div key={item.id} style={{ background: item.type === 'payment' ? '#166534' : '#090B10', border: item.type === 'payment' ? '1px solid #22C55E' : '1px solid #252932', borderRadius: 8, padding: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
                     {item.type === 'invoice' ? (
-                      <span title={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} aria-label={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#FF7B7B', fontSize: 16, fontWeight: 900 }}>
-                        <ReceiptText size={21} aria-hidden="true" />
-                        {item.transactionCount}
-                      </span>
+                      <>
+                        <span title={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} aria-label={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#FF7B7B', fontSize: 16, fontWeight: 900 }}>
+                          <ReceiptText size={21} aria-hidden="true" />
+                          {item.transactionCount}
+                        </span>
+                        <span style={{ color: '#FF9A9A', fontSize: 13, fontWeight: 900 }}>Invoice added</span>
+                      </>
                     ) : (
-                      <span title="Payment received" aria-label={`Payment received on ${formatOutstandingDate(item.date)}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#D7DEEA', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>
-                        <CircleDollarSign size={22} aria-hidden="true" style={{ color: '#4ADE80', flex: '0 0 auto' }} />
-                        {formatOutstandingDate(item.date)}
-                      </span>
+                      <>
+                        <span title={`Payment received from ${item.shopName ?? 'Legacy / shared'}`} aria-label={`Payment received from ${item.shopName ?? 'Legacy / shared'} on ${formatOutstandingDate(item.date)}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#D7DEEA', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>
+                          <CircleDollarSign size={22} aria-hidden="true" style={{ color: '#4ADE80', flex: '0 0 auto' }} />
+                          {formatOutstandingDate(item.date)}
+                        </span>
+                        <span style={{ minWidth: 0, color: '#BBF7D0', background: 'rgba(3, 48, 30, 0.48)', border: '1px solid rgba(187, 247, 208, 0.32)', borderRadius: 6, padding: '4px 7px', fontSize: 12, lineHeight: 1.2, fontWeight: 900, overflowWrap: 'anywhere', textAlign: 'right' }}>
+                          {item.shopName ?? 'Legacy / shared'}
+                        </span>
+                      </>
                     )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#FFFFFF', fontSize: 16, lineHeight: 1.35, fontWeight: 900, whiteSpace: 'nowrap' }}>
-                      <span>{formatMoney(item.previousOutstanding)}</span>
-                      <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#FDE68A' }}>{item.type === 'invoice' ? '+' : '-'}</span>
-                      <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#BBF7D0' }}>{formatMoney(item.transactionAmount)}</span>
-                      <span style={{ color: '#FDE68A' }}>=</span>
-                      <span style={{ color: '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
-                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, paddingTop: 9, borderTop: item.type === 'payment' ? '1px solid rgba(187, 247, 208, 0.24)' : '1px solid #252932', color: '#FFFFFF', fontSize: 15, lineHeight: 1.35, fontWeight: 900, whiteSpace: 'nowrap', overflowX: 'auto' }}>
+                    <span>{formatMoney(item.previousOutstanding)}</span>
+                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#FDE68A' }}>{item.type === 'invoice' ? '+' : '-'}</span>
+                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#BBF7D0' }}>{formatMoney(item.transactionAmount)}</span>
+                    <span style={{ color: '#FDE68A' }}>=</span>
+                    <span style={{ color: '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
                   </div>
                 </div>
               ))}

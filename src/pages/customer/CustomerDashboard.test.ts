@@ -31,6 +31,8 @@ const splitPayment = (id: string, amount: number, part: number): Payment => ({
   advanceCreatedAmount: 0,
   advanceAppliedAmount: 0,
   paymentKind: 'receipt',
+  shopId: 'SHOP_S',
+  branchSystemVersion: 1,
   amountUsedForOldBalance: 0,
   oldBalanceBeforePayment: 0,
   oldBalanceAfterPayment: 0,
@@ -60,7 +62,8 @@ describe('customer outstanding history', () => {
         transactionAmount: 1_000,
         transactionCount: 1,
         previousOutstanding: 2_000,
-        currentOutstanding: 1_000
+        currentOutstanding: 1_000,
+        shopName: 'SMPA'
       },
       {
         id: 'invoices:invoice-1',
@@ -131,7 +134,7 @@ describe('customer outstanding history', () => {
       totalProfit: 300,
       createdAt: '2026-08-02T09:00:00.000Z'
     };
-    const payment = {
+    const payment: Payment = {
       ...splitPayment('payment-300', 300, 1),
       splitPaymentGroupId: undefined,
       splitPaymentTotalAmount: undefined,
@@ -140,6 +143,7 @@ describe('customer outstanding history', () => {
       invoiceId: secondInvoice.id,
       invoiceNumber: secondInvoice.invoiceNumber,
       date: '2026-08-03',
+      shopId: 'SHOP_A',
       notes: '',
       createdAt: '2026-08-03T10:00:00.000Z'
     };
@@ -152,7 +156,8 @@ describe('customer outstanding history', () => {
         transactionAmount: 300,
         transactionCount: 1,
         previousOutstanding: 600,
-        currentOutstanding: 300
+        currentOutstanding: 300,
+        shopName: 'ASHOKA'
       },
       {
         id: 'invoices:invoice-300:invoice-200',
@@ -202,7 +207,8 @@ describe('customer outstanding history', () => {
       id: 'payment:receipt-4',
       previousOutstanding: 850,
       transactionAmount: 50,
-      currentOutstanding: 800
+      currentOutstanding: 800,
+      shopName: 'SMPA'
     });
     expect(history[5]).toMatchObject({
       id: 'invoices:invoice-2',
