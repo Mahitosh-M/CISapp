@@ -24,6 +24,8 @@ import type {
   Customer,
   CustomerFormData,
   CustomerTier,
+  DueCustomerRecord,
+  DueCustomerRow,
   AppSettings,
   BonusPcRequest,
   BonusPcRequestStatus,
@@ -112,6 +114,7 @@ const BONUS_PC_REQUESTS = 'bonusPcRequests';
 const COUNTERS = 'counters';
 const CUSTOMER_MONTHLY_SNAPSHOTS = 'customerMonthlySnapshots';
 const BUSINESS_MONTHLY_SNAPSHOTS = 'businessMonthlySnapshots';
+const DUE_CUSTOMERS = 'dueCustomers';
 const SHOP_CASH = 'shopCash';
 const DEFAULT_LIST_LIMIT = 50;
 const ACTIVE_OFFER_LIMIT = 20;
@@ -722,6 +725,23 @@ const mapPaymentDoc = (id: string, data: Record<string, unknown>): Payment => {
     cashSyncedAmount: data.cashSyncedAmount === undefined ? undefined : Math.max(0, numberOrZero(data.cashSyncedAmount))
   };
 };
+
+const mapDueCustomerDoc = (id: string, data: Record<string, unknown>): DueCustomerRecord => ({
+  id,
+  customerId: String(data.customerId || id),
+  customerName: String(data.customerName || ''),
+  overdueDays: Math.max(0, Math.round(numberOrZero(data.overdueDays))),
+  amount: Math.max(0, numberOrZero(data.amount)),
+  invoices: (Array.isArray(data.invoices) ? data.invoices : [])
+    .filter((invoice): invoice is Record<string, unknown> => Boolean(invoice) && typeof invoice === 'object')
+    .map((invoice) => ({
+      invoiceId: String(invoice.invoiceId || ''),
+      invoiceNumber: String(invoice.invoiceNumber || ''),
+      overdueDays: Math.max(0, Math.round(numberOrZero(invoice.overdueDays))),
+      amount: Math.max(0, numberOrZero(invoice.amount))
+    })),
+  updatedAt: String(data.updatedAt || '')
+});
 
 const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings => {
   return mergeWithDefaultSettings({
@@ -1761,6 +1781,73 @@ export const getPayments = async (options?: DateRangeQueryOptions) => {
     const snapshot = await getDocs(paymentsQuery);
     return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
   });
+};
+
+const dueCustomerRowsMatch = (record: DueCustomerRecord, row: DueCustomerRow) => (
+  record.customerId === row.customerId
+  && record.customerName === row.customerName
+  && record.overdueDays === row.overdueDays
+  && record.amount === row.amount
+  && JSON.stringify(record.invoices) === JSON.stringify(row.invoices)
+);
+
+export const getDueCustomerRecords = async () => {
+  const snapshot = await getDocs(collection(db, DUE_CUSTOMERS));
+  return snapshot.docs
+    .map((dueDoc) => mapDueCustomerDoc(dueDoc.id, dueDoc.data()))
+    .sort((left, right) =>
+      right.overdueDays - left.overdueDays
+      || right.amount - left.amount
+      || left.customerName.localeCompare(right.customerName)
+    );
+};
+
+export const syncDueCustomerRecords = async (rows: DueCustomerRow[]) => {
+  const existingRows = await getDueCustomerRecords();
+  const existingByCustomerId = new Map(existingRows.map((row) => [row.customerId, row]));
+  const currentCustomerIds = new Set(rows.map((row) => row.customerId));
+  const timestamp = nowIso();
+  const records = rows.map((row): DueCustomerRecord => ({
+    id: row.customerId,
+    ...row,
+    updatedAt: existingByCustomerId.get(row.customerId)?.updatedAt || timestamp
+  }));
+  const changedRecords = records.filter((record) => {
+    const existing = existingByCustomerId.get(record.customerId);
+    return !existing || !dueCustomerRowsMatch(existing, record);
+  });
+  const staleRecords = existingRows.filter((record) => !currentCustomerIds.has(record.customerId));
+  const batchSize = 450;
+
+  for (let index = 0; index < changedRecords.length; index += batchSize) {
+    const batch = writeBatch(db);
+    changedRecords.slice(index, index + batchSize).forEach((record) => {
+      record.updatedAt = timestamp;
+      batch.set(doc(db, DUE_CUSTOMERS, record.customerId), {
+        customerId: record.customerId,
+        customerName: record.customerName,
+        overdueDays: record.overdueDays,
+        amount: record.amount,
+        invoices: record.invoices,
+        updatedAt: record.updatedAt
+      });
+    });
+    await batch.commit();
+  }
+
+  for (let index = 0; index < staleRecords.length; index += batchSize) {
+    const batch = writeBatch(db);
+    staleRecords.slice(index, index + batchSize).forEach((record) => {
+      batch.delete(doc(db, DUE_CUSTOMERS, record.id));
+    });
+    await batch.commit();
+  }
+
+  return records;
+};
+
+export const deleteDueCustomerRecord = async (customerId: string) => {
+  await deleteDoc(doc(db, DUE_CUSTOMERS, customerId));
 };
 
 export const getPaymentsByInvoiceId = async (invoiceId: string, options?: Pick<DateRangeQueryOptions, 'limitCount'>) => {

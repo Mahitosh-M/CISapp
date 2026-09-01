@@ -5,7 +5,7 @@ rules_version = '2';
 // ===============================================================
 // Existing collections retain their current schemas and validators below:
 // users, settings, customers, invoices, payments, giftHistory, giftItems,
-// offers, monthlyCustomerStats, loyaltyLedger, rewardItems,
+// offers, monthlyCustomerStats, loyaltyLedger, rewardItems, dueCustomers,
 // redemptionRequests, overduePcRequests, and bonusPcRequests.
 //
 // customerCreditProfiles/{customerId}: admin-only calculated credit data.
@@ -2009,6 +2009,34 @@ service cloud.firestore {
         && data.updatedAt.size() <= 40;
     }
 
+    function validDueCustomerRecord(data, customerDocId) {
+      return data.keys().hasAll([
+          'customerId', 'customerName', 'overdueDays', 'amount', 'invoices', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'customerId', 'customerName', 'overdueDays', 'amount', 'invoices', 'updatedAt'
+        ])
+        && data.customerId == customerDocId
+        && data.customerId is string
+        && data.customerId.size() > 0
+        && data.customerId.size() <= 160
+        && data.customerName is string
+        && data.customerName.size() > 0
+        && data.customerName.size() <= 200
+        && data.overdueDays is int
+        && data.overdueDays > 7
+        && data.overdueDays <= 36500
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 1000000000000
+        && data.invoices is list
+        && data.invoices.size() > 0
+        && data.invoices.size() <= 500
+        && data.updatedAt is string
+        && data.updatedAt.size() > 0
+        && data.updatedAt.size() <= 40;
+    }
+
     match /users/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin()
@@ -2071,6 +2099,13 @@ service cloud.firestore {
         && validPaymentCashMutation(paymentId);
       allow delete: if isAdmin()
         && (validInvoiceDeletePaymentCashMutation() || validPaymentCashMutation(paymentId));
+    }
+
+    match /dueCustomers/{customerDocId} {
+      allow read: if isTeam();
+      allow create, update: if isTeam()
+        && validDueCustomerRecord(request.resource.data, customerDocId);
+      allow delete: if isTeam();
     }
 
     match /shopCash/{shopId} {

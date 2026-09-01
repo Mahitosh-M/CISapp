@@ -526,7 +526,7 @@ const CustomerDashboard = () => {
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
               {outstandingHistory.map((item) => (
-                <div key={item.id} style={{ background: item.type === 'payment' ? '#166534' : '#090B10', border: item.type === 'payment' ? '1px solid #22C55E' : '1px solid #252932', borderRadius: 8, padding: '12px' }}>
+                <div key={item.id} style={{ background: item.type === 'payment' ? '#DCFCE7' : '#090B10', border: item.type === 'payment' ? '1px solid #86EFAC' : '1px solid #252932', borderRadius: 8, padding: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
                     {item.type === 'invoice' ? (
                       <>
@@ -538,22 +538,22 @@ const CustomerDashboard = () => {
                       </>
                     ) : (
                       <>
-                        <span title={`Payment received from ${item.shopName ?? 'Legacy / shared'}`} aria-label={`Payment received from ${item.shopName ?? 'Legacy / shared'} on ${formatOutstandingDate(item.date)}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#D7DEEA', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>
-                          <CircleDollarSign size={22} aria-hidden="true" style={{ color: '#4ADE80', flex: '0 0 auto' }} />
+                        <span title={`Payment received from ${item.shopName ?? 'Legacy / shared'}`} aria-label={`Payment received from ${item.shopName ?? 'Legacy / shared'} on ${formatOutstandingDate(item.date)}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#102A43', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>
+                          <CircleDollarSign size={22} aria-hidden="true" style={{ color: '#2563EB', flex: '0 0 auto' }} />
                           {formatOutstandingDate(item.date)}
                         </span>
-                        <span style={{ minWidth: 0, color: '#BBF7D0', background: 'rgba(3, 48, 30, 0.48)', border: '1px solid rgba(187, 247, 208, 0.32)', borderRadius: 6, padding: '4px 7px', fontSize: 12, lineHeight: 1.2, fontWeight: 900, overflowWrap: 'anywhere', textAlign: 'right' }}>
+                        <span style={{ minWidth: 0, color: '#1E3A8A', background: '#FFFFFF', border: '1px solid #93C5FD', borderRadius: 6, padding: '4px 7px', fontSize: 12, lineHeight: 1.2, fontWeight: 900, overflowWrap: 'anywhere', textAlign: 'right' }}>
                           {item.shopName ?? 'Legacy / shared'}
                         </span>
                       </>
                     )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, paddingTop: 9, borderTop: item.type === 'payment' ? '1px solid rgba(187, 247, 208, 0.24)' : '1px solid #252932', color: '#FFFFFF', fontSize: 15, lineHeight: 1.35, fontWeight: 900, whiteSpace: 'nowrap', overflowX: 'auto' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, paddingTop: 9, borderTop: item.type === 'payment' ? '1px solid #86EFAC' : '1px solid #252932', color: item.type === 'payment' ? '#111827' : '#FFFFFF', fontSize: 15, lineHeight: 1.35, fontWeight: 900, whiteSpace: 'nowrap', overflowX: 'auto' }}>
                     <span>{formatMoney(item.previousOutstanding)}</span>
-                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#FDE68A' }}>{item.type === 'invoice' ? '+' : '-'}</span>
-                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#BBF7D0' }}>{formatMoney(item.transactionAmount)}</span>
-                    <span style={{ color: '#FDE68A' }}>=</span>
-                    <span style={{ color: '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
+                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#B45309' }}>{item.type === 'invoice' ? '+' : '-'}</span>
+                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#1D4ED8' }}>{formatMoney(item.transactionAmount)}</span>
+                    <span style={{ color: item.type === 'payment' ? '#475569' : '#FDE68A' }}>=</span>
+                    <span style={{ color: item.type === 'payment' ? '#DC2626' : '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
                   </div>
                 </div>
               ))}

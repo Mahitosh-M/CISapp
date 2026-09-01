@@ -1,26 +1,28 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { BellRing, ShoppingCart, UserPlus } from 'lucide-react';
+import { AlertCircle, BellRing, ChevronDown, ChevronUp, ShoppingCart, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
   createCustomer,
   deleteCustomerRecord,
+  deleteDueCustomerRecord,
   getAppSettings,
   getCustomers,
   getInvoices,
   getPayments,
   getPaymentTermsForTier,
+  syncDueCustomerRecords,
   syncOpeningBalanceInvoices,
   updateCustomerRecord
 } from '../services/firestoreService';
-import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
+import type { AppSettings, Customer, CustomerFormData, CustomerTier, DueCustomerRecord, Invoice, Payment } from '../types';
 import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
 import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
-import { buildCustomerOutstandingRows } from '../utils/overdueUtils';
+import { buildCustomerOutstandingRows, buildDueCustomerRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
@@ -62,6 +64,14 @@ const Customers = () => {
   const [showInactiveCustomers, setShowInactiveCustomers] = useState(false);
   const [inactiveDataLoaded, setInactiveDataLoaded] = useState(false);
   const [loadingInactiveCustomers, setLoadingInactiveCustomers] = useState(false);
+  const [dueCustomers, setDueCustomers] = useState<DueCustomerRecord[]>([]);
+  const [showDueCustomers, setShowDueCustomers] = useState(false);
+  const [dueDataLoaded, setDueDataLoaded] = useState(false);
+  const [loadingDueCustomers, setLoadingDueCustomers] = useState(false);
+  const [deletingDueCustomerId, setDeletingDueCustomerId] = useState('');
+  const [expandedDueCustomerIds, setExpandedDueCustomerIds] = useState<Set<string>>(() => new Set());
+  const [dueMessage, setDueMessage] = useState('');
+  const [dueError, setDueError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -192,6 +202,67 @@ const Customers = () => {
     } finally {
       setLoadingInactiveCustomers(false);
     }
+  };
+
+  const handleToggleDueCustomers = async () => {
+    if (showDueCustomers) {
+      setShowDueCustomers(false);
+      return;
+    }
+
+    setShowDueCustomers(true);
+    setDueMessage('');
+    setDueError('');
+
+    if (dueDataLoaded) return;
+
+    try {
+      setLoadingDueCustomers(true);
+      const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
+        getCustomers(),
+        getInvoices(),
+        getPayments(),
+        getAppSettings()
+      ]);
+      const dueRows = buildDueCustomerRows(customerRows, invoiceRows, paymentRows, appSettings);
+      const syncedRows = await syncDueCustomerRecords(dueRows);
+
+      setDueCustomers(syncedRows);
+      setDueDataLoaded(true);
+    } catch (err) {
+      setDueError(err instanceof Error ? err.message : 'Unable to load overdue customers.');
+    } finally {
+      setLoadingDueCustomers(false);
+    }
+  };
+
+  const handleDuePaid = async (row: DueCustomerRecord) => {
+    try {
+      setDeletingDueCustomerId(row.customerId);
+      setDueMessage('');
+      setDueError('');
+      await deleteDueCustomerRecord(row.customerId);
+      setDueCustomers((current) => current.filter((item) => item.customerId !== row.customerId));
+      setExpandedDueCustomerIds((current) => {
+        const next = new Set(current);
+        next.delete(row.customerId);
+        return next;
+      });
+      setDueMessage(`${row.customerName} removed from DUE.`);
+    } catch (err) {
+      setDueError(err instanceof Error ? err.message : 'Unable to remove the due record.');
+    } finally {
+      setDeletingDueCustomerId('');
+    }
+  };
+
+  const toggleDueInvoiceDetails = (customerId: string) => {
+    setExpandedDueCustomerIds((current) => {
+      const next = new Set(current);
+      if (next.has(customerId)) next.delete(customerId);
+      else next.add(customerId);
+      return next;
+    });
   };
 
   const inactiveOutstandingByCustomerId = useMemo(() => {
@@ -453,7 +524,7 @@ const Customers = () => {
 
   const staffTileGridStyle: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     gap: 12,
     marginBottom: 16
   };
@@ -490,7 +561,7 @@ const Customers = () => {
     <div>
       <SectionHeader title="Customers" />
 
-      {isStaff ? (
+      {isStaff || isAdmin ? (
         <div style={staffTileGridStyle}>
           <button
             type="button"
@@ -501,7 +572,7 @@ const Customers = () => {
             <span style={staffTileIconStyle}><ShoppingCart size={20} /></span>
             <span>
               <span style={{ display: 'block', fontWeight: 900 }}>Order</span>
-              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Open staff order entry</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Open order entry</span>
             </span>
           </button>
           <button
@@ -531,23 +602,30 @@ const Customers = () => {
               </span>
             </span>
           </button>
+          <button
+            type="button"
+            className="customer-action-tile"
+            style={{
+              ...staffTileStyle,
+              ...(showDueCustomers ? { borderColor: '#D4AF37', background: 'var(--role-card-subtle)' } : {})
+            }}
+            onClick={handleToggleDueCustomers}
+            disabled={loadingDueCustomers}
+          >
+            <span style={{ ...staffTileIconStyle, background: '#FDECEC', color: '#B42318' }}><AlertCircle size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showDueCustomers ? 'Hide DUE' : 'DUE'}</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
+                {loadingDueCustomers ? 'Loading overdue invoices' : 'More than 7 days overdue'}
+              </span>
+            </span>
+          </button>
         </div>
       ) : null}
 
       <div style={pageGridStyle}>
-        {(!isStaff || showCustomerForm) ? (
+        {showCustomerForm ? (
           <div style={cardStyle}>
-            {!isStaff ? (
-            <button
-              type="button"
-              style={{ ...buttonStyle, width: '100%', background: '#D4AF37', color: '#11185A', marginBottom: showCustomerForm ? 16 : 0 }}
-              onClick={handleToggleCustomerForm}
-            >
-              {showCustomerForm && !editingCustomerId ? 'Hide Customer Form' : 'Add New Customer'}
-            </button>
-            ) : null}
-
-            {showCustomerForm ? (
             <form onSubmit={handleSubmit}>
               <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 14 }}>
                 {editingCustomerId ? 'Edit Customer' : 'Add Customer'}
@@ -639,25 +717,13 @@ const Customers = () => {
             ) : null}
           </div>
         </form>
-            ) : null}
           </div>
         ) : null}
 
-        {!isAdmin && (!isStaff || showInactiveCustomers) ? (
+        {showInactiveCustomers ? (
           <div style={cardStyle}>
-            {!isStaff ? (
-              <button
-                type="button"
-                style={{ ...buttonStyle, width: '100%', background: showInactiveCustomers ? 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)' : '#E8EDF4', color: showInactiveCustomers ? '#FFFFFF' : '#11185A' }}
-                onClick={handleToggleInactiveCustomers}
-                disabled={loadingInactiveCustomers}
-              >
-                {loadingInactiveCustomers ? 'Loading customers...' : showInactiveCustomers ? 'Hide customers not ordered in 15+ days' : 'Customers not ordered in 15+ days'}
-              </button>
-            ) : null}
-
             {showInactiveCustomers ? (
-              <div style={{ marginTop: isStaff ? 0 : 16 }}>
+              <div>
                 <label style={labelStyle}>
                   Search follow-up customers
                   <input
@@ -723,6 +789,112 @@ const Customers = () => {
                 </div>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {showDueCustomers ? (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+              <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>DUE</div>
+              {!loadingDueCustomers ? (
+                <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{dueCustomers.length}</div>
+              ) : null}
+            </div>
+
+            {dueError ? <div style={{ color: '#FCA5A5', marginBottom: 12 }}>{dueError}</div> : null}
+            {dueMessage ? <div style={{ color: '#4ADE80', marginBottom: 12, fontWeight: 800 }}>{dueMessage}</div> : null}
+
+            <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid var(--role-card-border)' }}>
+              <table style={{ ...compactTableStyle, minWidth: 500 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...headerCellStyle, width: '32%' }}>Customer</th>
+                    <th style={{ ...headerCellStyle, width: '20%' }}>Overdue Days</th>
+                    <th style={{ ...headerCellStyle, width: '28%' }}>Amount</th>
+                    <th style={{ ...headerCellStyle, width: '20%' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingDueCustomers ? (
+                    <tr><td style={cellStyle} colSpan={4}>Loading DUE records...</td></tr>
+                  ) : dueCustomers.length === 0 ? (
+                    <tr><td style={cellStyle} colSpan={4}>No customers have pending invoices overdue by more than 7 days.</td></tr>
+                  ) : (
+                    dueCustomers.map((row) => {
+                      const detailsExpanded = expandedDueCustomerIds.has(row.customerId);
+
+                      return (
+                        <Fragment key={row.customerId}>
+                          <tr className="role-record-row">
+                            <td style={{ ...cellStyle, fontWeight: 900 }}>{row.customerName}</td>
+                            <td style={{ ...cellStyle, color: '#FCA5A5', fontWeight: 900 }}>{row.overdueDays} days</td>
+                            <td style={{ ...cellStyle, fontWeight: 900 }}>
+                              {row.invoices.length > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDueInvoiceDetails(row.customerId)}
+                                  aria-expanded={detailsExpanded}
+                                  title="Show invoice amounts"
+                                  style={{
+                                    border: 0,
+                                    padding: 0,
+                                    background: 'transparent',
+                                    color: '#F6E6A8',
+                                    font: 'inherit',
+                                    fontWeight: 900,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 5
+                                  }}
+                                >
+                                  {formatMoney(row.amount)}
+                                  {detailsExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                </button>
+                              ) : formatMoney(row.amount)}
+                            </td>
+                            <td style={cellStyle}>
+                              <button
+                                type="button"
+                                style={{ ...buttonStyle, width: '100%', padding: '7px 8px', background: '#E8F5EC', color: '#166534', fontSize: 11 }}
+                                disabled={Boolean(deletingDueCustomerId)}
+                                onClick={() => handleDuePaid(row)}
+                              >
+                                {deletingDueCustomerId === row.customerId ? '...' : 'PAID'}
+                              </button>
+                            </td>
+                          </tr>
+                          {detailsExpanded ? (
+                            <tr>
+                              <td style={{ ...cellStyle, paddingTop: 7, paddingBottom: 12 }} colSpan={4}>
+                                <div style={{ display: 'grid', gap: 6 }}>
+                                  {row.invoices.map((invoice) => (
+                                    <div
+                                      key={invoice.invoiceId}
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        gap: 12,
+                                        padding: '7px 9px',
+                                        borderRadius: 8,
+                                        background: 'var(--role-card-subtle)'
+                                      }}
+                                    >
+                                      <span style={{ color: '#D7DEEA', fontWeight: 800 }}>{invoice.invoiceNumber}</span>
+                                      <strong style={{ color: '#FFFFFF' }}>{formatMoney(invoice.amount)}</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
 

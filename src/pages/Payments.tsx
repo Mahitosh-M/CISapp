@@ -214,13 +214,11 @@ const Payments = () => {
   const selectedInvoiceOptions = selectedInvoiceIds
     .map((invoiceId) => invoiceOptions.find((invoice) => invoice.id === invoiceId))
     .filter((invoice): invoice is Invoice & { paidAmount: number; pendingAmount: number } => Boolean(invoice));
-  const selectedPendingTotal = selectedInvoiceOptions.reduce((sum, invoice) => sum + invoice.pendingAmount, 0);
   const allocationResult = useMemo(() => {
     const invoicesForAllocation = editingPaymentId ? selectedInvoiceOptions : pendingInvoiceOptions;
     return allocateReceiptOldestFirst(invoicesForAllocation, formData.amount, formData.cashDiscount);
   }, [editingPaymentId, formData.amount, formData.cashDiscount, pendingInvoiceOptions, selectedInvoiceOptions]);
   const allocationPreview = allocationResult.allocations;
-  const appliedTotalPreview = allocationResult.appliedTotal;
   const overpaymentAmount = allocationResult.advanceAmount;
 
   const splitPaymentTotalById = useMemo(() => {
@@ -598,25 +596,20 @@ const Payments = () => {
       <SectionHeader title="Payments" />
 
       <form style={cardStyle} onSubmit={handleSubmit}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingPaymentId ? 'Edit Payment' : 'Add Payment'}</div>
-            <div style={{ color: '#D7DEEA', marginTop: 4 }}>Enter the received amount; it will clear all pending invoices in oldest-first order.</div>
-          </div>
-          <div style={{ color: '#FFFFFF', fontWeight: 800 }}>
-            <div style={{ color: selectedPendingTotal > 0 ? '#B42318' : '#1B7F3A' }}>
-              Selected Pending: {selectedInvoiceIds.length > 0 ? formatMoney(selectedPendingTotal) : 'No pending invoice'}
-            </div>
-            {selectedCustomer ? (
-              <div style={{ color: '#4ADE80', fontSize: 12, marginTop: 4 }}>Available advance: {formatMoney(selectedCustomer.advanceBalance)}</div>
-            ) : null}
-            {selectedInvoiceIds.length > 0 ? (
-              <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>This payment applies: {formatMoney(appliedTotalPreview)}</div>
-            ) : null}
-          </div>
-        </div>
-
         <div style={formGridStyle}>
+          {selectedCustomer && !loadingCustomerPayments ? (
+            <div style={{ gridColumn: '1 / -1', color: '#FFFFFF' }}>
+              <div style={{ fontSize: 13, lineHeight: 1.3, fontWeight: 800 }}>
+                DUE: <span style={{ color: '#F87171', fontSize: 20, fontWeight: 900 }}>{formatMoney(totalPendingAmount)}</span>
+              </div>
+              {(selectedCustomer.advanceBalance ?? 0) > 0 ? (
+                <div style={{ color: '#4ADE80', fontSize: 13, marginTop: 5, fontWeight: 800 }}>
+                  Available advance: {formatMoney(selectedCustomer.advanceBalance)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <label style={labelStyle}>
             Customer
             <select style={inputStyle} value={formData.customerId} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
@@ -658,11 +651,8 @@ const Payments = () => {
 
           {formData.customerId && !loadingCustomerPayments && invoiceOptions.length > 0 ? (
             <div style={{ gridColumn: '1 / -1', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12, background: 'var(--role-card-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                <div style={{ fontWeight: 900, color: '#FFFFFF' }}>{editingPaymentId ? 'Apply to invoice' : 'Oldest-first invoice allocation'}</div>
-                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>
-                  {editingPaymentId ? 'Selected' : 'Total'} pending: {formatMoney(editingPaymentId ? selectedPendingTotal : totalPendingAmount)}
-                </div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 900, color: '#FFFFFF' }}>{editingPaymentId ? 'Apply to Invoice' : 'INVOICES'}</div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
                 {invoiceOptions.map((invoice) => {

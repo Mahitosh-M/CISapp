@@ -1,4 +1,4 @@
-import type { AppSettings, Customer, Invoice, OverdueInvoiceRisk, Payment } from '../types';
+import type { AppSettings, Customer, DueCustomerRow, Invoice, OverdueInvoiceRisk, Payment } from '../types';
 import { getTodayDateString } from './dateUtils';
 import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
@@ -24,16 +24,24 @@ export const buildOverdueInvoiceRisks = (
   customers: Customer[],
   invoices: Invoice[],
   payments: Payment[],
-  settings?: AppSettings
+  settings?: AppSettings,
+  today = getTodayDateString()
 ): OverdueInvoiceRisk[] => {
-  const today = getTodayDateString();
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const paidAmountByInvoiceId = new Map<string, number>();
+
+  payments.forEach((payment) => {
+    paidAmountByInvoiceId.set(
+      payment.invoiceId,
+      (paidAmountByInvoiceId.get(payment.invoiceId) ?? 0) + getInvoicePaymentEffect(payment)
+    );
+  });
 
   return invoices
     .map((invoice) => {
       const customer = customerById.get(invoice.customerId);
       const tier = customer?.tier ?? 'Tier 4';
-      const paidAmount = getPaidAmountForInvoice(invoice.id, payments);
+      const paidAmount = paidAmountByInvoiceId.get(invoice.id) ?? 0;
       const overdueAmount = getPendingAmount(invoice.totalSales, paidAmount);
       const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);
       const overdueDays = effectiveDueDate < today && overdueAmount > 0 ? daysBetween(effectiveDueDate, today) : 0;
@@ -57,6 +65,51 @@ export const buildOverdueInvoiceRisks = (
     })
     .filter((row) => row.overdueAmount > 0 && row.overdueDays > 0)
     .sort((a, b) => b.overdueAmount - a.overdueAmount);
+};
+
+export const buildDueCustomerRows = (
+  customers: Customer[],
+  invoices: Invoice[],
+  payments: Payment[],
+  settings?: AppSettings,
+  today = getTodayDateString()
+): DueCustomerRow[] => {
+  const rowsByCustomerId = new Map<string, DueCustomerRow>();
+
+  buildOverdueInvoiceRisks(customers, invoices, payments, settings, today)
+    .filter((invoice) => invoice.overdueDays > 7)
+    .forEach((invoice) => {
+      const current = rowsByCustomerId.get(invoice.customerId) ?? {
+        customerId: invoice.customerId,
+        customerName: invoice.customerName,
+        overdueDays: 0,
+        amount: 0,
+        invoices: []
+      };
+
+      current.overdueDays = Math.max(current.overdueDays, invoice.overdueDays);
+      current.amount += invoice.overdueAmount;
+      current.invoices.push({
+        invoiceId: invoice.invoiceId,
+        invoiceNumber: invoice.invoiceNumber,
+        overdueDays: invoice.overdueDays,
+        amount: invoice.overdueAmount
+      });
+      rowsByCustomerId.set(invoice.customerId, current);
+    });
+
+  return [...rowsByCustomerId.values()]
+    .map((row) => ({
+      ...row,
+      invoices: row.invoices.sort((left, right) =>
+        right.overdueDays - left.overdueDays || right.amount - left.amount
+      )
+    }))
+    .sort((left, right) =>
+      right.overdueDays - left.overdueDays
+      || right.amount - left.amount
+      || left.customerName.localeCompare(right.customerName)
+    );
 };
 
 export const buildCustomerOutstandingRows = (

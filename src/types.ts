@@ -224,6 +224,26 @@ export interface Payment {
   cashSyncedAmount?: number;
 }
 
+export interface DueInvoiceDetail {
+  invoiceId: string;
+  invoiceNumber: string;
+  overdueDays: number;
+  amount: number;
+}
+
+export interface DueCustomerRow {
+  customerId: string;
+  customerName: string;
+  overdueDays: number;
+  amount: number;
+  invoices: DueInvoiceDetail[];
+}
+
+export interface DueCustomerRecord extends DueCustomerRow {
+  id: string;
+  updatedAt: string;
+}
+
 export interface UserProfile {
   id: string;
   uid: string;

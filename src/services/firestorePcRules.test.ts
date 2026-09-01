@@ -143,6 +143,51 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await assertFails(deleteDoc(doc(adminDatabase, 'users', 'self-alias')));
   });
 
+  const dueCustomerPayload = {
+    customerId: 'customer-1',
+    customerName: 'Alpha Medical',
+    overdueDays: 12,
+    amount: 1200,
+    invoices: [
+      { invoiceId: 'invoice-1', invoiceNumber: 'INV-1', overdueDays: 12, amount: 700 },
+      { invoiceId: 'invoice-2', invoiceNumber: 'INV-2', overdueDays: 10, amount: 500 }
+    ],
+    updatedAt: timestamp
+  };
+
+  it.each(['Admin', 'Staff'] as const)('allows %s to create, read, and delete a DUE record', async (role) => {
+    await seed(role);
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+    const dueRef = doc(database, 'dueCustomers', 'customer-1');
+
+    await assertSucceeds(setDoc(dueRef, dueCustomerPayload));
+    await assertSucceeds(getDocs(collection(database, 'dueCustomers')));
+    await assertSucceeds(deleteDoc(dueRef));
+  });
+
+  it('denies customer-role access to DUE records', async () => {
+    await seedManagedUser('customer-user', 'customer');
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'dueCustomers', 'customer-1'), dueCustomerPayload);
+    });
+    const database = testEnvironment.authenticatedContext('customer-user').firestore();
+    const dueRef = doc(database, 'dueCustomers', 'customer-1');
+
+    await assertFails(getDoc(dueRef));
+    await assertFails(setDoc(dueRef, dueCustomerPayload));
+    await assertFails(deleteDoc(dueRef));
+  });
+
+  it('rejects a DUE record at the seven-day boundary', async () => {
+    await seed('Staff');
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+
+    await assertFails(setDoc(doc(database, 'dueCustomers', 'customer-1'), {
+      ...dueCustomerPayload,
+      overdueDays: 7
+    }));
+  });
+
   const addInvoicePcToBatch = (
     testDatabase: unknown,
     points: number,
