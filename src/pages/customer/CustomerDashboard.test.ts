@@ -63,7 +63,7 @@ describe('customer outstanding history', () => {
         transactionCount: 1,
         previousOutstanding: 2_000,
         currentOutstanding: 1_000,
-        shopName: 'SMPA'
+        shopName: 'SND'
       },
       {
         id: 'invoices:invoice-1',
@@ -157,7 +157,7 @@ describe('customer outstanding history', () => {
         transactionCount: 1,
         previousOutstanding: 600,
         currentOutstanding: 300,
-        shopName: 'ASHOKA'
+        shopName: 'MSK'
       },
       {
         id: 'invoices:invoice-300:invoice-200',
@@ -208,7 +208,7 @@ describe('customer outstanding history', () => {
       previousOutstanding: 850,
       transactionAmount: 50,
       currentOutstanding: 800,
-      shopName: 'SMPA'
+      shopName: 'SND'
     });
     expect(history[5]).toMatchObject({
       id: 'invoices:invoice-2',

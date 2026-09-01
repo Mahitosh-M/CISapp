@@ -49,6 +49,12 @@ const getPaymentOutstandingEffect = (payment: Payment) => (
   getInvoicePaymentEffect(payment) + Math.max(0, payment.amountUsedForOldBalance ?? 0)
 );
 
+const getCustomerPaymentShopName = (payment: Payment) => {
+  if (payment.shopId === 'SHOP_S') return 'SND';
+  if (payment.shopId === 'SHOP_A') return 'MSK';
+  return getShopName(payment.shopId);
+};
+
 const getPaymentGroupKey = (payment: Payment) => {
   if (payment.splitPaymentGroupId) return `split:${payment.splitPaymentGroupId}`;
 
@@ -83,7 +89,7 @@ const buildPaymentLedgerEvents = (payments: Payment[]) => {
       createdAt: payment.createdAt,
       order: 1,
       amount: paymentEffect,
-      shopName: getShopName(payment.shopId)
+      shopName: getCustomerPaymentShopName(payment)
     });
   });
 
