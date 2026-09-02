@@ -1,7 +1,8 @@
 import type { Customer } from '../types';
+import type { jsPDF } from 'jspdf';
 import type { CustomerLedgerEntry } from './customerLedger';
 import { formatShortDate } from './formatters';
-import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from './openingBalance';
+import { isOpeningBalanceInvoice } from './openingBalance';
 import { getInvoicePaymentEffect } from './paymentUtils';
 import { getShopName } from './shops';
 
@@ -18,14 +19,38 @@ type PdfRowMeta = {
   balance: number;
 };
 
-const formatPdfMoney = (value: number) => `INR ${Math.round(value || 0).toLocaleString('en-IN')}`;
+const formatPdfMoney = (value: number) => `₹ ${Math.round(value || 0).toLocaleString('en-IN')}`;
+
+const getPdfShopName = (shopId?: NonNullable<CustomerLedgerEntry['invoice']>['shopId']) => {
+  if (shopId === 'SHOP_S') return 'SND';
+  if (shopId === 'SHOP_A') return 'MSK';
+  return getShopName(shopId);
+};
+
+const toBase64 = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+};
+
+const loadPdfFont = async (document: jsPDF) => {
+  const response = await fetch('/fonts/Roboto-Regular.ttf');
+  if (!response.ok) throw new Error('Unable to load the PDF font. Check your connection and try again.');
+  document.addFileToVFS('Roboto-Regular.ttf', toBase64(await response.arrayBuffer()));
+  document.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+  document.addFont('Roboto-Regular.ttf', 'Roboto', 'bold');
+};
 
 const getSafeFileName = (customerName: string, rangeLabel: string) => {
   const cleanPart = (value: string) => value.trim().replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '');
   return `${cleanPart(customerName) || 'customer'}-ledger-${cleanPart(rangeLabel) || 'statement'}.pdf`;
 };
 
-export const downloadCustomerLedgerPdf = async ({
+export const createCustomerLedgerPdf = async ({
   customer,
   rows,
   rangeLabel,
@@ -36,6 +61,7 @@ export const downloadCustomerLedgerPdf = async ({
     import('jspdf-autotable')
   ]);
   const document = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+  await loadPdfFont(document);
   const pageWidth = document.internal.pageSize.getWidth();
   const currentBalance = rows[rows.length - 1]?.runningBalance ?? customer.totalOutstandingAmount ?? 0;
   const paidByInvoiceId = rows.reduce((totals, row) => {
@@ -49,13 +75,15 @@ export const downloadCustomerLedgerPdf = async ({
   document.setFillColor(212, 175, 55);
   document.rect(0, 32, pageWidth, 1.4, 'F');
   document.setTextColor(255, 255, 255);
-  document.setFont('helvetica', 'bold');
+  document.setFont('Roboto', 'bold');
   document.setFontSize(17);
-  document.text('Customer Ledger Statement', 10, 13);
-  document.setFont('helvetica', 'normal');
+  const customerHeadingWidth = document.getTextWidth(customer.name);
+  document.setFontSize(Math.max(11, Math.min(17, 17 * (125 / Math.max(customerHeadingWidth, 1)))));
+  document.text(customer.name, 10, 13);
+  document.setFont('Roboto', 'normal');
   document.setFontSize(8.5);
-  document.text(`${customer.name}  |  ${customer.area || 'Area not specified'}  |  ${rangeLabel}`, 10, 21, { maxWidth: 128 });
-  document.setFont('helvetica', 'bold');
+  document.text(`Customer Ledger Statement  |  ${rangeLabel}`, 10, 21, { maxWidth: 128 });
+  document.setFont('Roboto', 'bold');
   document.setFontSize(8);
   document.text('CURRENT BALANCE', pageWidth - 10, 11, { align: 'right' });
   document.setTextColor(currentBalance > 0 ? 255 : 191, currentBalance > 0 ? 190 : 219, currentBalance > 0 ? 190 : 254);
@@ -79,15 +107,12 @@ export const downloadCustomerLedgerPdf = async ({
           : 'Invoice';
     const details = invoice
       ? [
-          getInvoiceDisplayNumber(invoice),
-          `Due ${formatShortDate(invoice.dueDate)}`,
-          invoice.shopId ? getShopName(invoice.shopId) : '',
+          invoice.shopId ? getPdfShopName(invoice.shopId) : '',
           invoice.notes
         ].filter(Boolean).join(' | ')
       : payment
         ? [
-            payment.invoiceNumber ? `Invoice ${payment.invoiceNumber}` : 'Unallocated',
-            payment.shopId ? getShopName(payment.shopId) : '',
+            payment.shopId ? getPdfShopName(payment.shopId) : '',
             payment.splitPaymentCount && payment.splitPaymentCount > 1
               ? `Split ${payment.splitPaymentPart || 1}/${payment.splitPaymentCount}`
               : '',
@@ -125,7 +150,7 @@ export const downloadCustomerLedgerPdf = async ({
     head: [['Date', 'Entry', 'Details', 'Amount', 'Balance']],
     body,
     styles: {
-      font: 'helvetica',
+      font: 'Roboto',
       fontSize: 8.2,
       cellPadding: 2.2,
       lineColor: [218, 225, 234],
@@ -181,12 +206,17 @@ export const downloadCustomerLedgerPdf = async ({
     document.setPage(pageNumber);
     document.setDrawColor(218, 225, 234);
     document.line(10, 286, pageWidth - 10, 286);
-    document.setFont('helvetica', 'normal');
+    document.setFont('Roboto', 'normal');
     document.setFontSize(7.5);
     document.setTextColor(107, 114, 128);
     document.text(`Generated ${generatedAt}`, 10, 291);
     document.text(`Page ${pageNumber} of ${pageCount}`, pageWidth - 10, 291, { align: 'right' });
   }
 
-  document.save(getSafeFileName(customer.name, rangeLabel));
+  return document;
+};
+
+export const downloadCustomerLedgerPdf = async (options: CustomerLedgerPdfOptions) => {
+  const document = await createCustomerLedgerPdf(options);
+  document.save(getSafeFileName(options.customer.name, options.rangeLabel));
 };
