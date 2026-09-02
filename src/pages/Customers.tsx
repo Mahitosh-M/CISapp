@@ -1,6 +1,6 @@
-import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AlertCircle, BellRing, ChevronDown, ChevronUp, ShoppingCart, UserPlus } from 'lucide-react';
+import { AlertCircle, BellRing, BookOpen, ChevronDown, ChevronUp, CircleDollarSign, Download, FileText, ShoppingCart, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -10,20 +10,25 @@ import {
   getAppSettings,
   getCustomers,
   getInvoices,
+  getInvoicesByCustomerId,
   getPayments,
+  getPaymentsByCustomerId,
   getPaymentTermsForTier,
   syncDueCustomerRecords,
   syncOpeningBalanceInvoices,
   updateCustomerRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, DueCustomerRecord, Invoice, Payment } from '../types';
+import { buildCustomerLedger } from '../utils/customerLedger';
+import { downloadCustomerLedgerPdf } from '../utils/customerLedgerPdf';
 import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
 import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
-import { formatDate, formatMoney } from '../utils/formatters';
+import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
-import { getBusinessInvoices } from '../utils/openingBalance';
+import { getBusinessInvoices, getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
 import { buildCustomerOutstandingRows, buildDueCustomerRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
+import { getShopName } from '../utils/shops';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 
@@ -42,6 +47,14 @@ const emptyCustomerForm: CustomerFormData = {
 };
 
 type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount'>;
+type LedgerRange = 'last_10' | 'last_month' | 'last_3_months' | 'overall';
+
+const LEDGER_RANGES: Array<{ id: LedgerRange; label: string }> = [
+  { id: 'last_10', label: 'Last 10 Transactions' },
+  { id: 'last_month', label: 'Last Month' },
+  { id: 'last_3_months', label: 'Last 3 Months' },
+  { id: 'overall', label: 'Overall' }
+];
 
 const Customers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -72,10 +85,23 @@ const Customers = () => {
   const [expandedDueCustomerIds, setExpandedDueCustomerIds] = useState<Set<string>>(() => new Set());
   const [dueMessage, setDueMessage] = useState('');
   const [dueError, setDueError] = useState('');
+  const [showLedger, setShowLedger] = useState(false);
+  const [ledgerCustomers, setLedgerCustomers] = useState<Customer[]>([]);
+  const [ledgerCustomerListLoaded, setLedgerCustomerListLoaded] = useState(false);
+  const [loadingLedgerCustomers, setLoadingLedgerCustomers] = useState(false);
+  const [selectedLedgerCustomerId, setSelectedLedgerCustomerId] = useState('');
+  const [ledgerInvoices, setLedgerInvoices] = useState<Invoice[]>([]);
+  const [ledgerPayments, setLedgerPayments] = useState<Payment[]>([]);
+  const [loadingLedger, setLoadingLedger] = useState(false);
+  const [ledgerError, setLedgerError] = useState('');
+  const [activeLedgerRange, setActiveLedgerRange] = useState<LedgerRange | null>(null);
+  const [loadedLedgerRangeKey, setLoadedLedgerRangeKey] = useState('');
+  const [downloadingLedgerPdf, setDownloadingLedgerPdf] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const ledgerRequestRef = useRef(0);
   const { canDeleteRecords, userProfile } = useAuth();
   const isAdmin = userProfile?.role === 'Admin';
   const isStaff = userProfile?.role === 'Staff';
@@ -263,6 +289,119 @@ const Customers = () => {
       else next.add(customerId);
       return next;
     });
+  };
+
+  const handleToggleLedger = async () => {
+    if (showLedger) {
+      setShowLedger(false);
+      return;
+    }
+
+    setShowLedger(true);
+    setLedgerError('');
+    if (ledgerCustomerListLoaded) return;
+
+    try {
+      setLoadingLedgerCustomers(true);
+      setLedgerCustomers(await getCustomers());
+      setLedgerCustomerListLoaded(true);
+    } catch (err) {
+      setLedgerError(err instanceof Error ? err.message : 'Unable to load customers for the ledger.');
+    } finally {
+      setLoadingLedgerCustomers(false);
+    }
+  };
+
+  const handleLedgerCustomerChange = (customerId: string) => {
+    ++ledgerRequestRef.current;
+    setSelectedLedgerCustomerId(customerId);
+    setLedgerInvoices([]);
+    setLedgerPayments([]);
+    setLedgerError('');
+    setActiveLedgerRange(null);
+    setLoadedLedgerRangeKey('');
+    setLoadingLedger(false);
+  };
+
+  const handleLedgerRangeChange = async (range: LedgerRange) => {
+    if (!selectedLedgerCustomerId) return;
+    const rangeKey = `${selectedLedgerCustomerId}:${range}`;
+    setActiveLedgerRange(range);
+    setLedgerError('');
+    if (loadedLedgerRangeKey === rangeKey) return;
+    const requestId = ++ledgerRequestRef.current;
+    const today = getTodayDateString();
+    const queryOptions = range === 'last_month'
+      ? { fromDate: addDaysToDateString(today, -30), toDate: today }
+      : range === 'last_3_months'
+        ? { fromDate: addDaysToDateString(today, -90), toDate: today }
+        : range === 'last_10'
+          ? { limitCount: 10 }
+          : undefined;
+
+    try {
+      setLoadingLedger(true);
+      const [invoiceRows, paymentRows] = await Promise.all([
+        getInvoicesByCustomerId(selectedLedgerCustomerId, queryOptions),
+        getPaymentsByCustomerId(selectedLedgerCustomerId, queryOptions)
+      ]);
+      if (requestId !== ledgerRequestRef.current) return;
+      if (range === 'last_10') {
+        const latestRows = buildCustomerLedger(invoiceRows, paymentRows).slice(-10);
+        const invoiceIds = new Set(latestRows.flatMap((row) => row.invoice ? [row.invoice.id] : []));
+        const paymentIds = new Set(latestRows.flatMap((row) => row.payment ? [row.payment.id] : []));
+        setLedgerInvoices(invoiceRows.filter((invoice) => invoiceIds.has(invoice.id)));
+        setLedgerPayments(paymentRows.filter((payment) => paymentIds.has(payment.id)));
+      } else {
+        setLedgerInvoices(invoiceRows);
+        setLedgerPayments(paymentRows);
+      }
+      setLoadedLedgerRangeKey(rangeKey);
+    } catch (err) {
+      if (requestId === ledgerRequestRef.current) {
+        setLedgerError(err instanceof Error ? err.message : 'Unable to load the customer ledger.');
+      }
+    } finally {
+      if (requestId === ledgerRequestRef.current) setLoadingLedger(false);
+    }
+  };
+
+  const selectedLedgerCustomer = useMemo(
+    () => ledgerCustomers.find((customer) => customer.id === selectedLedgerCustomerId),
+    [ledgerCustomers, selectedLedgerCustomerId]
+  );
+  const ledgerRows = useMemo(
+    () => buildCustomerLedger(
+      ledgerInvoices,
+      ledgerPayments,
+      activeLedgerRange && activeLedgerRange !== 'overall' && selectedLedgerCustomer?.totalOutstandingAmount !== undefined
+        ? { endingBalance: selectedLedgerCustomer.totalOutstandingAmount }
+        : undefined
+    ),
+    [activeLedgerRange, ledgerInvoices, ledgerPayments, selectedLedgerCustomer]
+  );
+  const ledgerOpeningBalance = activeLedgerRange && activeLedgerRange !== 'overall' && ledgerRows.length > 0
+    ? Math.max(0, ledgerRows[0].runningBalance - ledgerRows[0].invoiceAmount + ledgerRows[0].paymentAmount)
+    : undefined;
+  const displayedLedgerRows = useMemo(() => [...ledgerRows].reverse(), [ledgerRows]);
+  const ledgerRangeLabel = LEDGER_RANGES.find((range) => range.id === activeLedgerRange)?.label ?? '';
+
+  const handleDownloadLedgerPdf = async () => {
+    if (!selectedLedgerCustomer || ledgerRows.length === 0 || !ledgerRangeLabel) return;
+    try {
+      setDownloadingLedgerPdf(true);
+      setLedgerError('');
+      await downloadCustomerLedgerPdf({
+        customer: selectedLedgerCustomer,
+        rows: ledgerRows,
+        rangeLabel: ledgerRangeLabel,
+        openingBalance: ledgerOpeningBalance
+      });
+    } catch (err) {
+      setLedgerError(err instanceof Error ? err.message : 'Unable to download the ledger PDF.');
+    } finally {
+      setDownloadingLedgerPdf(false);
+    }
   };
 
   const inactiveOutstandingByCustomerId = useMemo(() => {
@@ -620,6 +759,24 @@ const Customers = () => {
               </span>
             </span>
           </button>
+          <button
+            type="button"
+            className="customer-action-tile"
+            style={{
+              ...staffTileStyle,
+              ...(showLedger ? { borderColor: '#D4AF37', background: 'var(--role-card-subtle)' } : {})
+            }}
+            onClick={handleToggleLedger}
+            disabled={loadingLedgerCustomers}
+          >
+            <span style={{ ...staffTileIconStyle, background: '#E8F5EC', color: '#166534' }}><BookOpen size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showLedger ? 'Hide LEDGER' : 'LEDGER'}</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
+                {loadingLedgerCustomers ? 'Loading customers' : 'Customer account history'}
+              </span>
+            </span>
+          </button>
         </div>
       ) : null}
 
@@ -891,6 +1048,182 @@ const Customers = () => {
                         </Fragment>
                       );
                     })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {showLedger ? (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', paddingBottom: 14, borderBottom: '1px solid var(--role-card-border)' }}>
+              <div>
+                <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>LEDGER</div>
+                {selectedLedgerCustomer ? (
+                  <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 5 }}>{selectedLedgerCustomer.area || 'No area'}</div>
+                ) : null}
+              </div>
+              {selectedLedgerCustomer && activeLedgerRange && !loadingLedger ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Current Balance</div>
+                    <div style={{ color: '#FCA5A5', fontSize: 20, fontWeight: 900, marginTop: 3 }}>
+                      {formatMoney(ledgerRows[ledgerRows.length - 1]?.runningBalance ?? selectedLedgerCustomer.totalOutstandingAmount ?? 0)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    style={{ ...buttonStyle, display: 'inline-flex', alignItems: 'center', gap: 7, background: '#E8F5EC', color: '#166534', opacity: ledgerRows.length === 0 || downloadingLedgerPdf ? 0.55 : 1 }}
+                    disabled={ledgerRows.length === 0 || downloadingLedgerPdf}
+                    onClick={() => void handleDownloadLedgerPdf()}
+                  >
+                    <Download size={16} />{downloadingLedgerPdf ? 'Preparing...' : 'Download PDF'}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <label style={{ ...labelStyle, maxWidth: 520, marginTop: 16 }}>
+              Customer
+              <select
+                style={inputStyle}
+                value={selectedLedgerCustomerId}
+                disabled={loadingLedgerCustomers}
+                onChange={(event) => handleLedgerCustomerChange(event.target.value)}
+              >
+                <option value="">{loadingLedgerCustomers ? 'Loading customers...' : 'Select customer'}</option>
+                {ledgerCustomers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
+                ))}
+              </select>
+            </label>
+
+            {selectedLedgerCustomerId ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }} role="group" aria-label="Ledger range">
+                {LEDGER_RANGES.map((range) => {
+                  const active = activeLedgerRange === range.id;
+                  return (
+                    <button
+                      key={range.id}
+                      type="button"
+                      aria-pressed={active}
+                      disabled={loadingLedger}
+                      onClick={() => void handleLedgerRangeChange(range.id)}
+                      style={{
+                        ...buttonStyle,
+                        minHeight: 38,
+                        padding: '8px 12px',
+                        border: active ? '1px solid #D4AF37' : '1px solid var(--role-card-border)',
+                        borderRadius: 8,
+                        background: active ? '#D4AF37' : 'var(--role-card-subtle)',
+                        color: active ? '#11185A' : '#FFFFFF',
+                        opacity: loadingLedger && !active ? 0.65 : 1
+                      }}
+                    >
+                      {range.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {ledgerError ? <div style={{ color: '#FCA5A5', marginBottom: 12 }}>{ledgerError}</div> : null}
+
+            <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--role-card-border)' }}>
+              <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...headerCellStyle, width: '11%' }}>Date</th>
+                    <th style={{ ...headerCellStyle, width: '13%' }}>Entry</th>
+                    <th style={{ ...headerCellStyle, width: '34%' }}>Details</th>
+                    <th style={{ ...headerCellStyle, width: '14%', textAlign: 'right' }}>Invoice (+)</th>
+                    <th style={{ ...headerCellStyle, width: '14%', textAlign: 'right' }}>Payment (-)</th>
+                    <th style={{ ...headerCellStyle, width: '14%', textAlign: 'right' }}>Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingLedger ? (
+                    <tr><td style={{ ...cellStyle, padding: 18 }} colSpan={6}>Loading ledger...</td></tr>
+                  ) : !selectedLedgerCustomerId ? (
+                    <tr><td style={{ ...cellStyle, padding: 18 }} colSpan={6}>No customer selected.</td></tr>
+                  ) : !activeLedgerRange ? (
+                    <tr><td style={{ ...cellStyle, padding: 18 }} colSpan={6}>No range selected.</td></tr>
+                  ) : ledgerRows.length === 0 ? (
+                    <tr><td style={{ ...cellStyle, padding: 18 }} colSpan={6}>No invoice or payment records found.</td></tr>
+                  ) : (
+                    <>
+                      {displayedLedgerRows.map((row) => {
+                      const invoice = row.invoice;
+                      const payment = row.payment;
+                      const paymentMeta = payment ? [
+                        payment.invoiceNumber ? `Invoice ${payment.invoiceNumber}` : 'Unallocated',
+                        payment.mode,
+                        payment.shopId ? getShopName(payment.shopId) : '',
+                        payment.splitPaymentCount && payment.splitPaymentCount > 1
+                          ? `Split ${payment.splitPaymentPart || 1}/${payment.splitPaymentCount}`
+                          : ''
+                      ].filter(Boolean).join(' | ') : '';
+
+                      return (
+                        <tr
+                          className="role-record-row"
+                          key={row.id}
+                          style={{ background: row.kind === 'payment' ? 'rgba(34, 197, 94, 0.08)' : 'rgba(248, 113, 113, 0.06)' }}
+                        >
+                          <td style={{ ...cellStyle, fontWeight: 800, whiteSpace: 'nowrap', verticalAlign: 'middle' }}>{formatShortDate(row.date)}</td>
+                          <td style={{ ...cellStyle, verticalAlign: 'middle' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: row.kind === 'payment' ? '#86EFAC' : '#FCA5A5', fontWeight: 900 }}>
+                              {row.kind === 'payment' ? <CircleDollarSign size={16} /> : <FileText size={16} />}
+                              {payment?.paymentKind === 'advance_application' ? 'Advance' : row.kind === 'payment' ? 'Payment' : invoice && isOpeningBalanceInvoice(invoice) ? 'Opening' : 'Invoice'}
+                            </span>
+                          </td>
+                          <td style={{ ...cellStyle, verticalAlign: 'middle' }}>
+                            {invoice ? (
+                              <>
+                                <div style={{ fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</div>
+                                <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 4 }}>
+                                  Due {formatShortDate(invoice.dueDate)} | Cost {formatMoney(invoice.totalCost)}
+                                </div>
+                                {invoice.notes ? <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 3 }}>{invoice.notes}</div> : null}
+                              </>
+                            ) : payment ? (
+                              <>
+                                <div style={{ fontWeight: 900 }}>{paymentMeta}</div>
+                                <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 4 }}>
+                                  Received {formatMoney(row.paymentReceived)}
+                                  {payment.cashDiscount > 0 ? ` | Discount ${formatMoney(payment.cashDiscount)}` : ''}
+                                  {payment.advanceCreatedAmount > 0 ? ` | Advance ${formatMoney(payment.advanceCreatedAmount)}` : ''}
+                                </div>
+                                {payment.notes ? <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 3 }}>{payment.notes}</div> : null}
+                              </>
+                            ) : null}
+                          </td>
+                          <td style={{ ...cellStyle, textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: row.invoiceAmount > 0 ? '#FCA5A5' : '#8792A9', fontWeight: 900 }}>
+                            {row.invoiceAmount > 0 ? `+ ${formatMoney(row.invoiceAmount)}` : '-'}
+                          </td>
+                          <td style={{ ...cellStyle, textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: row.paymentAmount > 0 ? '#86EFAC' : '#8792A9', fontWeight: 900 }}>
+                            {row.paymentAmount > 0 ? `- ${formatMoney(row.paymentAmount)}` : '-'}
+                          </td>
+                          <td style={{ ...cellStyle, textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap', color: row.runningBalance > 0 ? '#FCA5A5' : '#86EFAC', fontWeight: 900 }}>
+                            {formatMoney(row.runningBalance)}
+                          </td>
+                        </tr>
+                      );
+                      })}
+                      {ledgerOpeningBalance !== undefined ? (
+                        <tr style={{ background: 'rgba(148, 163, 184, 0.10)' }}>
+                          <td style={{ ...cellStyle, verticalAlign: 'middle' }}>-</td>
+                          <td style={{ ...cellStyle, verticalAlign: 'middle', fontWeight: 900 }}>B/F</td>
+                          <td style={{ ...cellStyle, verticalAlign: 'middle', color: '#D7DEEA' }}>Balance brought forward</td>
+                          <td style={{ ...cellStyle, textAlign: 'right' }}>-</td>
+                          <td style={{ ...cellStyle, textAlign: 'right' }}>-</td>
+                          <td style={{ ...cellStyle, textAlign: 'right', whiteSpace: 'nowrap', color: ledgerOpeningBalance > 0 ? '#FCA5A5' : '#86EFAC', fontWeight: 900 }}>
+                            {formatMoney(ledgerOpeningBalance)}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </>
                   )}
                 </tbody>
               </table>
