@@ -73,6 +73,7 @@ import { getUnpaidInvoicesAfterPayment } from '../utils/paymentAllocation';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import {
   applyCustomerOutstandingDelta,
+  buildInvoiceBalanceCheckpoints,
   combineCustomerOutstandingDeltas,
   type CustomerOutstandingDelta
 } from '../utils/customerOutstanding';
@@ -539,6 +540,8 @@ const buildOpeningBalanceInvoicePayload = (customerId: string, customer: Custome
     totalSales: amount,
     totalCost: 0,
     totalProfit: 0,
+    customerBalanceBeforeInvoice: 0,
+    customerBalanceAfterInvoice: amount,
     notes: 'Opening balance from previous outstanding',
     createdAt,
     updatedAt: createdAt
@@ -590,11 +593,16 @@ export async function syncCustomerFinancialSummary(customerId: string) {
     }
   );
   const totalOutstandingAmount = summary.invoiceOutstandingAmount + summary.openingBalanceOutstandingAmount;
+  const invoiceLedger = buildInvoiceBalanceCheckpoints(invoices, payments);
+  if (invoiceLedger.latestInvoiceId) {
+    invoiceLedger.balanceByInvoiceId[invoiceLedger.latestInvoiceId] = totalOutstandingAmount;
+  }
   const payload = {
     totalOutstandingAmount,
     invoiceOutstandingAmount: summary.invoiceOutstandingAmount,
     openingBalanceOutstandingAmount: summary.openingBalanceOutstandingAmount,
     advanceBalance,
+    latestOutstandingInvoiceId: invoiceLedger.latestInvoiceId,
     financialSummaryUpdatedAt: nowIso(),
     previousOutstandingAmount: 0
   };
@@ -602,7 +610,7 @@ export async function syncCustomerFinancialSummary(customerId: string) {
   await updateDoc(doc(db, CUSTOMERS, customerId), payload);
   patchCachedCustomer(customerId, payload);
 
-  return payload;
+  return { ...payload, invoiceBalanceById: invoiceLedger.balanceByInvoiceId };
 }
 
 let appSettingsCache: AppSettings | undefined;
@@ -665,6 +673,7 @@ const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => 
     totalOutstandingAmount: data.totalOutstandingAmount === undefined ? undefined : numberOrZero(data.totalOutstandingAmount),
     invoiceOutstandingAmount: data.invoiceOutstandingAmount === undefined ? undefined : numberOrZero(data.invoiceOutstandingAmount),
     openingBalanceOutstandingAmount: data.openingBalanceOutstandingAmount === undefined ? undefined : numberOrZero(data.openingBalanceOutstandingAmount),
+    latestOutstandingInvoiceId: data.latestOutstandingInvoiceId ? String(data.latestOutstandingInvoiceId) : undefined,
     overdueAmount: data.overdueAmount === undefined ? undefined : numberOrZero(data.overdueAmount),
     financialSummaryUpdatedAt: data.financialSummaryUpdatedAt ? String(data.financialSummaryUpdatedAt) : undefined,
     paymentTerms: String(data.paymentTerms || getPaymentTermsLabel(tier)),
@@ -708,6 +717,12 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     totalSales: numberOrZero(data.totalSales ?? salesAmount),
     totalCost,
     totalProfit,
+    customerBalanceBeforeInvoice: data.customerBalanceBeforeInvoice === undefined
+      ? undefined
+      : Math.max(0, numberOrZero(data.customerBalanceBeforeInvoice)),
+    customerBalanceAfterInvoice: data.customerBalanceAfterInvoice === undefined
+      ? undefined
+      : Math.max(0, numberOrZero(data.customerBalanceAfterInvoice)),
     notes: String(data.notes || ''),
     createdAt: String(data.createdAt || ''),
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
@@ -1256,6 +1271,9 @@ export const createCustomer = async (customer: CustomerFormData, auditUser?: Aud
     totalOutstandingAmount: previousOutstandingAmount,
     invoiceOutstandingAmount: 0,
     openingBalanceOutstandingAmount: previousOutstandingAmount,
+    ...(previousOutstandingAmount > 0 ? {
+      latestOutstandingInvoiceId: getOpeningBalanceInvoiceId(customerRef.id)
+    } : {}),
     financialSummaryUpdatedAt: timestamp
   };
 
@@ -1337,6 +1355,7 @@ export const syncOpeningBalanceInvoices = async (customers: Customer[], invoices
       totalOutstandingAmount: customer.previousOutstandingAmount,
       invoiceOutstandingAmount: 0,
       openingBalanceOutstandingAmount: customer.previousOutstandingAmount,
+      latestOutstandingInvoiceId: invoiceRef.id,
       financialSummaryUpdatedAt: timestamp,
       updatedAt: timestamp
     });
@@ -1525,6 +1544,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
   let advanceAppliedAmount = 0;
   let invoiceNumber = '';
   let nextAdvanceBalance = 0;
+  let customerBalanceBeforeInvoice = 0;
   let customerOutstandingUpdate: Partial<Customer> = {};
 
   await runTransaction(db, async (transaction) => {
@@ -1545,6 +1565,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       : 0;
     advanceAppliedAmount = Math.min(advanceBalance, Math.max(0, numberOrZero(invoice.totalSales)));
     nextAdvanceBalance = advanceBalance - advanceAppliedAmount;
+    customerBalanceBeforeInvoice = applyCustomerOutstandingDelta(customerSnapshot.data(), {}).totalOutstandingAmount;
     customerOutstandingUpdate = buildAtomicOutstandingUpdate(
       customerSnapshot.data(),
       { invoice: Math.max(0, numberOrZero(invoice.totalSales)) - advanceAppliedAmount },
@@ -1564,12 +1585,15 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       ...invoiceTerms,
       pcPolicyVersionAtInvoice: CURRENT_PC_POLICY_VERSION,
       invoiceNumber,
+      customerBalanceBeforeInvoice,
+      customerBalanceAfterInvoice: Math.max(0, numberOrZero(customerOutstandingUpdate.totalOutstandingAmount)),
       createdAt: timestamp,
       updatedAt: timestamp
     });
     transaction.update(customerRef, {
       ...customerOutstandingUpdate,
-      advanceBalance: nextAdvanceBalance
+      advanceBalance: nextAdvanceBalance,
+      latestOutstandingInvoiceId: docRef.id
     });
 
     if (advanceAppliedAmount > 0) {
@@ -1606,7 +1630,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
 
   patchCachedCustomer(invoice.customerId, {
     ...customerOutstandingUpdate,
-    advanceBalance: nextAdvanceBalance
+    advanceBalance: nextAdvanceBalance,
+    latestOutstandingInvoiceId: docRef.id
   });
 
   const postProcessing = await runTransactionPostProcessing({

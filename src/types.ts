@@ -67,6 +67,7 @@ export interface Customer {
   totalOutstandingAmount?: number;
   invoiceOutstandingAmount?: number;
   openingBalanceOutstandingAmount?: number;
+  latestOutstandingInvoiceId?: string;
   overdueAmount?: number;
   financialSummaryUpdatedAt?: string;
   paymentTerms: string;
@@ -183,6 +184,8 @@ export interface Invoice {
   totalSales: number;
   totalCost: number;
   totalProfit: number;
+  customerBalanceBeforeInvoice?: number;
+  customerBalanceAfterInvoice?: number;
   notes: string;
   createdAt: string;
   updatedAt?: string;

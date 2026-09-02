@@ -14,6 +14,7 @@ import {
   getInvoicesByCustomerId,
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
+  getPaymentsByCustomerId,
   getPaymentsByInvoiceIds,
   updateInvoiceRecord,
   updatePaymentRecord
@@ -27,6 +28,7 @@ import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber } from '../utils/openingBalance';
+import { buildInvoiceBalanceCheckpoints } from '../utils/customerOutstanding';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { summarizePaymentSaveResults, type PaymentSaveResultLike } from '../utils/paymentSaveResult';
 import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
@@ -156,7 +158,9 @@ const Invoices = () => {
         getNextInvoiceNumber(),
         getAppSettings()
       ]);
-      const paymentRows = await getPaymentsByInvoiceIds(invoiceRows.map((invoice) => invoice.id));
+      const paymentRows = customerFilter !== 'all' && showFullCustomerRecords
+        ? await getPaymentsByCustomerId(customerFilter)
+        : await getPaymentsByInvoiceIds(invoiceRows.map((invoice) => invoice.id));
 
       setCustomers(customerRows);
       setInvoices(invoiceRows);
@@ -188,6 +192,36 @@ const Invoices = () => {
 
   const invoiceRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
+    const invoicesByCustomer = invoices.reduce((invoiceMap, invoice) => {
+      const customerInvoices = invoiceMap.get(invoice.customerId) ?? [];
+      customerInvoices.push(invoice);
+      invoiceMap.set(invoice.customerId, customerInvoices);
+      return invoiceMap;
+    }, new Map<string, Invoice[]>());
+    const nextInvoiceOpeningBalanceById = new Map<string, number>();
+    const latestLoadedInvoiceIdByCustomer = new Map<string, string>();
+
+    invoicesByCustomer.forEach((customerInvoices, customerId) => {
+      const orderedInvoices = [...customerInvoices].sort((left, right) => (
+        (left.createdAt || left.date).localeCompare(right.createdAt || right.date)
+        || left.invoiceNumber.localeCompare(right.invoiceNumber)
+      ));
+      latestLoadedInvoiceIdByCustomer.set(customerId, orderedInvoices[orderedInvoices.length - 1]?.id ?? '');
+      orderedInvoices.forEach((invoice, index) => {
+        const nextOpeningBalance = orderedInvoices[index + 1]?.customerBalanceBeforeInvoice;
+        if (nextOpeningBalance !== undefined) nextInvoiceOpeningBalanceById.set(invoice.id, nextOpeningBalance);
+      });
+    });
+    const rebuiltLedger = customerFilter !== 'all' && showFullCustomerRecords
+      ? buildInvoiceBalanceCheckpoints(invoices, payments).balanceByInvoiceId
+      : undefined;
+    const rebuiltLedgerBalances = rebuiltLedger ?? {};
+    const selectedCustomer = customers.find((customer) => customer.id === customerFilter);
+    const selectedLatestInvoiceId = selectedCustomer?.latestOutstandingInvoiceId
+      || latestLoadedInvoiceIdByCustomer.get(customerFilter);
+    if (rebuiltLedger && selectedLatestInvoiceId && selectedCustomer?.totalOutstandingAmount !== undefined) {
+      rebuiltLedgerBalances[selectedLatestInvoiceId] = selectedCustomer.totalOutstandingAmount;
+    }
 
     const rows = invoices
       .map((invoice) => {
@@ -195,6 +229,13 @@ const Invoices = () => {
         const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
         const customer = customers.find((item) => item.id === invoice.customerId);
         const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 4', settings);
+        const latestInvoiceId = customer?.latestOutstandingInvoiceId || latestLoadedInvoiceIdByCustomer.get(invoice.customerId);
+        const balanceDue = rebuiltLedgerBalances[invoice.id]
+          ?? (latestInvoiceId === invoice.id && customer?.totalOutstandingAmount !== undefined
+            ? customer.totalOutstandingAmount
+            : nextInvoiceOpeningBalanceById.get(invoice.id)
+              ?? invoice.customerBalanceAfterInvoice
+              ?? outstanding);
 
         return {
           ...invoice,
@@ -202,7 +243,7 @@ const Invoices = () => {
           customerMobile: customer?.mobile ?? '',
           paidAmount,
           outstanding,
-          customerOutstanding: Math.max(0, customer?.totalOutstandingAmount ?? outstanding)
+          balanceDue: Math.max(0, balanceDue)
         };
       })
       .filter((invoice) => {
@@ -212,7 +253,7 @@ const Invoices = () => {
       });
 
     return sortByLatestInvoiceNumber(rows);
-  }, [customerFilter, customers, invoices, payments, searchText, settings]);
+  }, [customerFilter, customers, invoices, payments, searchText, settings, showFullCustomerRecords]);
 
   const recalculateTotals = (nextFormData: InvoiceFormData): InvoiceFormData => {
     const totalSales = Number(nextFormData.salesAmount) || 0;
@@ -863,8 +904,8 @@ const Invoices = () => {
                     <td style={cellStyle}>{formatShortDate(invoice.date)}</td>
                     <td style={cellStyle}>{formatShortDate(invoice.effectiveDueDate)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.totalSales)}</td>
-                    <td style={{ ...cellStyle, color: invoice.customerOutstanding > 0 ? '#F87171' : '#FFFFFF', fontWeight: 800 }}>
-                      {formatMoney(invoice.customerOutstanding)}
+                    <td style={{ ...cellStyle, color: invoice.balanceDue > 0 ? '#F87171' : '#FFFFFF', fontWeight: 800 }}>
+                      {formatMoney(invoice.balanceDue)}
                     </td>
                     <td style={cellStyle}>{formatMoney(invoice.costAmount)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.transportAmount)}</td>

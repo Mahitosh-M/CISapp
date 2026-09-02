@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { applyCustomerOutstandingDelta, combineCustomerOutstandingDeltas } from './customerOutstanding';
+import {
+  applyCustomerOutstandingDelta,
+  buildInvoiceBalanceCheckpoints,
+  combineCustomerOutstandingDeltas
+} from './customerOutstanding';
 
 describe('atomic customer outstanding', () => {
   it('stores only the unpaid part after an invoice and same-day payment', () => {
@@ -41,5 +45,50 @@ describe('atomic customer outstanding', () => {
       totalOutstandingAmount: 0,
       invoiceOutstandingAmount: 0
     });
+  });
+
+  it('builds a running invoice ledger and keeps historical checkpoints distinct', () => {
+    const ledger = buildInvoiceBalanceCheckpoints(
+      [
+        { id: 'invoice-1', totalSales: 100, date: '2026-09-01', createdAt: '2026-09-01T09:00:00.000Z' },
+        { id: 'invoice-2', totalSales: 200, date: '2026-09-03', createdAt: '2026-09-03T09:00:00.000Z' }
+      ],
+      [
+        {
+          id: 'payment-1',
+          amount: 40,
+          amountAppliedToInvoice: 40,
+          date: '2026-09-02',
+          createdAt: '2026-09-02T09:00:00.000Z'
+        },
+        {
+          id: 'payment-2',
+          amount: 60,
+          amountAppliedToInvoice: 60,
+          date: '2026-09-04',
+          createdAt: '2026-09-04T09:00:00.000Z'
+        }
+      ]
+    );
+
+    expect(ledger.balanceByInvoiceId).toEqual({
+      'invoice-1': 60,
+      'invoice-2': 200
+    });
+    expect(ledger.latestInvoiceId).toBe('invoice-2');
+    expect(ledger.totalOutstandingAmount).toBe(200);
+  });
+
+  it('reduces the latest ledger balance for every part of a split payment', () => {
+    const ledger = buildInvoiceBalanceCheckpoints(
+      [{ id: 'invoice-1', totalSales: 1000, date: '2026-09-01', createdAt: '2026-09-01T09:00:00.000Z' }],
+      [
+        { id: 'part-1', amount: 500, date: '2026-09-02', createdAt: '2026-09-02T09:00:00.000Z' },
+        { id: 'part-2', amount: 400, date: '2026-09-02', createdAt: '2026-09-02T09:01:00.000Z' },
+        { id: 'part-3', amount: 100, date: '2026-09-02', createdAt: '2026-09-02T09:02:00.000Z' }
+      ]
+    );
+
+    expect(ledger.balanceByInvoiceId['invoice-1']).toBe(0);
   });
 });
