@@ -18,7 +18,7 @@ import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { Customer, Invoice, Payment, PaymentFormData, ShopId } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatDate, formatMoney } from '../utils/formatters';
+import { formatMoney, formatShortDate } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
 import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../utils/openingBalance';
@@ -74,6 +74,7 @@ const Payments = () => {
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
   const [paymentLimit, setPaymentLimit] = useState(LIST_PAGE_SIZE);
+  const [showFullCustomerRecords, setShowFullCustomerRecords] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -103,7 +104,9 @@ const Payments = () => {
       const paymentRead =
         customerFilter === 'all'
           ? getPayments({ limitCount: paymentLimit, sortBy: 'createdAt' })
-          : getPaymentsByCustomerId(customerFilter, { limitCount: paymentLimit });
+          : showFullCustomerRecords
+            ? getPaymentsByCustomerId(customerFilter)
+            : getPaymentsByCustomerId(customerFilter, { limitCount: paymentLimit });
 
       const [customerRows, paymentRows] = await Promise.all([
         getCustomers(),
@@ -121,11 +124,13 @@ const Payments = () => {
 
   useEffect(() => {
     loadData();
-  }, [customerFilter, paymentLimit]);
+  }, [customerFilter, paymentLimit, showFullCustomerRecords]);
 
-  useEffect(() => {
-    setPaymentLimit(customerFilter === 'all' ? LIST_PAGE_SIZE : CUSTOMER_LIST_PAGE_SIZE);
-  }, [customerFilter]);
+  const handleCustomerFilterChange = (value: string) => {
+    setShowFullCustomerRecords(false);
+    setPaymentLimit(value === 'all' ? LIST_PAGE_SIZE : CUSTOMER_LIST_PAGE_SIZE);
+    setCustomerFilter(value);
+  };
 
   useEffect(() => {
     let isActive = true;
@@ -520,7 +525,11 @@ const Payments = () => {
     setPaymentLimit((current) => current + LOAD_MORE_PAGE_SIZE);
   };
 
-  const canLoadMorePayments = !loading && payments.length >= paymentLimit;
+  const handleLoadFullCustomerRecords = () => {
+    if (customerFilter !== 'all') setShowFullCustomerRecords(true);
+  };
+
+  const canLoadMorePayments = !loading && !showFullCustomerRecords && payments.length >= paymentLimit;
 
   const cardStyle: CSSProperties = {
     background: 'var(--role-card-background)',
@@ -757,7 +766,7 @@ const Payments = () => {
 
           <label style={labelStyle}>
             Customer Filter
-            <select style={inputStyle} value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)}>
+            <select style={inputStyle} value={customerFilter} onChange={(event) => handleCustomerFilterChange(event.target.value)}>
               <option value="all">All customers</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
@@ -777,16 +786,15 @@ const Payments = () => {
                 <th style={headerCellStyle}>Invoice</th>
                 <th style={headerCellStyle}>Amount</th>
                 <th style={headerCellStyle}>Cash Discount</th>
-                <th style={headerCellStyle}>Mode</th>
                 <th style={headerCellStyle}>Notes</th>
                 <th style={headerCellStyle}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td style={cellStyle} colSpan={8}>Loading payments...</td></tr>
+                <tr><td style={cellStyle} colSpan={7}>Loading payments...</td></tr>
               ) : paymentRows.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={8}>No payments found.</td></tr>
+                <tr><td style={cellStyle} colSpan={7}>No payments found.</td></tr>
               ) : (
                 paymentRows.map((payment) => {
                   const linkedInvoice = invoices.find((invoice) => invoice.id === payment.invoiceId);
@@ -795,7 +803,7 @@ const Payments = () => {
 
                   return (
                   <tr className="role-record-row" key={payment.id}>
-                    <td style={cellStyle}>{formatDate(payment.date)}</td>
+                    <td style={cellStyle}>{formatShortDate(payment.date)}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
                     <td style={cellStyle}>{invoiceLabel}</td>
                     <td style={{ ...cellStyle, color: '#4ADE80', fontWeight: 800 }}>
@@ -829,7 +837,6 @@ const Payments = () => {
                       ) : null}
                     </td>
                     <td style={cellStyle}>{formatMoney(payment.cashDiscount)}</td>
-                    <td style={cellStyle}>{payment.mode}</td>
                     <td style={cellStyle}>{payment.notes || '-'}</td>
                     <td style={cellStyle}>
                       {canEditPayment(payment) ? (
@@ -850,11 +857,18 @@ const Payments = () => {
             </tbody>
           </table>
         </div>
-        {canLoadMorePayments ? (
-          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginTop: 12 }} onClick={handleLoadMore}>
-            Load 5 more
-          </button>
-        ) : null}
+        <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+          {canLoadMorePayments ? (
+            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={handleLoadMore}>
+              Load 5 more
+            </button>
+          ) : null}
+          {!loading && customerFilter !== 'all' && !showFullCustomerRecords ? (
+            <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} onClick={handleLoadFullCustomerRecords}>
+              FULL
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

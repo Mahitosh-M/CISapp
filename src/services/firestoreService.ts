@@ -72,6 +72,11 @@ import { getOpeningBalanceInvoiceId, getOpeningBalanceInvoiceNumber, isOpeningBa
 import { getUnpaidInvoicesAfterPayment } from '../utils/paymentAllocation';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import {
+  applyCustomerOutstandingDelta,
+  combineCustomerOutstandingDeltas,
+  type CustomerOutstandingDelta
+} from '../utils/customerOutstanding';
+import {
   CURRENT_PC_POLICY_VERSION,
   canPostInvoicePcForSettlement,
   decideImmutableInvoicePcAward
@@ -606,6 +611,32 @@ const numberOrZero = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const getInvoiceOutstandingDelta = (invoice: Invoice | undefined, amount: number): CustomerOutstandingDelta => {
+  if (!amount) return {};
+  return isOpeningBalanceInvoice(invoice ?? { invoiceNumber: '' })
+    ? { openingBalance: amount }
+    : { invoice: amount };
+};
+
+const getPaymentOutstandingDelta = (
+  payment: Payment,
+  invoice: Invoice | undefined,
+  direction: -1 | 1
+): CustomerOutstandingDelta => combineCustomerOutstandingDeltas(
+  getInvoiceOutstandingDelta(invoice, direction * getInvoicePaymentEffect(payment)),
+  { legacy: direction * Math.max(0, payment.amountUsedForOldBalance ?? 0) }
+);
+
+const buildAtomicOutstandingUpdate = (
+  customerData: Record<string, unknown>,
+  delta: CustomerOutstandingDelta,
+  timestamp: string
+) => ({
+  ...applyCustomerOutstandingDelta(customerData, delta),
+  financialSummaryUpdatedAt: timestamp,
+  updatedAt: timestamp
+});
 
 export const getPaymentTermsForTier = (tier: CustomerTier) => {
   return getPaymentTermsLabel(tier);
@@ -1481,8 +1512,6 @@ export const getNextInvoiceNumber = async (settings?: AppSettings, invoiceDate?:
 
 export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditUser) => {
   invoice = prepareNewInvoicePayload(invoice, auditUser);
-  // Rebuild first so legacy overpayments are available as advance before this invoice is created.
-  await syncCustomerFinancialSummary(invoice.customerId);
   const activeSettings = await getAppSettings();
   const counter = getInvoiceCounterDetails(activeSettings, invoice.date);
   const initialCounterSnapshot = await getDoc(counter.ref);
@@ -1495,6 +1524,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
   const timestamp = nowIso();
   let advanceAppliedAmount = 0;
   let invoiceNumber = '';
+  let nextAdvanceBalance = 0;
+  let customerOutstandingUpdate: Partial<Customer> = {};
 
   await runTransaction(db, async (transaction) => {
     const [customerSnapshot, counterSnapshot] = await Promise.all([
@@ -1513,6 +1544,12 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       ? Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
       : 0;
     advanceAppliedAmount = Math.min(advanceBalance, Math.max(0, numberOrZero(invoice.totalSales)));
+    nextAdvanceBalance = advanceBalance - advanceAppliedAmount;
+    customerOutstandingUpdate = buildAtomicOutstandingUpdate(
+      customerSnapshot.data(),
+      { invoice: Math.max(0, numberOrZero(invoice.totalSales)) - advanceAppliedAmount },
+      timestamp
+    );
 
     transaction.set(counter.ref, {
       kind: 'invoice',
@@ -1529,6 +1566,10 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       invoiceNumber,
       createdAt: timestamp,
       updatedAt: timestamp
+    });
+    transaction.update(customerRef, {
+      ...customerOutstandingUpdate,
+      advanceBalance: nextAdvanceBalance
     });
 
     if (advanceAppliedAmount > 0) {
@@ -1560,11 +1601,12 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
         updatedAt: timestamp
       });
 
-      transaction.update(customerRef, {
-        advanceBalance: advanceBalance - advanceAppliedAmount,
-        updatedAt: timestamp
-      });
     }
+  });
+
+  patchCachedCustomer(invoice.customerId, {
+    ...customerOutstandingUpdate,
+    advanceBalance: nextAdvanceBalance
   });
 
   const postProcessing = await runTransactionPostProcessing({
@@ -1576,7 +1618,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       totalProfit: invoice.totalProfit,
       invoiceCount: 1
     }],
-    customerIds: [invoice.customerId],
+    customerIds: [],
     invoiceIds: advanceAppliedAmount > 0 ? [docRef.id] : []
   });
   invalidateTransactionCaches([invoice.customerId], [invoice.date]);
@@ -2151,12 +2193,18 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
   const paymentRef = doc(collection(db, PAYMENTS));
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
+  let customerOutstandingUpdate: Partial<Customer> = {};
+  let nextAdvanceBalance = 0;
 
   await assertAdvanceCanBeCreated(allocatedPayment);
 
   await runTransaction(db, async (transaction) => {
     const customerRef = doc(db, CUSTOMERS, payment.customerId);
-    const customerSnapshot = await transaction.get(customerRef);
+    const invoiceRef = payment.invoiceId ? doc(db, INVOICES, payment.invoiceId) : undefined;
+    const [customerSnapshot, invoiceSnapshot] = await Promise.all([
+      transaction.get(customerRef),
+      invoiceRef ? transaction.get(invoiceRef) : Promise.resolve(undefined)
+    ]);
     const previousOutstandingAmount = customerSnapshot.exists() ? numberOrZero(customerSnapshot.data().previousOutstandingAmount) : 0;
     const allocation = buildAllocatedPaymentPayload(payment, previousOutstandingAmount);
 
@@ -2167,10 +2215,20 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
       } : {})
     };
 
-    if (customerSnapshot.exists() && allocation.payload.advanceCreatedAmount > 0) {
+    if (customerSnapshot.exists()) {
+      const targetInvoice = invoiceSnapshot?.exists()
+        ? mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data())
+        : undefined;
+      nextAdvanceBalance = Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
+        + allocation.payload.advanceCreatedAmount;
+      customerOutstandingUpdate = buildAtomicOutstandingUpdate(
+        customerSnapshot.data(),
+        getPaymentOutstandingDelta(allocatedPayment as Payment, targetInvoice, -1),
+        timestamp
+      );
       transaction.update(customerRef, {
-        advanceBalance: Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance)) + allocation.payload.advanceCreatedAmount,
-        updatedAt: timestamp
+        ...customerOutstandingUpdate,
+        advanceBalance: nextAdvanceBalance
       });
     }
 
@@ -2188,6 +2246,13 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
     );
   });
 
+  if (Object.keys(customerOutstandingUpdate).length > 0) {
+    patchCachedCustomer(payment.customerId, {
+      ...customerOutstandingUpdate,
+      advanceBalance: nextAdvanceBalance
+    });
+  }
+
   const postProcessing = await runTransactionPostProcessing({
     recordLabel: 'Payment',
     monthlyDeltas: [{
@@ -2195,7 +2260,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
       date: allocatedPayment.date,
       paymentsReceived: allocatedPayment.amount
     }],
-    customerIds: [payment.customerId],
+    customerIds: [],
     invoiceIds: [allocatedPayment.invoiceId].filter(Boolean)
   });
   invalidateTransactionCaches([payment.customerId], [allocatedPayment.date]);

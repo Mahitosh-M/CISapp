@@ -23,7 +23,7 @@ import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
-import { formatDate, formatMoney } from '../utils/formatters';
+import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber } from '../utils/openingBalance';
@@ -61,16 +61,6 @@ const sortByLatestInvoiceNumber = <T extends { invoiceNumber: string }>(rows: T[
     const numberDifference = getInvoiceNumberRank(right.invoiceNumber) - getInvoiceNumberRank(left.invoiceNumber);
     return numberDifference || right.invoiceNumber.localeCompare(left.invoiceNumber);
   });
-};
-
-const getInvoiceStatus = (dueDate: string, totalSales: number, paidAmount: number) => {
-  const outstanding = getPendingAmount(totalSales, paidAmount);
-  const today = getTodayDateString();
-
-  if (outstanding <= 0) return { label: 'Paid', color: '#27AE60' };
-  if (paidAmount > 0) return { label: 'Partial', color: '#F2994A' };
-  if (dueDate && dueDate < today) return { label: 'Overdue', color: '#EB5757' };
-  return { label: 'Unpaid', color: '#2D9CDB' };
 };
 
 const escapeHtml = (value: string | number) =>
@@ -118,8 +108,8 @@ const Invoices = () => {
   const [editingInvoiceId, setEditingInvoiceId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [customerFilter, setCustomerFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [invoiceLimit, setInvoiceLimit] = useState(LIST_PAGE_SIZE);
+  const [showFullCustomerRecords, setShowFullCustomerRecords] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -156,7 +146,9 @@ const Invoices = () => {
       const invoiceRead =
         customerFilter === 'all'
           ? getInvoices({ limitCount: invoiceLimit, sortBy: 'invoiceNumber' })
-          : getInvoicesByCustomerId(customerFilter, { limitCount: invoiceLimit, sortBy: 'invoiceNumber' });
+          : showFullCustomerRecords
+            ? getInvoicesByCustomerId(customerFilter)
+            : getInvoicesByCustomerId(customerFilter, { limitCount: invoiceLimit, sortBy: 'invoiceNumber' });
 
       const [customerRows, invoiceRows, invoiceNumber, appSettings] = await Promise.all([
         getCustomers(),
@@ -180,11 +172,13 @@ const Invoices = () => {
 
   useEffect(() => {
     loadData();
-  }, [customerFilter, invoiceLimit]);
+  }, [customerFilter, invoiceLimit, showFullCustomerRecords]);
 
-  useEffect(() => {
-    setInvoiceLimit(customerFilter === 'all' ? LIST_PAGE_SIZE : CUSTOMER_LIST_PAGE_SIZE);
-  }, [customerFilter]);
+  const handleCustomerFilterChange = (value: string) => {
+    setShowFullCustomerRecords(false);
+    setInvoiceLimit(value === 'all' ? LIST_PAGE_SIZE : CUSTOMER_LIST_PAGE_SIZE);
+    setCustomerFilter(value);
+  };
 
   const getPaidAmount = (invoiceId: string) => {
     return payments
@@ -201,7 +195,6 @@ const Invoices = () => {
         const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
         const customer = customers.find((item) => item.id === invoice.customerId);
         const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 4', settings);
-        const status = getInvoiceStatus(effectiveDueDate, invoice.totalSales, paidAmount);
 
         return {
           ...invoice,
@@ -209,18 +202,17 @@ const Invoices = () => {
           customerMobile: customer?.mobile ?? '',
           paidAmount,
           outstanding,
-          status
+          customerOutstanding: Math.max(0, customer?.totalOutstandingAmount ?? outstanding)
         };
       })
       .filter((invoice) => {
         const matchesSearch = !term || [getInvoiceDisplayNumber(invoice), invoice.invoiceNumber, invoice.customerName].some((value) => value.toLowerCase().includes(term));
         const matchesCustomer = customerFilter === 'all' || invoice.customerId === customerFilter;
-        const matchesStatus = statusFilter === 'all' || invoice.status.label === statusFilter;
-        return matchesSearch && matchesCustomer && matchesStatus;
+        return matchesSearch && matchesCustomer;
       });
 
     return sortByLatestInvoiceNumber(rows);
-  }, [customerFilter, customers, invoices, payments, searchText, settings, statusFilter]);
+  }, [customerFilter, customers, invoices, payments, searchText, settings]);
 
   const recalculateTotals = (nextFormData: InvoiceFormData): InvoiceFormData => {
     const totalSales = Number(nextFormData.salesAmount) || 0;
@@ -599,6 +591,12 @@ const Invoices = () => {
     setInvoiceLimit((current) => current + LOAD_MORE_PAGE_SIZE);
   };
 
+  const handleLoadFullCustomerRecords = () => {
+    if (customerFilter !== 'all') setShowFullCustomerRecords(true);
+  };
+
+  const canLoadMoreInvoices = !loading && !showFullCustomerRecords && invoices.length >= invoiceLimit;
+
   const cardStyle: CSSProperties = {
     background: 'var(--role-card-background)',
     borderRadius: 12,
@@ -825,21 +823,11 @@ const Invoices = () => {
           </label>
           <label style={labelStyle}>
             Customer Filter
-            <select style={inputStyle} value={customerFilter} onChange={(event) => setCustomerFilter(event.target.value)}>
+            <select style={inputStyle} value={customerFilter} onChange={(event) => handleCustomerFilterChange(event.target.value)}>
               <option value="all">All customers</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
               ))}
-            </select>
-          </label>
-          <label style={labelStyle}>
-            Status Filter
-            <select style={inputStyle} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">All statuses</option>
-              <option value="Paid">Paid</option>
-              <option value="Partial">Partial</option>
-              <option value="Unpaid">Unpaid</option>
-              <option value="Overdue">Overdue</option>
             </select>
           </label>
         </div>
@@ -854,36 +842,34 @@ const Invoices = () => {
                 <th style={headerCellStyle}>Date</th>
                 <th style={headerCellStyle}>Due</th>
                 <th style={headerCellStyle}>Sales</th>
+                <th style={headerCellStyle}>Balance Due</th>
                 <th style={headerCellStyle}>Cost</th>
                 <th style={headerCellStyle}>Transport</th>
                 <th style={headerCellStyle}>Profit</th>
                 <th style={headerCellStyle}>Paid</th>
-                <th style={headerCellStyle}>Outstanding</th>
-                <th style={headerCellStyle}>Status</th>
                 <th style={headerCellStyle}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td style={cellStyle} colSpan={12}>Loading invoices...</td></tr>
+                <tr><td style={cellStyle} colSpan={11}>Loading invoices...</td></tr>
               ) : invoiceRows.length === 0 ? (
-                <tr><td style={cellStyle} colSpan={12}>No invoices found.</td></tr>
+                <tr><td style={cellStyle} colSpan={11}>No invoices found.</td></tr>
               ) : (
                 invoiceRows.map((invoice) => (
                   <tr key={invoice.id}>
                     <td style={cellStyle}><strong>{getInvoiceDisplayNumber(invoice)}</strong></td>
                     <td style={cellStyle}>{invoice.customerName}</td>
-                    <td style={cellStyle}>{formatDate(invoice.date)}</td>
-                    <td style={cellStyle}>{formatDate(invoice.effectiveDueDate)}</td>
+                    <td style={cellStyle}>{formatShortDate(invoice.date)}</td>
+                    <td style={cellStyle}>{formatShortDate(invoice.effectiveDueDate)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.totalSales)}</td>
+                    <td style={{ ...cellStyle, color: invoice.customerOutstanding > 0 ? '#F87171' : '#FFFFFF', fontWeight: 800 }}>
+                      {formatMoney(invoice.customerOutstanding)}
+                    </td>
                     <td style={cellStyle}>{formatMoney(invoice.costAmount)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.transportAmount)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.totalProfit)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.paidAmount)}</td>
-                    <td style={{ ...cellStyle, color: invoice.outstanding > 0 ? '#B42318' : '#11185A', fontWeight: 800 }}>
-                      {formatMoney(invoice.outstanding)}
-                    </td>
-                    <td style={{ ...cellStyle, color: invoice.status.color, fontWeight: 800 }}>{invoice.status.label}</td>
                     <td style={cellStyle}>
                       {canEditInvoice(invoice) ? (
                         <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
@@ -914,11 +900,18 @@ const Invoices = () => {
             </tbody>
           </table>
         </div>
-        {!loading && invoices.length >= invoiceLimit ? (
-          <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', marginTop: 12 }} onClick={handleLoadMore}>
-            Load 5 more
-          </button>
-        ) : null}
+        <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+          {canLoadMoreInvoices ? (
+            <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={handleLoadMore}>
+              Load 5 more
+            </button>
+          ) : null}
+          {!loading && customerFilter !== 'all' && !showFullCustomerRecords ? (
+            <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} onClick={handleLoadFullCustomerRecords}>
+              FULL
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
