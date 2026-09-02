@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -855,30 +856,34 @@ const Payments = () => {
                     <td style={cellStyle}>{formatMoney(totalCashDiscount)}</td>
                     <td style={cellStyle}>{paymentNotes || '-'}</td>
                     <td style={cellStyle}>
-                      {paymentInvoiceRows.map(({ payment: allocation, label }) => (
-                        <div
-                          key={allocation.id}
-                          style={{
-                            marginTop: allocation.id === payment.id ? 0 : 8,
-                            paddingTop: allocation.id === payment.id ? 0 : 8,
-                            borderTop: allocation.id === payment.id ? 'none' : '1px solid rgba(148, 163, 184, 0.22)'
-                          }}
-                        >
-                          {paymentParts.length > 1 ? (
-                            <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, marginBottom: 5 }}>{label}</div>
-                          ) : null}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                        {paymentInvoiceRows.map(({ payment: allocation, label }) => (
+                          <div key={allocation.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                           {canEditPayment(allocation) ? (
-                            <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(allocation)}>
-                              Edit
+                            <button
+                              type="button"
+                              title={`Edit ${label}`}
+                              aria-label={`Edit ${label}`}
+                              style={{ ...buttonStyle, width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF' }}
+                              onClick={() => handleEdit(allocation)}
+                            >
+                              <Pencil size={16} aria-hidden="true" />
                             </button>
                           ) : null}
                           {canDeleteRecords ? (
-                            <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(allocation)}>
-                              Delete
+                            <button
+                              type="button"
+                              title={`Delete ${label}`}
+                              aria-label={`Delete ${label}`}
+                              style={{ ...buttonStyle, width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#FDECEC', color: '#B42318' }}
+                              onClick={() => handleDelete(allocation)}
+                            >
+                              <Trash2 size={16} aria-hidden="true" />
                             </button>
                           ) : null}
-                        </div>
-                      ))}
+                          </div>
+                        ))}
+                      </div>
                     </td>
                   </tr>
                   );
