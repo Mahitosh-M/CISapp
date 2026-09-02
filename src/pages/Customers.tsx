@@ -15,11 +15,10 @@ import {
   getPaymentsByCustomerId,
   getPaymentTermsForTier,
   syncDueCustomerRecords,
-  syncOpeningBalanceInvoices,
   updateCustomerRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, DueCustomerRecord, Invoice, Payment } from '../types';
-import { buildCustomerLedger } from '../utils/customerLedger';
+import { buildCustomerLedger, getLedgerPaymentParts, getPaymentNoteWithoutSplitMarker } from '../utils/customerLedger';
 import { downloadCustomerLedgerPdf } from '../utils/customerLedgerPdf';
 import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
 import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
@@ -122,21 +121,12 @@ const Customers = () => {
       ]);
       const [invoiceRows, paymentRows] = isAdmin ? await Promise.all([getInvoices(), getPayments()]) : [[], []];
 
-      const openingBalanceSync = isAdmin
-        ? await syncOpeningBalanceInvoices(customerRows, invoiceRows)
-        : { convertedCustomerIds: [] as string[], createdInvoices: [] as Invoice[] };
-      const convertedCustomerIds = new Set(openingBalanceSync.convertedCustomerIds);
-      const syncedCustomerRows = customerRows.map((customer) =>
-        convertedCustomerIds.has(customer.id) ? { ...customer, previousOutstandingAmount: 0 } : customer
-      );
-      const syncedInvoiceRows = [...invoiceRows, ...openingBalanceSync.createdInvoices];
-
       setCustomers(
         isAdmin
-          ? applyIntelligenceTiersToCustomers(syncedCustomerRows, syncedInvoiceRows, paymentRows, appSettings)
-          : syncedCustomerRows
+          ? applyIntelligenceTiersToCustomers(customerRows, invoiceRows, paymentRows, appSettings)
+          : customerRows
       );
-      setInvoices(syncedInvoiceRows);
+      setInvoices(invoiceRows);
       setPayments(paymentRows);
       setSettings(appSettings);
     } catch (err) {
@@ -349,7 +339,7 @@ const Customers = () => {
       if (range === 'last_10') {
         const latestRows = buildCustomerLedger(invoiceRows, paymentRows).slice(-10);
         const invoiceIds = new Set(latestRows.flatMap((row) => row.invoice ? [row.invoice.id] : []));
-        const paymentIds = new Set(latestRows.flatMap((row) => row.payment ? [row.payment.id] : []));
+        const paymentIds = new Set(latestRows.flatMap((row) => getLedgerPaymentParts(row).map((payment) => payment.id)));
         setLedgerInvoices(invoiceRows.filter((invoice) => invoiceIds.has(invoice.id)));
         setLedgerPayments(paymentRows.filter((payment) => paymentIds.has(payment.id)));
       } else {
@@ -1156,13 +1146,23 @@ const Customers = () => {
                       {displayedLedgerRows.map((row) => {
                       const invoice = row.invoice;
                       const payment = row.payment;
+                      const paymentParts = getLedgerPaymentParts(row);
+                      const paymentInvoiceCount = new Set(paymentParts.map((part) => part.invoiceId).filter(Boolean)).size;
+                      const paymentModes = [...new Set(paymentParts.map((part) => part.mode).filter(Boolean))].join(', ');
+                      const paymentShops = [...new Set(paymentParts.map((part) => part.shopId).filter(Boolean))]
+                        .map((shopId) => getShopName(shopId))
+                        .join(', ');
+                      const paymentNotes = [...new Set(paymentParts
+                        .map(getPaymentNoteWithoutSplitMarker)
+                        .filter(Boolean))].join(' | ');
+                      const totalCashDiscount = paymentParts.reduce((total, part) => total + Math.max(0, part.cashDiscount || 0), 0);
+                      const totalAdvanceCreated = paymentParts.reduce((total, part) => total + Math.max(0, part.advanceCreatedAmount || 0), 0);
                       const paymentMeta = payment ? [
-                        payment.invoiceNumber ? `Invoice ${payment.invoiceNumber}` : 'Unallocated',
-                        payment.mode,
-                        payment.shopId ? getShopName(payment.shopId) : '',
-                        payment.splitPaymentCount && payment.splitPaymentCount > 1
-                          ? `Split ${payment.splitPaymentPart || 1}/${payment.splitPaymentCount}`
-                          : ''
+                        paymentParts.length > 1
+                          ? `${paymentInvoiceCount || paymentParts.length} ${paymentInvoiceCount === 1 ? 'invoice' : 'invoices'}`
+                          : payment.invoiceNumber ? `Invoice ${payment.invoiceNumber}` : 'Unallocated',
+                        paymentModes,
+                        paymentShops
                       ].filter(Boolean).join(' | ') : '';
 
                       return (
@@ -1192,10 +1192,10 @@ const Customers = () => {
                                 <div style={{ fontWeight: 900 }}>{paymentMeta}</div>
                                 <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 4 }}>
                                   Received {formatMoney(row.paymentReceived)}
-                                  {payment.cashDiscount > 0 ? ` | Discount ${formatMoney(payment.cashDiscount)}` : ''}
-                                  {payment.advanceCreatedAmount > 0 ? ` | Advance ${formatMoney(payment.advanceCreatedAmount)}` : ''}
+                                  {totalCashDiscount > 0 ? ` | Discount ${formatMoney(totalCashDiscount)}` : ''}
+                                  {totalAdvanceCreated > 0 ? ` | Advance ${formatMoney(totalAdvanceCreated)}` : ''}
                                 </div>
-                                {payment.notes ? <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 3 }}>{payment.notes}</div> : null}
+                                {paymentNotes ? <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 3 }}>{paymentNotes}</div> : null}
                               </>
                             ) : null}
                           </td>

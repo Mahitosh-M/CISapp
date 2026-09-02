@@ -1,5 +1,6 @@
 import type { Customer } from '../types';
 import type { jsPDF } from 'jspdf';
+import { getLedgerPaymentParts, getPaymentNoteWithoutSplitMarker } from './customerLedger';
 import type { CustomerLedgerEntry } from './customerLedger';
 import { formatShortDate } from './formatters';
 import { isOpeningBalanceInvoice } from './openingBalance';
@@ -65,8 +66,10 @@ export const createCustomerLedgerPdf = async ({
   const pageWidth = document.internal.pageSize.getWidth();
   const currentBalance = rows[rows.length - 1]?.runningBalance ?? customer.totalOutstandingAmount ?? 0;
   const paidByInvoiceId = rows.reduce((totals, row) => {
-    if (!row.payment?.invoiceId) return totals;
-    totals.set(row.payment.invoiceId, (totals.get(row.payment.invoiceId) ?? 0) + getInvoicePaymentEffect(row.payment));
+    getLedgerPaymentParts(row).forEach((payment) => {
+      if (!payment.invoiceId) return;
+      totals.set(payment.invoiceId, (totals.get(payment.invoiceId) ?? 0) + getInvoicePaymentEffect(payment));
+    });
     return totals;
   }, new Map<string, number>());
 
@@ -97,6 +100,17 @@ export const createCustomerLedgerPdf = async ({
   orderedRows.forEach((row) => {
     const invoice = row.invoice;
     const payment = row.payment;
+    const paymentParts = getLedgerPaymentParts(row);
+    const paymentInvoiceCount = new Set(paymentParts.map((part) => part.invoiceId).filter(Boolean)).size;
+    const paymentModes = [...new Set(paymentParts.map((part) => part.mode).filter(Boolean))].join(', ');
+    const paymentShops = [...new Set(paymentParts.map((part) => part.shopId).filter(Boolean))]
+      .map((shopId) => getPdfShopName(shopId))
+      .join(', ');
+    const paymentNotes = [...new Set(paymentParts
+      .map(getPaymentNoteWithoutSplitMarker)
+      .filter(Boolean))].join(' | ');
+    const totalCashDiscount = paymentParts.reduce((total, part) => total + Math.max(0, part.cashDiscount || 0), 0);
+    const totalAdvanceCreated = paymentParts.reduce((total, part) => total + Math.max(0, part.advanceCreatedAmount || 0), 0);
     const invoiceFullyPaid = Boolean(invoice && (paidByInvoiceId.get(invoice.id) ?? 0) >= invoice.totalSales);
     const entryLabel = payment?.paymentKind === 'advance_application'
       ? 'Advance'
@@ -112,14 +126,15 @@ export const createCustomerLedgerPdf = async ({
         ].filter(Boolean).join(' | ')
       : payment
         ? [
-            payment.shopId ? getPdfShopName(payment.shopId) : '',
-            payment.splitPaymentCount && payment.splitPaymentCount > 1
-              ? `Split ${payment.splitPaymentPart || 1}/${payment.splitPaymentCount}`
+            paymentParts.length > 1
+              ? `${paymentInvoiceCount || paymentParts.length} ${paymentInvoiceCount === 1 ? 'invoice' : 'invoices'}`
               : '',
+            paymentModes,
+            paymentShops,
             `Received ${formatPdfMoney(row.paymentReceived)}`,
-            payment.cashDiscount > 0 ? `Discount ${formatPdfMoney(payment.cashDiscount)}` : '',
-            payment.advanceCreatedAmount > 0 ? `Advance ${formatPdfMoney(payment.advanceCreatedAmount)}` : '',
-            payment.notes
+            totalCashDiscount > 0 ? `Discount ${formatPdfMoney(totalCashDiscount)}` : '',
+            totalAdvanceCreated > 0 ? `Advance ${formatPdfMoney(totalAdvanceCreated)}` : '',
+            paymentNotes
           ].filter(Boolean).join(' | ')
         : '';
     const amount = row.invoiceAmount > 0

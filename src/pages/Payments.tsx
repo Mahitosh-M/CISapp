@@ -11,16 +11,18 @@ import {
   getPayments,
   getPaymentsByInvoiceIds,
   getPaymentsByCustomerId,
+  getPaymentsBySplitPaymentGroupIds,
   updatePaymentRecord,
   type PaymentSaveResult
 } from '../services/firestoreService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { Customer, Invoice, Payment, PaymentFormData, ShopId } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
+import { getPaymentNoteWithoutSplitMarker, groupPaymentTransactions } from '../utils/customerLedger';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney, formatShortDate } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
-import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
+import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, sortInvoicesForPaymentAllocation } from '../utils/openingBalance';
 import { allocateReceiptOldestFirst } from '../utils/paymentAllocation';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
@@ -30,7 +32,11 @@ import { BRANCH_SYSTEM_VERSION, getAssignedStaffShopId, getShopName, isBranchAwa
 const LIST_PAGE_SIZE = 1;
 const CUSTOMER_LIST_PAGE_SIZE = 3;
 const LOAD_MORE_PAGE_SIZE = 5;
-const splitPaymentPattern = /Split payment\s+(\d+)\/(\d+)/i;
+
+const getCompactInvoiceNumber = (invoiceNumber: string) => {
+  const match = invoiceNumber.match(/(\d+)(?!.*\d)/);
+  return match ? match[1].padStart(3, '0') : invoiceNumber;
+};
 
 const emptyPaymentForm: PaymentFormData = {
   customerId: '',
@@ -42,16 +48,6 @@ const emptyPaymentForm: PaymentFormData = {
   cashDiscount: 0,
   mode: 'Cash',
   notes: ''
-};
-
-const getSplitPaymentFallbackKey = (payment: Payment) => {
-  const match = payment.notes.match(splitPaymentPattern);
-  if (!match) return '';
-
-  const baseNotes = payment.notes.replace(/\s*\|?\s*Split payment\s+\d+\/\d+/i, '').trim();
-  const splitCount = match[2] || '';
-
-  return [payment.customerId, payment.date, payment.mode, baseNotes, splitCount].join('|');
 };
 
 const createSplitPaymentGroupId = () => {
@@ -75,6 +71,7 @@ const Payments = () => {
   const [customerFilter, setCustomerFilter] = useState('all');
   const [paymentLimit, setPaymentLimit] = useState(LIST_PAGE_SIZE);
   const [showFullCustomerRecords, setShowFullCustomerRecords] = useState(false);
+  const [paymentPageIsFull, setPaymentPageIsFull] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -99,6 +96,7 @@ const Payments = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      setPaymentPageIsFull(false);
       setError('');
 
       const paymentRead =
@@ -108,13 +106,31 @@ const Payments = () => {
             ? getPaymentsByCustomerId(customerFilter)
             : getPaymentsByCustomerId(customerFilter, { limitCount: paymentLimit });
 
-      const [customerRows, paymentRows] = await Promise.all([
+      const [customerRows, initialPaymentRows] = await Promise.all([
         getCustomers(),
         paymentRead
       ]);
 
+      const loadedSplitCounts = initialPaymentRows.reduce((counts, payment) => {
+        if (payment.splitPaymentGroupId) {
+          counts.set(payment.splitPaymentGroupId, (counts.get(payment.splitPaymentGroupId) ?? 0) + 1);
+        }
+        return counts;
+      }, new Map<string, number>());
+      const incompleteSplitGroupIds = [...new Set(initialPaymentRows
+        .filter((payment) => (
+          payment.splitPaymentGroupId
+          && (payment.splitPaymentCount ?? 0) > (loadedSplitCounts.get(payment.splitPaymentGroupId) ?? 0)
+        ))
+        .map((payment) => payment.splitPaymentGroupId as string))];
+      const remainingSplitRows = await getPaymentsBySplitPaymentGroupIds(incompleteSplitGroupIds);
+      const paymentRows = [...new Map(
+        [...initialPaymentRows, ...remainingSplitRows].map((payment) => [payment.id, payment])
+      ).values()];
+
       setCustomers(customerRows);
       setPayments(paymentRows);
+      setPaymentPageIsFull(initialPaymentRows.length >= paymentLimit);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load payments.');
     } finally {
@@ -226,32 +242,6 @@ const Payments = () => {
   const allocationPreview = allocationResult.allocations;
   const overpaymentAmount = allocationResult.advanceAmount;
 
-  const splitPaymentTotalById = useMemo(() => {
-    const totals = new Map<string, number>();
-    const fallbackGroups = new Map<string, Payment[]>();
-
-    payments.forEach((payment) => {
-      if ((payment.splitPaymentTotalAmount ?? 0) > 0) {
-        totals.set(payment.id, payment.splitPaymentTotalAmount ?? 0);
-        return;
-      }
-
-      const fallbackKey = getSplitPaymentFallbackKey(payment);
-      if (!fallbackKey) return;
-
-      const group = fallbackGroups.get(fallbackKey) ?? [];
-      group.push(payment);
-      fallbackGroups.set(fallbackKey, group);
-    });
-
-    fallbackGroups.forEach((group) => {
-      const total = group.reduce((sum, payment) => sum + payment.amount, 0);
-      group.forEach((payment) => totals.set(payment.id, total));
-    });
-
-    return totals;
-  }, [payments]);
-
   useEffect(() => {
     if (editingPaymentId || !formData.customerId) return;
 
@@ -287,20 +277,25 @@ const Payments = () => {
     }
   }, [editingPaymentId, formData.customerId, formData.invoiceId, paymentEffect, pendingInvoiceOptions, selectedInvoiceIds]);
 
-  const filteredPaymentRows = useMemo(() => {
+  const paymentRows = useMemo(() => {
     const term = searchText.trim().toLowerCase();
 
-    return sortNewestFirst(payments.filter((payment) => {
-      const matchesSearch =
-        !term ||
-        [payment.customerName, payment.invoiceNumber].some((value) => value.toLowerCase().includes(term));
-      const matchesCustomer = customerFilter === 'all' || payment.customerId === customerFilter;
+    return groupPaymentTransactions(payments)
+      .filter((group) => {
+        const matchesSearch = !term || group.payments.some((payment) => (
+          [payment.customerName, payment.invoiceNumber].some((value) => value.toLowerCase().includes(term))
+        ));
+        const matchesCustomer = customerFilter === 'all'
+          || group.payments.some((payment) => payment.customerId === customerFilter);
 
-      return matchesSearch && matchesCustomer;
-    }), ['createdAt', 'date']);
+        return matchesSearch && matchesCustomer;
+      })
+      .sort((left, right) => (
+        right.createdAt.localeCompare(left.createdAt)
+        || right.date.localeCompare(left.date)
+        || right.id.localeCompare(left.id)
+      ));
   }, [customerFilter, payments, searchText]);
-
-  const paymentRows = filteredPaymentRows;
 
   const handleFieldChange = (field: keyof PaymentFormData, value: string) => {
     if (field === 'customerId') {
@@ -529,7 +524,7 @@ const Payments = () => {
     if (customerFilter !== 'all') setShowFullCustomerRecords(true);
   };
 
-  const canLoadMorePayments = !loading && !showFullCustomerRecords && payments.length >= paymentLimit;
+  const canLoadMorePayments = !loading && !showFullCustomerRecords && paymentPageIsFull;
 
   const cardStyle: CSSProperties = {
     background: 'var(--role-card-background)',
@@ -783,7 +778,7 @@ const Payments = () => {
               <tr>
                 <th style={headerCellStyle}>Date</th>
                 <th style={headerCellStyle}>Customer</th>
-                <th style={headerCellStyle}>Invoice</th>
+                <th style={headerCellStyle}>Invoices</th>
                 <th style={headerCellStyle}>Amount</th>
                 <th style={headerCellStyle}>Cash Discount</th>
                 <th style={headerCellStyle}>Notes</th>
@@ -796,59 +791,94 @@ const Payments = () => {
               ) : paymentRows.length === 0 ? (
                 <tr><td style={cellStyle} colSpan={7}>No payments found.</td></tr>
               ) : (
-                paymentRows.map((payment) => {
-                  const linkedInvoice = invoices.find((invoice) => invoice.id === payment.invoiceId);
-                  const invoiceLabel = linkedInvoice ? getInvoiceDisplayNumber(linkedInvoice) : payment.invoiceNumber || 'Advance';
-                  const splitPaymentTotal = splitPaymentTotalById.get(payment.id);
+                paymentRows.map((paymentGroup) => {
+                  const paymentParts = paymentGroup.payments;
+                  const payment = paymentParts[0];
+                  const paymentInvoiceRows = paymentParts.map((part) => {
+                    const linkedInvoice = invoices.find((invoice) => invoice.id === part.invoiceId);
+                    return {
+                      payment: part,
+                      label: linkedInvoice ? getInvoiceDisplayNumber(linkedInvoice) : part.invoiceNumber || 'Advance'
+                    };
+                  });
+                  const invoiceLabels = [...new Set(paymentInvoiceRows.map((row) => row.label))];
+                  const additionalInvoiceNumbers = [...new Set(invoiceLabels.slice(1).map(getCompactInvoiceNumber))].join(', ');
+                  const totalAmount = paymentParts.reduce((total, part) => total + Math.max(0, part.amount || 0), 0);
+                  const totalAdvanceApplied = paymentParts.reduce((total, part) => total + Math.max(0, part.advanceAppliedAmount || 0), 0);
+                  const totalAdvanceCreated = paymentParts.reduce((total, part) => total + Math.max(0, part.advanceCreatedAmount || 0), 0);
+                  const totalCashDiscount = paymentParts.reduce((total, part) => total + Math.max(0, part.cashDiscount || 0), 0);
+                  const totalPaymentEffect = paymentParts.reduce((total, part) => total + getInvoicePaymentEffect(part), 0);
+                  const totalOldBalance = paymentParts.reduce((total, part) => total + Math.max(0, part.amountUsedForOldBalance || 0), 0);
+                  const totalInvoiceAmount = paymentParts.reduce((total, part) => total + getAmountAppliedToInvoice(part), 0);
+                  const paymentNotes = [...new Set(paymentParts
+                    .map(getPaymentNoteWithoutSplitMarker)
+                    .filter(Boolean))].join(' | ');
+                  const isAdvanceApplication = paymentParts.every((part) => part.paymentKind === 'advance_application');
 
                   return (
-                  <tr className="role-record-row" key={payment.id}>
-                    <td style={cellStyle}>{formatShortDate(payment.date)}</td>
+                  <tr className="role-record-row" key={paymentGroup.id}>
+                    <td style={cellStyle}>{formatShortDate(paymentGroup.date)}</td>
                     <td style={cellStyle}>{payment.customerName}</td>
-                    <td style={cellStyle}>{invoiceLabel}</td>
-                    <td style={{ ...cellStyle, color: '#4ADE80', fontWeight: 800 }}>
-                      {payment.paymentKind === 'advance_application'
-                        ? `${formatMoney(payment.advanceAppliedAmount)} advance adjusted`
-                        : formatMoney(payment.amount)}
-                      {payment.advanceCreatedAmount > 0 ? (
-                        <div style={{ color: '#4ADE80', fontSize: 12, fontWeight: 800 }}>
-                          Advance stored: {formatMoney(payment.advanceCreatedAmount)}
-                        </div>
-                      ) : null}
-                      {(payment.notes || '').includes('Split payment') ? (
-                        <div style={{ color: '#4ADE80', fontSize: 12, fontWeight: 800 }}>
-                          Split paid: {formatMoney(splitPaymentTotal ?? payment.amount)}
-                        </div>
-                      ) : null}
-                      {payment.cashDiscount > 0 ? (
-                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
-                          Applied with discount: {formatMoney(getInvoicePaymentEffect(payment))}
-                        </div>
-                      ) : null}
-                      {payment.amountUsedForOldBalance > 0 ? (
-                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
-                          Old balance: {formatMoney(payment.amountUsedForOldBalance)}
-                        </div>
-                      ) : null}
-                      {payment.amountUsedForOldBalance > 0 ? (
-                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
-                          Invoice: {formatMoney(getAmountAppliedToInvoice(payment))}
+                    <td style={cellStyle}>
+                      <div style={{ fontWeight: 900 }}>{invoiceLabels[0]}</div>
+                      {additionalInvoiceNumbers ? (
+                        <div style={{ color: '#D7DEEA', fontWeight: 700, marginTop: 7, whiteSpace: 'nowrap' }}>
+                          {additionalInvoiceNumbers}
                         </div>
                       ) : null}
                     </td>
-                    <td style={cellStyle}>{formatMoney(payment.cashDiscount)}</td>
-                    <td style={cellStyle}>{payment.notes || '-'}</td>
+                    <td style={{ ...cellStyle, color: '#4ADE80', fontWeight: 800 }}>
+                      {isAdvanceApplication
+                        ? `${formatMoney(totalAdvanceApplied)} advance adjusted`
+                        : formatMoney(totalAmount)}
+                      {totalAdvanceCreated > 0 ? (
+                        <div style={{ color: '#4ADE80', fontSize: 12, fontWeight: 800 }}>
+                          Advance stored: {formatMoney(totalAdvanceCreated)}
+                        </div>
+                      ) : null}
+                      {totalCashDiscount > 0 ? (
+                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
+                          Applied with discount: {formatMoney(totalPaymentEffect)}
+                        </div>
+                      ) : null}
+                      {totalOldBalance > 0 ? (
+                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
+                          Old balance: {formatMoney(totalOldBalance)}
+                        </div>
+                      ) : null}
+                      {totalOldBalance > 0 ? (
+                        <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 700 }}>
+                          Invoice: {formatMoney(totalInvoiceAmount)}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={cellStyle}>{formatMoney(totalCashDiscount)}</td>
+                    <td style={cellStyle}>{paymentNotes || '-'}</td>
                     <td style={cellStyle}>
-                      {canEditPayment(payment) ? (
-                        <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(payment)}>
-                          Edit
-                        </button>
-                      ) : null}
-                      {canDeleteRecords ? (
-                        <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(payment)}>
-                          Delete
-                        </button>
-                      ) : null}
+                      {paymentInvoiceRows.map(({ payment: allocation, label }) => (
+                        <div
+                          key={allocation.id}
+                          style={{
+                            marginTop: allocation.id === payment.id ? 0 : 8,
+                            paddingTop: allocation.id === payment.id ? 0 : 8,
+                            borderTop: allocation.id === payment.id ? 'none' : '1px solid rgba(148, 163, 184, 0.22)'
+                          }}
+                        >
+                          {paymentParts.length > 1 ? (
+                            <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, marginBottom: 5 }}>{label}</div>
+                          ) : null}
+                          {canEditPayment(allocation) ? (
+                            <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8 }} onClick={() => handleEdit(allocation)}>
+                              Edit
+                            </button>
+                          ) : null}
+                          {canDeleteRecords ? (
+                            <button type="button" style={{ ...buttonStyle, background: '#FDECEC', color: '#B42318' }} onClick={() => handleDelete(allocation)}>
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
                     </td>
                   </tr>
                   );

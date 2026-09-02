@@ -47,7 +47,7 @@ const payment = (
 });
 
 describe('customer ledger', () => {
-  it('shows invoice additions and every split payment with a running balance', () => {
+  it('combines split allocations into one payment transaction and running-balance change', () => {
     const rows = buildCustomerLedger(
       [
         invoice('invoice-1', 100, '2026-09-01', '2026-09-01T09:00:00.000Z'),
@@ -55,12 +55,69 @@ describe('customer ledger', () => {
       ],
       [
         payment('payment-1', 40, '2026-09-02', '2026-09-02T09:00:00.000Z'),
-        payment('split-1', 50, '2026-09-04', '2026-09-04T09:00:00.000Z'),
-        payment('split-2', 10, '2026-09-04', '2026-09-04T09:01:00.000Z')
+        payment('split-1', 50, '2026-09-04', '2026-09-04T09:00:00.000Z', {
+          invoiceId: 'invoice-1',
+          splitPaymentGroupId: 'group-1',
+          splitPaymentTotalAmount: 60,
+          splitPaymentPart: 1,
+          splitPaymentCount: 2
+        }),
+        payment('split-2', 10, '2026-09-04', '2026-09-04T09:01:00.000Z', {
+          invoiceId: 'invoice-2',
+          splitPaymentGroupId: 'group-1',
+          splitPaymentTotalAmount: 60,
+          splitPaymentPart: 2,
+          splitPaymentCount: 2
+        })
       ]
     );
 
-    expect(rows.map((row) => row.runningBalance)).toEqual([100, 60, 260, 210, 200]);
+    expect(rows.map((row) => row.id)).toEqual([
+      'invoice:invoice-1',
+      'payment:payment-1',
+      'invoice:invoice-2',
+      'split:group-1'
+    ]);
+    expect(rows.map((row) => row.runningBalance)).toEqual([100, 60, 260, 200]);
+    expect(rows[3]).toMatchObject({ paymentAmount: 60, paymentReceived: 60 });
+    expect(rows[3].payments?.map((part) => part.id)).toEqual(['split-1', 'split-2']);
+  });
+
+  it('combines legacy split allocations that only have split markers in their notes', () => {
+    const rows = buildCustomerLedger(
+      [invoice('invoice-1', 100, '2026-09-01', '2026-09-01T09:00:00.000Z')],
+      [
+        payment('split-1', 40, '2026-09-02', '2026-09-02T09:00:00.000Z', {
+          invoiceId: 'invoice-1',
+          notes: 'Counter receipt | Split payment 1/2'
+        }),
+        payment('split-2', 30, '2026-09-02', '2026-09-02T09:01:00.000Z', {
+          invoiceId: 'invoice-2',
+          notes: 'Counter receipt | Split payment 2/2'
+        })
+      ]
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ paymentAmount: 70, paymentReceived: 70, runningBalance: 30 });
+    expect(rows[1].payments?.map((part) => part.id)).toEqual(['split-1', 'split-2']);
+  });
+
+  it('keeps ordinary payments entered on the same day as separate transactions', () => {
+    const rows = buildCustomerLedger(
+      [invoice('invoice-1', 100, '2026-09-01', '2026-09-01T09:00:00.000Z')],
+      [
+        payment('payment-1', 20, '2026-09-02', '2026-09-02T09:00:00.000Z'),
+        payment('payment-2', 30, '2026-09-02', '2026-09-02T10:00:00.000Z')
+      ]
+    );
+
+    expect(rows.map((row) => row.id)).toEqual([
+      'invoice:invoice-1',
+      'payment:payment-1',
+      'payment:payment-2'
+    ]);
+    expect(rows.map((row) => row.runningBalance)).toEqual([100, 80, 50]);
   });
 
   it('includes cash discounts but excludes payment advances from the due reduction', () => {

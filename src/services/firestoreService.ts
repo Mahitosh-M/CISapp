@@ -68,7 +68,13 @@ import { isOfferCurrentlyActive, sortOffersByLatest } from '../utils/offers';
 import { calculateInvoiceApcInfo, getInvoiceFullPaymentDate, getInvoiceFullPaymentEvent } from '../utils/customerPortal';
 import { buildCustomerScores } from '../utils/customerAnalytics';
 import { buildMonthlyCustomerStats, canViewRewardAtLevel, getCurrentMonthKey, getMonthlyStatsId } from '../utils/loyalty';
-import { getOpeningBalanceInvoiceId, getOpeningBalanceInvoiceNumber, isOpeningBalanceInvoice, OPENING_BALANCE_INVOICE_TYPE } from '../utils/openingBalance';
+import {
+  getOpeningBalanceInvoiceId,
+  getOpeningBalanceInvoiceNumber,
+  isOpeningBalanceInvoice,
+  OPENING_BALANCE_INVOICE_TYPE,
+  prepareOpeningBalanceInvoiceEdit
+} from '../utils/openingBalance';
 import { getUnpaidInvoicesAfterPayment } from '../utils/paymentAllocation';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import {
@@ -1332,45 +1338,6 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
 
 };
 
-export const syncOpeningBalanceInvoices = async (customers: Customer[], invoices: Invoice[]) => {
-  const existingOpeningCustomerIds = new Set(invoices.filter(isOpeningBalanceInvoice).map((invoice) => invoice.customerId));
-  const customersToConvert = customers.filter((customer) => (customer.previousOutstandingAmount ?? 0) > 0 && !existingOpeningCustomerIds.has(customer.id));
-
-  if (customersToConvert.length === 0) {
-    return { convertedCustomerIds: [] as string[], createdInvoices: [] as Invoice[] };
-  }
-
-  const batch = writeBatch(db);
-  const timestamp = nowIso();
-  const createdInvoices: Invoice[] = [];
-
-  customersToConvert.forEach((customer) => {
-    const invoiceRef = doc(db, INVOICES, getOpeningBalanceInvoiceId(customer.id));
-    const createdAt = customer.createdAt || timestamp;
-    const payload = buildOpeningBalanceInvoicePayload(customer.id, customer, customer.previousOutstandingAmount, createdAt);
-
-    batch.set(invoiceRef, payload);
-    batch.update(doc(db, CUSTOMERS, customer.id), {
-      previousOutstandingAmount: 0,
-      totalOutstandingAmount: customer.previousOutstandingAmount,
-      invoiceOutstandingAmount: 0,
-      openingBalanceOutstandingAmount: customer.previousOutstandingAmount,
-      latestOutstandingInvoiceId: invoiceRef.id,
-      financialSummaryUpdatedAt: timestamp,
-      updatedAt: timestamp
-    });
-    createdInvoices.push({ id: invoiceRef.id, ...payload });
-  });
-
-  await batch.commit();
-  await Promise.all(customersToConvert.map((customer) => syncCustomerFinancialSummary(customer.id)));
-
-  return {
-    convertedCustomerIds: customersToConvert.map((customer) => customer.id),
-    createdInvoices
-  };
-};
-
 export const syncCustomerPartnerLevelsFromFirestore = async () => {
   const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
     getCustomers(),
@@ -1656,15 +1623,21 @@ export const updateInvoiceRecord = async (
   auditUser?: AuditUser,
   options?: { deferPcAward?: boolean }
 ) => {
-  const [existingInvoiceSnapshot, customer, activeSettings] = await Promise.all([
+  const [existingInvoiceSnapshot, requestedCustomer, activeSettings] = await Promise.all([
     getDoc(doc(db, INVOICES, invoiceId)),
     getCustomerById(invoice.customerId),
     getAppSettings()
   ]);
   const existingInvoice = existingInvoiceSnapshot.exists() ? mapInvoiceDoc(existingInvoiceSnapshot.id, existingInvoiceSnapshot.data()) : undefined;
   if (!existingInvoice) throw new Error('Invoice record no longer exists. Refresh the list and try again.');
+  const editingOpeningBalance = isOpeningBalanceInvoice(existingInvoice);
+  invoice = editingOpeningBalance
+    ? prepareOpeningBalanceInvoiceEdit(existingInvoice, invoice)
+    : prepareExistingInvoicePayload(existingInvoice, invoice, auditUser);
+  const customer = invoice.customerId === requestedCustomer?.id
+    ? requestedCustomer
+    : await getCustomerById(invoice.customerId);
   if (!customer) throw new Error('Selected customer no longer exists.');
-  invoice = prepareExistingInvoicePayload(existingInvoice, invoice, auditUser);
   if (existingInvoice.customerId && existingInvoice.customerId !== invoice.customerId) {
     const postedPcSnapshot = await getDoc(doc(
       db,
@@ -1675,8 +1648,8 @@ export const updateInvoiceRecord = async (
       throw new Error('This invoice cannot be moved because its PC award is already permanently posted.');
     }
   }
-  const preserveExistingTerms = existingInvoice.customerId === invoice.customerId && !isOpeningBalanceInvoice(existingInvoice);
-  const invoiceTerms = isOpeningBalanceInvoice(existingInvoice)
+  const preserveExistingTerms = existingInvoice.customerId === invoice.customerId && !editingOpeningBalance;
+  const invoiceTerms = editingOpeningBalance
     ? undefined
     : buildInvoiceTimeTerms(
         invoice.date,
@@ -1688,6 +1661,12 @@ export const updateInvoiceRecord = async (
 
   await updateDoc(doc(db, INVOICES, invoiceId), {
     ...invoice,
+    ...(editingOpeningBalance ? {
+      invoiceType: OPENING_BALANCE_INVOICE_TYPE,
+      isOpeningBalance: true,
+      customerBalanceBeforeInvoice: 0,
+      customerBalanceAfterInvoice: invoice.totalSales
+    } : {}),
     ...(invoiceTerms ? { dueDate: invoiceTerms.savedDueDate, ...invoiceTerms } : {}),
     updatedAt: nowIso()
   });
@@ -1695,7 +1674,7 @@ export const updateInvoiceRecord = async (
   const affectedCustomerIds = [existingInvoice?.customerId, invoice.customerId].filter((customerId): customerId is string => Boolean(customerId));
   const postProcessing = await runTransactionPostProcessing({
     recordLabel: 'Invoice',
-    monthlyDeltas: [
+    monthlyDeltas: editingOpeningBalance ? [] : [
       {
         customerId: existingInvoice.customerId,
         date: existingInvoice.date,
@@ -1712,7 +1691,7 @@ export const updateInvoiceRecord = async (
       }
     ],
     customerIds: [...new Set(affectedCustomerIds)],
-    invoiceIds: options?.deferPcAward ? [] : [invoiceId]
+    invoiceIds: editingOpeningBalance || options?.deferPcAward ? [] : [invoiceId]
   });
   invalidateTransactionCaches(affectedCustomerIds, [existingInvoice.date, invoice.date]);
   return { invoiceId, ...postProcessing };
@@ -1848,6 +1827,27 @@ export const getPayments = async (options?: DateRangeQueryOptions) => {
     const snapshot = await getDocs(paymentsQuery);
     return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
   });
+};
+
+export const getPaymentsBySplitPaymentGroupIds = async (groupIds: string[]) => {
+  const uniqueGroupIds = [...new Set(groupIds.filter(Boolean))];
+  if (uniqueGroupIds.length === 0) return [];
+
+  const chunks: string[][] = [];
+  for (let index = 0; index < uniqueGroupIds.length; index += 30) {
+    chunks.push(uniqueGroupIds.slice(index, index + 30));
+  }
+
+  const snapshots = await Promise.all(
+    chunks.map((chunk) => getDocs(query(
+      collection(db, PAYMENTS),
+      where('splitPaymentGroupId', 'in', chunk)
+    )))
+  );
+
+  return snapshots.flatMap((snapshot) => (
+    snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))
+  ));
 };
 
 const dueCustomerRowsMatch = (record: DueCustomerRecord, row: DueCustomerRow) => (

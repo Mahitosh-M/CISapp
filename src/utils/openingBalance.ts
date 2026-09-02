@@ -1,4 +1,4 @@
-import type { Customer, Invoice } from '../types';
+import type { Customer, Invoice, InvoiceFormData } from '../types';
 
 export const OPENING_BALANCE_INVOICE_TYPE = 'opening_balance';
 export const OPENING_BALANCE_INVOICE_PREFIX = '0000-OPENING';
@@ -20,6 +20,24 @@ export const isBusinessInvoice = (invoice: Pick<Invoice, 'invoiceNumber'> & { in
 
 export const getBusinessInvoices = <T extends Pick<Invoice, 'invoiceNumber'> & { invoiceType?: string; isOpeningBalance?: boolean }>(invoices: T[]) =>
   invoices.filter(isBusinessInvoice);
+
+export const prepareOpeningBalanceInvoiceEdit = (existingInvoice: Invoice, invoice: InvoiceFormData): InvoiceFormData => {
+  const amount = Math.max(0, Number(invoice.salesAmount) || 0);
+
+  return {
+    customerId: existingInvoice.customerId,
+    customerName: existingInvoice.customerName,
+    date: invoice.date,
+    dueDate: invoice.date,
+    salesAmount: amount,
+    costAmount: 0,
+    transportAmount: 0,
+    totalSales: amount,
+    totalCost: 0,
+    totalProfit: 0,
+    notes: invoice.notes
+  };
+};
 
 export const sortInvoicesForPaymentAllocation = <T extends Pick<Invoice, 'date' | 'invoiceNumber'> & { invoiceType?: string; isOpeningBalance?: boolean }>(invoices: T[]) => {
   return [...invoices].sort((left, right) => {

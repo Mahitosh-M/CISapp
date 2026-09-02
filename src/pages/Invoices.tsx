@@ -27,7 +27,7 @@ import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
 import { latestEntriesNotice, latestFiveScrollStyle } from '../utils/listDisplay';
-import { getInvoiceDisplayNumber } from '../utils/openingBalance';
+import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
 import { buildInvoiceBalanceCheckpoints } from '../utils/customerOutstanding';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { summarizePaymentSaveResults, type PaymentSaveResultLike } from '../utils/paymentSaveResult';
@@ -129,8 +129,10 @@ const Invoices = () => {
   const isAdmin = userProfile?.role === 'Admin';
   const formIsBranchAware = isBranchAwareRecord(formData);
   const transactionShopId = assignedStaffShopId ?? (isShopId(formData.shopId) ? formData.shopId : undefined);
-  const editingInvoiceCreationPayment = editingInvoiceId
-    ? payments.find((payment) => payment.invoiceId === editingInvoiceId && payment.notes === invoiceCreationPaymentNote)
+  const editingInvoice = editingInvoiceId ? invoices.find((invoice) => invoice.id === editingInvoiceId) : undefined;
+  const editingOpeningBalance = Boolean(editingInvoice && isOpeningBalanceInvoice(editingInvoice));
+  const editingInvoiceCreationPayment = editingInvoice
+    ? payments.find((payment) => payment.invoiceId === editingInvoice.id && payment.notes === invoiceCreationPaymentNote)
     : undefined;
   const sameDayPaymentShopId = isBranchAwareRecord(editingInvoiceCreationPayment)
     ? editingInvoiceCreationPayment.shopId
@@ -311,7 +313,11 @@ const Invoices = () => {
       setFormData((current) => ({
         ...current,
         date: value,
-        dueDate: selectedCustomer ? calculateDueDate(value, selectedCustomer.tier, settings) : value
+        dueDate: editingOpeningBalance
+          ? value
+          : selectedCustomer
+            ? calculateDueDate(value, selectedCustomer.tier, settings)
+            : value
       }));
       return;
     }
@@ -496,30 +502,37 @@ const Invoices = () => {
 
   const handleEdit = (invoice: Invoice) => {
     const invoiceCreationPayment = getInvoiceCreationPayment(invoice.id);
+    const openingBalance = isOpeningBalanceInvoice(invoice);
 
     setEditingInvoiceId(invoice.id);
-    setSameDayPaymentAmount(invoiceCreationPayment?.amount ?? 0);
-    setSameDayCashDiscount(invoiceCreationPayment?.cashDiscount ?? 0);
+    setSameDayPaymentAmount(openingBalance ? 0 : invoiceCreationPayment?.amount ?? 0);
+    setSameDayCashDiscount(openingBalance ? 0 : invoiceCreationPayment?.cashDiscount ?? 0);
     setSameDayPaymentMode(invoiceCreationPayment?.mode ?? 'Cash');
     setSameDayPaymentAlreadyAccounted(invoiceCreationPayment?.affectsShopCash === false && isBranchAwareRecord(invoiceCreationPayment));
     setFormData({
       customerId: invoice.customerId,
       customerName: invoice.customerName,
       date: invoice.date,
-      dueDate: invoice.dueDate,
+      dueDate: openingBalance ? invoice.date : invoice.dueDate,
       salesAmount: invoice.salesAmount,
-      costAmount: invoice.costAmount,
-      transportAmount: invoice.transportAmount,
+      costAmount: openingBalance ? 0 : invoice.costAmount,
+      transportAmount: openingBalance ? 0 : invoice.transportAmount,
       totalSales: invoice.totalSales,
-      totalCost: invoice.totalCost,
-      totalProfit: invoice.totalProfit,
+      totalCost: openingBalance ? 0 : invoice.totalCost,
+      totalProfit: openingBalance ? 0 : invoice.totalProfit,
       notes: invoice.notes,
       ...(isBranchAwareRecord(invoice) ? {
         shopId: invoice.shopId,
         branchSystemVersion: BRANCH_SYSTEM_VERSION
       } : {})
     });
-    void loadCustomerCreditLimit(invoice.customerId);
+    if (openingBalance) {
+      creditRequestRef.current += 1;
+      setSelectedCreditSummary(undefined);
+      setLoadingCreditLimit(false);
+    } else {
+      void loadCustomerCreditLimit(invoice.customerId);
+    }
     setMessage('');
     setWarning('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -714,18 +727,22 @@ const Invoices = () => {
       <form style={cardStyle} onSubmit={handleSubmit}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ color: '#D4AF37', fontWeight: 800 }}>{editingInvoiceId ? 'Edit Invoice' : 'Create Invoice'}</div>
-            <div style={{ color: '#D7DEEA', marginTop: 4 }}>Next invoice number: {editingInvoiceId ? 'Existing number retained' : nextInvoiceNumber}</div>
+            <div style={{ color: '#D4AF37', fontWeight: 800 }}>
+              {editingOpeningBalance ? 'Edit Opening Balance' : editingInvoiceId ? 'Edit Invoice' : 'Create Invoice'}
+            </div>
+            <div style={{ color: '#D7DEEA', marginTop: 4 }}>
+              {editingOpeningBalance ? 'Historical customer balance' : `Next invoice number: ${editingInvoiceId ? 'Existing number retained' : nextInvoiceNumber}`}
+            </div>
           </div>
-          <div style={{ color: formData.totalProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 800 }}>
+          {!editingOpeningBalance ? <div style={{ color: formData.totalProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 800 }}>
             Estimated Profit: {formatMoney(formData.totalProfit)}
-          </div>
+          </div> : null}
         </div>
 
         <div style={formGridStyle}>
           <label style={labelStyle}>
             Customer
-            <select style={inputStyle} value={formData.customerId} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
+            <select style={inputStyle} value={formData.customerId} disabled={editingOpeningBalance} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
@@ -733,7 +750,7 @@ const Invoices = () => {
             </select>
           </label>
 
-          {isAdmin && (!editingInvoiceId || formIsBranchAware || adminNeedsSameDayPaymentShop) ? <label style={labelStyle}>
+          {!editingOpeningBalance && isAdmin && (!editingInvoiceId || formIsBranchAware || adminNeedsSameDayPaymentShop) ? <label style={labelStyle}>
             Shop
             <select
               style={inputStyle}
@@ -745,17 +762,17 @@ const Invoices = () => {
               <option value="">Select shop</option>
               {SHOP_OPTIONS.map((shop) => <option key={shop.id} value={shop.id}>{shop.name}</option>)}
             </select>
-          </label> : assignedStaffShopId ? <div style={labelStyle}>
+          </label> : !editingOpeningBalance && assignedStaffShopId ? <div style={labelStyle}>
             Shop
             <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
               {getShopName(assignedStaffShopId)}
             </div>
-          </div> : formIsBranchAware ? <div style={labelStyle}>
+          </div> : !editingOpeningBalance && formIsBranchAware ? <div style={labelStyle}>
             Shop
             <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
               {getShopName(formData.shopId)}
             </div>
-          </div> : isBranchAwareRecord(editingInvoiceCreationPayment) ? <div style={labelStyle}>
+          </div> : !editingOpeningBalance && isBranchAwareRecord(editingInvoiceCreationPayment) ? <div style={labelStyle}>
             Payment Shop
             <div style={{ ...inputStyle, minHeight: 42, display: 'flex', alignItems: 'center', fontWeight: 900 }}>
               {getShopName(editingInvoiceCreationPayment.shopId)}
@@ -763,31 +780,31 @@ const Invoices = () => {
           </div> : null}
 
           <label style={labelStyle}>
-            Invoice Date
+            {editingOpeningBalance ? 'Balance Date' : 'Invoice Date'}
             <input style={inputStyle} type="date" required value={formData.date} onChange={(event) => handleFieldChange('date', event.target.value)} />
           </label>
 
-          <label style={labelStyle}>
+          {!editingOpeningBalance ? <label style={labelStyle}>
             Due Date
             <input style={inputStyle} type="date" required value={formData.dueDate} onChange={(event) => handleFieldChange('dueDate', event.target.value)} />
-          </label>
+          </label> : null}
 
           <label style={labelStyle}>
-            Sales Amount
+            {editingOpeningBalance ? 'Opening Balance Amount' : 'Sales Amount'}
             <input style={inputStyle} type="number" min="0" value={formData.salesAmount} onChange={(event) => handleFieldChange('salesAmount', event.target.value)} />
           </label>
 
-          <label style={labelStyle}>
+          {!editingOpeningBalance ? <label style={labelStyle}>
             Cost Amount
             <input style={inputStyle} type="number" min="0" value={formData.costAmount} onChange={(event) => handleFieldChange('costAmount', event.target.value)} />
-          </label>
+          </label> : null}
 
-          <label style={labelStyle}>
+          {!editingOpeningBalance ? <label style={labelStyle}>
             Transport Amount
             <input style={inputStyle} type="number" min="0" value={formData.transportAmount} onChange={(event) => handleFieldChange('transportAmount', event.target.value)} />
-          </label>
+          </label> : null}
 
-          <div style={labelStyle}>
+          {!editingOpeningBalance ? <div style={labelStyle}>
             Credit Limit
             <div style={{
               ...inputStyle,
@@ -805,9 +822,9 @@ const Invoices = () => {
                   ? formatMoney(selectedCreditSummary?.availableCredit ?? 0)
                   : 'Select customer'}
             </div>
-          </div>
+          </div> : null}
 
-          <label style={labelStyle}>
+          {!editingOpeningBalance ? <label style={labelStyle}>
             Payment Received
             <input
               style={inputStyle}
@@ -816,9 +833,9 @@ const Invoices = () => {
               value={sameDayPaymentAmount}
               onChange={(event) => setSameDayPaymentAmount(Number(event.target.value) || 0)}
             />
-          </label>
+          </label> : null}
 
-          <label style={labelStyle}>
+          {!editingOpeningBalance ? <label style={labelStyle}>
             Cash Discount
             <input
               style={inputStyle}
@@ -827,9 +844,9 @@ const Invoices = () => {
               value={sameDayCashDiscount}
               onChange={(event) => setSameDayCashDiscount(Number(event.target.value) || 0)}
             />
-          </label>
+          </label> : null}
 
-          {sameDayPaymentAmount > 0 && sameDayPaymentShopId ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
+          {!editingOpeningBalance && sameDayPaymentAmount > 0 && sameDayPaymentShopId ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
             <input
               type="checkbox"
               checked={sameDayPaymentAlreadyAccounted}
@@ -846,7 +863,7 @@ const Invoices = () => {
 
         <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
           <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>
-            {saving ? 'Saving...' : editingInvoiceId ? 'Update Invoice' : 'Create Invoice'}
+            {saving ? 'Saving...' : editingOpeningBalance ? 'Update Opening Balance' : editingInvoiceId ? 'Update Invoice' : 'Create Invoice'}
           </button>
           {editingInvoiceId ? (
             <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetForm}>
@@ -914,7 +931,7 @@ const Invoices = () => {
                     <td style={cellStyle}>
                       {canEditInvoice(invoice) ? (
                         <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
-                          Edit
+                          {isOpeningBalanceInvoice(invoice) ? 'Edit Balance' : 'Edit'}
                         </button>
                       ) : null}
                       <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A', marginRight: 8, marginBottom: 8 }} onClick={() => handlePrint(invoice)}>
