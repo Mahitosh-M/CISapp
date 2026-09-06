@@ -796,6 +796,19 @@ const Customers = () => {
           </label>
 
           <label style={labelStyle}>
+            Branch
+            <select
+              style={inputStyle}
+              value={formData.branchId}
+              onChange={(event) => handleFieldChange('branchId', event.target.value)}
+              required
+            >
+              <option value="SINDHANUR">SINDHANUR</option>
+              <option value="MASKI">MASKI</option>
+            </select>
+          </label>
+
+          <label style={labelStyle}>
             Partner Level
             <select style={inputStyle} value={formData.tier} onChange={(event) => handleFieldChange('tier', event.target.value)}>
               {CUSTOMER_TIERS.map((tier) => (
