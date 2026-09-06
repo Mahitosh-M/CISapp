@@ -672,6 +672,7 @@ const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => 
     name: String(data.name || ''),
     mobile: String(data.mobile || ''),
     area: String(data.area || ''),
+    branchId: data.branchId === 'MASKI' ? 'MASKI' : 'SINDHANUR',
     tier,
     // Old balance from before this ERP started. Missing legacy documents safely read as zero.
     previousOutstandingAmount: Math.max(0, numberOrZero(data.previousOutstandingAmount)),

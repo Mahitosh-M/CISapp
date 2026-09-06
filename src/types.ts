@@ -1,4 +1,5 @@
 export type CustomerTier = 'Tier 1' | 'Tier 2' | 'Tier 3' | 'Tier 4';
+export type CustomerBranch = 'SINDHANUR' | 'MASKI';
 
 export type CustomerMovement = 'Promoted' | 'Demoted' | 'Stable' | 'New';
 
@@ -61,6 +62,7 @@ export interface Customer {
   name: string;
   mobile: string;
   area: string;
+  branchId?: CustomerBranch;
   tier: CustomerTier;
   previousOutstandingAmount: number;
   advanceBalance: number;
@@ -432,6 +434,7 @@ export interface CustomerFormData {
   name: string;
   mobile: string;
   area: string;
+  branchId: CustomerBranch;
   tier: CustomerTier;
   paymentTerms: string;
   notes: string;
