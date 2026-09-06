@@ -407,7 +407,7 @@ const Admin = () => {
             <select style={inputStyle} value={customerLoginId} onChange={(event) => setCustomerLoginId(event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)} - {customer.branchId || 'Branch not selected'}</option>
               ))}
             </select>
           </label>
@@ -428,14 +428,14 @@ const Admin = () => {
 
       {activePanel === 'medicals' ? <form className="admin-card" style={cardStyle} onSubmit={handleCreateMedicalLogin}>
         <div className="admin-card-title"><Stethoscope size={18} />Create Medical Login</div>
-        <div style={{ color: '#D7DEEA', marginBottom: 12 }}>Admin creates medical credentials and links them to an existing customer record. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
+        <div style={{ color: '#D7DEEA', marginBottom: 12 }}>A Medical login is another type of customer login. It uses the linked customer's branch, invoices, payments, follow-ups, Salesapp sync, and other customer features. Existing passwords cannot be shown later; use reset email if a user forgets it.</div>
         <div style={gridStyle}>
           <label style={{ fontWeight: 800 }}>
             Link Customer
             <select style={inputStyle} value={medicalLoginId} onChange={(event) => setMedicalLoginId(event.target.value)}>
               <option value="">Select customer</option>
               {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>
+                <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)} - {customer.branchId || 'Branch not selected'}</option>
               ))}
             </select>
           </label>

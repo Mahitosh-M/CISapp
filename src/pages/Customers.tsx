@@ -1308,6 +1308,7 @@ const Customers = () => {
                                 <div style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
                               </div>
                             ) : null}
+                            <div style={{ color: '#D7DEEA', fontSize: 11 }}>Branch: {customer.branchId || 'Not selected'}</div>
                             {customer.status ? <div style={{ color: '#D7DEEA', fontSize: 11 }}>Status: {customer.status}</div> : null}
                           </td>
                           <td style={{ ...cellStyle, color: totalColor, fontWeight: 800 }}>
