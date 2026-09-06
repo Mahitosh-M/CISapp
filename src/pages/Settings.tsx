@@ -177,7 +177,7 @@ const Settings = () => {
     }
   };
 
-  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'headerOrder' | 'down' | 'customerDown', value: string | boolean) => {
+  const handleTopLevelSettingChange = (field: 'highOutstandingThreshold' | 'invoicePrefix' | 'financialYearReset' | 'defaultReportPeriod' | 'showCustomerTierToCustomer' | 'turnOnOrder' | 'medicalOrder' | 'headerOrder' | 'down' | 'customerDown', value: string | boolean) => {
     setSettings((current) => ({
       ...current,
       [field]: field === 'highOutstandingThreshold' ? Number(value) || 0 : value
@@ -186,14 +186,18 @@ const Settings = () => {
 
   const handleToggleChange = async (field: AppSettingsToggleField, value: boolean) => {
     const previousValue = settings[field];
-    setSettings((current) => ({ ...current, [field]: value }));
+    setSettings((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === 'medicalOrder' && value ? { turnOnOrder: false } : {})
+    }));
     setSavingToggle(field);
     setMessage('');
     setError('');
 
     try {
       await updateAppSettingsToggle(field, value);
-      const label = field === 'down' ? 'App Down' : field === 'customerDown' ? 'Customer' : field === 'turnOnOrder' ? 'Order Page' : 'Header Order';
+      const label = field === 'down' ? 'App Down' : field === 'customerDown' ? 'Customer' : field === 'turnOnOrder' ? 'Customer Order' : field === 'medicalOrder' ? 'Medical Order' : 'Header Order';
       setMessage(label + ' updated.');
     } catch (err) {
       setSettings((current) => ({ ...current, [field]: previousValue }));
@@ -335,9 +339,15 @@ const Settings = () => {
           />
           <ToggleSetting
             checked={settings.turnOnOrder}
-            label="Order Page"
+            label="Customer Order"
             disabled={savingToggle === 'turnOnOrder'}
             onChange={(checked) => handleToggleChange('turnOnOrder', checked)}
+          />
+          <ToggleSetting
+            checked={settings.medicalOrder}
+            label="Medical Order"
+            disabled={savingToggle === 'medicalOrder'}
+            onChange={(checked) => handleToggleChange('medicalOrder', checked)}
           />
           <ToggleSetting
             checked={settings.headerOrder}

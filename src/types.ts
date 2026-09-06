@@ -302,6 +302,7 @@ export interface AppSettings {
   loyaltySettings: LoyaltySettings;
   showCustomerTierToCustomer: boolean;
   turnOnOrder: boolean;
+  medicalOrder: boolean;
   headerOrder: boolean;
   down: boolean;
   customerDown: boolean;

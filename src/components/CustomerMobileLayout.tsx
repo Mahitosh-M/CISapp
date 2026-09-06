@@ -8,6 +8,7 @@ import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { markBonusPcRequestSeen } from '../services/firestoreService';
 import { formatApc } from '../utils/loyalty';
 import { getTierColors, getTierDisplayName } from '../utils/tiers';
+import { canUsePortalOrder } from '../utils/orderVisibility';
 
 const navItems = [
   { to: '/customer', label: 'Home', icon: Home, color: '#FDE68A', end: true },
@@ -32,8 +33,8 @@ const CustomerMobileLayout = () => {
   const customerTierColors = getTierColors(portalData.customer?.tier ?? 'Tier 4');
   const pcBalance = portalData.apcSummary?.apcBalance ?? 0;
   const pcBalanceStorageKey = getPcBalanceStorageKey(portalData.userProfile?.uid, portalData.customer?.id);
-  const showOrderHome = portalData.settings.turnOnOrder;
-  const showHeaderOrder = portalData.settings.headerOrder;
+  const showOrderHome = canUsePortalOrder(role, portalData.settings);
+  const showHeaderOrder = showOrderHome && portalData.settings.headerOrder;
   const visibleNavItems = showOrderHome ? navItems : navItems.filter((item) => item.to !== '/customer');
 
   const latestUnreadBonus = useMemo(() => {
@@ -69,7 +70,7 @@ const CustomerMobileLayout = () => {
   const openOrderApp = () => {
     const orderUrl = new URL(ORDER_APP_URL);
     orderUrl.searchParams.set('name', customerHeading);
-    orderUrl.searchParams.set('role', 'customer');
+    orderUrl.searchParams.set('role', role === 'Medical' ? 'Medical' : 'customer');
     orderUrl.searchParams.set('area', portalData.customer?.area || '');
     orderUrl.searchParams.set('returnUrl', window.location.href);
     window.open(orderUrl.toString(), '_blank', 'noopener,noreferrer');
@@ -122,7 +123,7 @@ const CustomerMobileLayout = () => {
 
       <main style={{ padding: '16px 14px 96px' }}>
         {portalData.error ? <div style={{ background: '#FDECEC', color: '#7F1D1D', borderRadius: 14, padding: 12, marginBottom: 12 }}>{portalData.error}</div> : null}
-        <Outlet context={{ ...portalData, openOrderApp }} />
+        <Outlet context={{ ...portalData, openOrderApp, canOrder: showOrderHome }} />
       </main>
 
       <nav style={{ position: 'fixed', left: '50%', bottom: 0, transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', borderTop: '1px solid rgba(212,175,55,0.45)', display: 'grid', gridTemplateColumns: `repeat(${visibleNavItems.length}, minmax(0, 1fr))`, gap: 5, padding: '7px 6px 9px', boxShadow: '0 -12px 28px rgba(0,0,0,0.30)', zIndex: 20 }}>
@@ -240,6 +241,7 @@ const CustomerMobileLayout = () => {
 
 export type CustomerPortalOutletContext = CustomerPortalData & {
   openOrderApp: () => void;
+  canOrder: boolean;
 };
 
 export const useCustomerPortalContext = () => useOutletContext<CustomerPortalOutletContext>();

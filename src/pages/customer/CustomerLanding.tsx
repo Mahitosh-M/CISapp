@@ -20,9 +20,9 @@ const tileStyle = {
 
 const CustomerLanding = () => {
   const navigate = useNavigate();
-  const { openOrderApp, settings } = useCustomerPortalContext();
+  const { openOrderApp, canOrder } = useCustomerPortalContext();
 
-  if (!settings.turnOnOrder) {
+  if (!canOrder) {
     return <Navigate to="/customer/dashboard" replace />;
   }
 

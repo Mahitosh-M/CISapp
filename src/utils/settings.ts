@@ -94,6 +94,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Customer portal privacy flag. Default false hides tier/category until Admin explicitly allows it.
   showCustomerTierToCustomer: false,
   turnOnOrder: false,
+  medicalOrder: false,
   headerOrder: true,
   down: false,
   customerDown: false
@@ -173,6 +174,7 @@ export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSe
   },
   showCustomerTierToCustomer: settings?.showCustomerTierToCustomer ?? DEFAULT_SETTINGS.showCustomerTierToCustomer,
   turnOnOrder: settings?.turnOnOrder ?? DEFAULT_SETTINGS.turnOnOrder,
+  medicalOrder: settings?.medicalOrder ?? DEFAULT_SETTINGS.medicalOrder,
   headerOrder: settings?.headerOrder ?? DEFAULT_SETTINGS.headerOrder,
   down: settings?.down ?? DEFAULT_SETTINGS.down,
   customerDown: settings?.customerDown ?? DEFAULT_SETTINGS.customerDown,

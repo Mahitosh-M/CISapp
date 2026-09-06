@@ -817,6 +817,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
     targetSettings: data.targetSettings as AppSettings['targetSettings'],
     showCustomerTierToCustomer: data.showCustomerTierToCustomer === true,
     turnOnOrder: data.turnOnOrder === true,
+    medicalOrder: data.medicalOrder === true,
     headerOrder: data.headerOrder === undefined ? DEFAULT_SETTINGS.headerOrder : data.headerOrder === true,
     down: data.down === true,
     customerDown: data.customerDown === true,
@@ -2623,24 +2624,23 @@ export const updateAppSettings = async (settings: AppSettings, auditUser?: Audit
   appSettingsCache = { ...appSettings, id: settings.id, updatedAt: timestamp };
 };
 
-export type AppSettingsToggleField = 'down' | 'customerDown' | 'turnOnOrder' | 'headerOrder';
+export type AppSettingsToggleField = 'down' | 'customerDown' | 'turnOnOrder' | 'medicalOrder' | 'headerOrder';
 
 export const updateAppSettingsToggle = async (field: AppSettingsToggleField, value: boolean) => {
   const currentSettings = await getAppSettings();
   const settingsId = currentSettings.id || APP_SETTINGS_DOC_ID;
   const timestamp = nowIso();
 
-  await updateDoc(doc(db, SETTINGS, settingsId), {
-    [field]: value,
-    updatedAt: timestamp
-  });
+  const updates = field === 'medicalOrder' && value
+    ? { medicalOrder: true, turnOnOrder: false, updatedAt: timestamp }
+    : { [field]: value, updatedAt: timestamp };
+  await updateDoc(doc(db, SETTINGS, settingsId), updates);
 
   clearFirestoreSessionCache(SETTINGS);
   appSettingsCache = {
     ...currentSettings,
     id: settingsId,
-    [field]: value,
-    updatedAt: timestamp
+    ...updates
   };
 };
 
