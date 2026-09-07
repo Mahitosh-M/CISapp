@@ -70,7 +70,8 @@ const CustomerMobileLayout = () => {
   const openOrderApp = () => {
     const orderUrl = new URL(ORDER_APP_URL);
     orderUrl.searchParams.set('name', customerHeading);
-    orderUrl.searchParams.set('role', role === 'Medical' ? 'Medical' : 'customer');
+    orderUrl.searchParams.set('role', role === 'Medical' ? 'medical' : 'customer');
+    if (portalData.customer?.id) orderUrl.searchParams.set('customerId', portalData.customer.id);
     orderUrl.searchParams.set('area', portalData.customer?.area || '');
     orderUrl.searchParams.set('returnUrl', window.location.href);
     window.open(orderUrl.toString(), '_blank', 'noopener,noreferrer');
