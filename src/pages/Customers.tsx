@@ -1,6 +1,6 @@
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AlertCircle, BellRing, BookOpen, ChevronDown, ChevronUp, CircleDollarSign, Download, FileText, ShoppingCart, UserPlus } from 'lucide-react';
+import { AlertCircle, BookOpen, ChevronDown, ChevronUp, CircleDollarSign, Download, FileText, MapPin, ShoppingCart, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -24,8 +24,8 @@ import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
 import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
-import { getBusinessInvoices, getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
-import { buildCustomerOutstandingRows, buildDueCustomerRows } from '../utils/overdueUtils';
+import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
+import { buildDueCustomerRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import { getShopName } from '../utils/shops';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
@@ -60,9 +60,7 @@ const Customers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [inactiveCustomers, setInactiveCustomers] = useState<Customer[]>([]);
-  const [inactiveInvoices, setInactiveInvoices] = useState<Invoice[]>([]);
-  const [inactivePayments, setInactivePayments] = useState<Payment[]>([]);
+  const [branchPendingCustomers, setBranchPendingCustomers] = useState<Customer[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [formData, setFormData] = useState<CustomerFormData>(emptyCustomerForm);
   const [editingCustomerId, setEditingCustomerId] = useState('');
@@ -72,11 +70,9 @@ const Customers = () => {
   const [selectedSearchCustomerId, setSelectedSearchCustomerId] = useState('');
   const [searchCustomers, setSearchCustomers] = useState<Customer[] | null>(null);
   const [loadingSearchCustomers, setLoadingSearchCustomers] = useState(false);
-  const [inactiveSearchText, setInactiveSearchText] = useState('');
-  const [calledCustomerIds, setCalledCustomerIds] = useState<Set<string>>(() => new Set());
-  const [showInactiveCustomers, setShowInactiveCustomers] = useState(false);
-  const [inactiveDataLoaded, setInactiveDataLoaded] = useState(false);
-  const [loadingInactiveCustomers, setLoadingInactiveCustomers] = useState(false);
+  const [showBranchPendingCustomers, setShowBranchPendingCustomers] = useState(false);
+  const [branchPendingDataLoaded, setBranchPendingDataLoaded] = useState(false);
+  const [loadingBranchPendingCustomers, setLoadingBranchPendingCustomers] = useState(false);
   const [dueCustomers, setDueCustomers] = useState<DueCustomerRecord[]>([]);
   const [showDueCustomers, setShowDueCustomers] = useState(false);
   const [dueDataLoaded, setDueDataLoaded] = useState(false);
@@ -191,33 +187,26 @@ const Customers = () => {
 
   const getStoredCustomerTotal = (customer: Customer) => customer.totalOutstandingAmount ?? 0;
 
-  const handleToggleInactiveCustomers = async () => {
-    if (showInactiveCustomers) {
-      setShowInactiveCustomers(false);
+  const handleToggleBranchPendingCustomers = async () => {
+    if (showBranchPendingCustomers) {
+      setShowBranchPendingCustomers(false);
       return;
     }
 
-    setShowInactiveCustomers(true);
+    setShowBranchPendingCustomers(true);
 
-    if (inactiveDataLoaded) return;
+    if (branchPendingDataLoaded) return;
 
     try {
-      setLoadingInactiveCustomers(true);
+      setLoadingBranchPendingCustomers(true);
       setError('');
-      const [customerRows, invoiceRows, paymentRows] = await Promise.all([
-        getCustomers(),
-        getInvoices(),
-        getPayments()
-      ]);
-
-      setInactiveCustomers(customerRows);
-      setInactiveInvoices(invoiceRows);
-      setInactivePayments(paymentRows);
-      setInactiveDataLoaded(true);
+      const customerRows = await getCustomers();
+      setBranchPendingCustomers(customerRows.filter((customer) => !customer.branchId));
+      setBranchPendingDataLoaded(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load follow-up customers.');
+      setError(err instanceof Error ? err.message : 'Unable to load customers without a branch.');
     } finally {
-      setLoadingInactiveCustomers(false);
+      setLoadingBranchPendingCustomers(false);
     }
   };
 
@@ -395,57 +384,6 @@ const Customers = () => {
     }
   };
 
-  const inactiveOutstandingByCustomerId = useMemo(() => {
-    return new Map(
-      buildCustomerOutstandingRows(inactiveCustomers, inactiveInvoices, inactivePayments, settings).map((row) => [row.customerId, row])
-    );
-  }, [inactiveCustomers, inactiveInvoices, inactivePayments, settings]);
-
-  const inactiveCustomerRows = useMemo(() => {
-    const today = getTodayDateString();
-    const cutoffDate = addDaysToDateString(today, -15);
-    const todayTime = new Date(`${today}T00:00:00`).getTime();
-    const term = inactiveSearchText.trim().toLowerCase();
-    const lastOrderByCustomerId = new Map<string, string>();
-
-    getBusinessInvoices(inactiveInvoices).forEach((invoice) => {
-      const currentDate = lastOrderByCustomerId.get(invoice.customerId);
-
-      if (!currentDate || invoice.date > currentDate) {
-        lastOrderByCustomerId.set(invoice.customerId, invoice.date);
-      }
-    });
-
-    return inactiveCustomers
-      .map((customer) => {
-        const lastOrderDate = lastOrderByCustomerId.get(customer.id) ?? '';
-        const lastOrderTime = lastOrderDate ? new Date(`${lastOrderDate}T00:00:00`).getTime() : 0;
-        const daysSinceLastOrder = lastOrderTime > 0 ? Math.max(0, Math.floor((todayTime - lastOrderTime) / (24 * 60 * 60 * 1000))) : null;
-        const outstanding = inactiveOutstandingByCustomerId.get(customer.id)?.outstanding ?? customer.totalOutstandingAmount ?? 0;
-
-        return {
-          customer,
-          lastOrderDate,
-          daysSinceLastOrder,
-          outstanding
-        };
-      })
-      .filter((row) => !row.lastOrderDate || row.lastOrderDate <= cutoffDate)
-      .filter((row) => !calledCustomerIds.has(row.customer.id))
-      .filter((row) => {
-        if (!term) return true;
-
-        return [row.customer.name, row.customer.area].some((value) =>
-          value.toLowerCase().includes(term)
-        );
-      })
-      .sort((left, right) => {
-        if (!left.lastOrderDate && right.lastOrderDate) return -1;
-        if (left.lastOrderDate && !right.lastOrderDate) return 1;
-        return left.lastOrderDate.localeCompare(right.lastOrderDate) || left.customer.name.localeCompare(right.customer.name);
-      });
-  }, [calledCustomerIds, inactiveCustomers, inactiveInvoices, inactiveOutstandingByCustomerId, inactiveSearchText]);
-
   const handleFieldChange = (field: CustomerTextField, value: string) => {
     if (field === 'tier') {
       const tier = value as CustomerTier;
@@ -503,6 +441,7 @@ const Customers = () => {
 
       if (editingCustomerId) {
         await updateCustomerRecord(editingCustomerId, customerPayload, auditUser);
+        setBranchPendingCustomers((current) => current.filter((customer) => customer.id !== editingCustomerId));
         setMessage('Customer updated successfully.');
       } else {
         await createCustomer(customerPayload, auditUser);
@@ -718,21 +657,21 @@ const Customers = () => {
               <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Create customer record</span>
             </span>
           </button>
-          <button
+          {isAdmin ? <button
             type="button"
             className="customer-action-tile"
             style={staffTileStyle}
-            onClick={handleToggleInactiveCustomers}
-            disabled={loadingInactiveCustomers}
+            onClick={handleToggleBranchPendingCustomers}
+            disabled={loadingBranchPendingCustomers}
           >
-            <span style={staffTileIconStyle}><BellRing size={20} /></span>
+            <span style={staffTileIconStyle}><MapPin size={20} /></span>
             <span>
-              <span style={{ display: 'block', fontWeight: 900 }}>{showInactiveCustomers ? 'Hide Follow-up' : 'Follow-up'}</span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showBranchPendingCustomers ? 'Hide Branch Pending' : 'Branch Pending'}</span>
               <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
-                {loadingInactiveCustomers ? 'Loading customers' : 'Not ordered in 15+ days'}
+                {loadingBranchPendingCustomers ? 'Loading customers' : 'Customers without a branch'}
               </span>
             </span>
-          </button>
+          </button> : null}
           <button
             type="button"
             className="customer-action-tile"
@@ -882,65 +821,42 @@ const Customers = () => {
           </div>
         ) : null}
 
-        {showInactiveCustomers ? (
+        {isAdmin && showBranchPendingCustomers ? (
           <div style={cardStyle}>
-            {showInactiveCustomers ? (
               <div>
-                <label style={labelStyle}>
-                  Search follow-up customers
-                  <input
-                    style={inputStyle}
-                    value={inactiveSearchText}
-                    onChange={(event) => setInactiveSearchText(event.target.value)}
-                    placeholder="Search follow-up customers"
-                  />
-                </label>
-
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
                   <div style={{ color: '#D7DEEA', fontSize: 12 }}>
-                    Follow-up list based on normal business invoices only.
+                    Assign SINDHANUR or MASKI. A customer disappears from this list immediately after saving.
                   </div>
-                  <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{inactiveCustomerRows.length} customer(s)</div>
+                  <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{branchPendingCustomers.length} customer(s)</div>
                 </div>
 
                 <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
                   <table style={compactTableStyle}>
                     <thead>
                       <tr>
-                        <th style={{ ...headerCellStyle, width: '42%' }}>Customer</th>
-                        <th style={{ ...headerCellStyle, width: '18%' }}>Days</th>
-                        <th style={{ ...headerCellStyle, width: '20%' }}>Total</th>
+                        <th style={{ ...headerCellStyle, width: '55%' }}>Customer</th>
+                        <th style={{ ...headerCellStyle, width: '25%' }}>Area</th>
                         <th style={{ ...headerCellStyle, width: '20%' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {loadingInactiveCustomers ? (
-                        <tr><td style={cellStyle} colSpan={4}>Loading follow-up customers...</td></tr>
-                      ) : inactiveCustomerRows.length === 0 ? (
-                        <tr><td style={cellStyle} colSpan={4}>No customers found for this follow-up list.</td></tr>
+                      {loadingBranchPendingCustomers ? (
+                        <tr><td style={cellStyle} colSpan={3}>Loading customers...</td></tr>
+                      ) : branchPendingCustomers.length === 0 ? (
+                        <tr><td style={cellStyle} colSpan={3}>Every customer has a branch.</td></tr>
                       ) : (
-                        inactiveCustomerRows.map(({ customer, daysSinceLastOrder, outstanding }) => (
+                        branchPendingCustomers.map((customer) => (
                           <tr className="role-record-row" key={customer.id}>
-                            <td style={cellStyle}>
-                              <strong>{customer.name}</strong>
-                              {customer.area ? (
-                                <div style={{ marginTop: 4 }}>
-                                  <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Area</div>
-                                  <div style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 800 }}>{customer.area}</div>
-                                </div>
-                              ) : null}
-                            </td>
-                            <td style={{ ...cellStyle, color: '#B7791F', fontWeight: 900 }}>
-                              {daysSinceLastOrder === null ? '-' : `${daysSinceLastOrder} day(s)`}
-                            </td>
-                            <td style={{ ...cellStyle, fontWeight: 900 }}>{formatMoney(outstanding)}</td>
+                            <td style={cellStyle}><strong>{customer.name}</strong></td>
+                            <td style={cellStyle}>{customer.area || '-'}</td>
                             <td style={cellStyle}>
                               <button
                                 type="button"
                                 style={{ ...buttonStyle, width: '100%', padding: '6px 10px', background: '#E8F5EC', color: '#166534', fontSize: 11 }}
-                                onClick={() => setCalledCustomerIds((current) => new Set(current).add(customer.id))}
+                                onClick={() => handleEdit(customer)}
                               >
-                                Called
+                                Assign Branch
                               </button>
                             </td>
                           </tr>
@@ -950,7 +866,6 @@ const Customers = () => {
                   </table>
                 </div>
               </div>
-            ) : null}
           </div>
         ) : null}
 
