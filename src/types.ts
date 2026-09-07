@@ -58,6 +58,7 @@ export interface LoyaltySettings {
 }
 
 export interface Customer {
+  customerType?: 'customer' | 'medical';
   id: string;
   name: string;
   mobile: string;
@@ -432,6 +433,7 @@ export interface OverdueInvoiceRisk {
 }
 
 export interface CustomerFormData {
+  customerType?: 'customer' | 'medical';
   name: string;
   mobile: string;
   area: string;

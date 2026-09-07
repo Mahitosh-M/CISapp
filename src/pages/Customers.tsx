@@ -35,6 +35,7 @@ const LIST_PAGE_SIZE = 1;
 const ORDER_APP_URL = 'https://orderapp-35200.web.app';
 
 const emptyCustomerForm: CustomerFormData = {
+  customerType: 'customer',
   name: '',
   mobile: '',
   area: '',
@@ -445,7 +446,7 @@ const Customers = () => {
         setMessage('Customer updated successfully.');
       } else {
         await createCustomer(customerPayload, auditUser);
-        setMessage('Customer added successfully.');
+        setMessage(formData.customerType === 'medical' ? 'Medical added successfully.' : 'Customer added successfully.');
       }
 
       resetForm();
@@ -460,6 +461,7 @@ const Customers = () => {
   const handleEdit = (customer: Customer) => {
     setEditingCustomerId(customer.id);
     setFormData({
+      customerType: customer.customerType || 'customer',
       name: customer.name,
       mobile: customer.mobile,
       area: customer.area,
@@ -505,12 +507,16 @@ const Customers = () => {
     window.open(orderUrl.toString(), '_blank', 'noopener,noreferrer');
   };
 
-  const handleToggleCustomerForm = () => {
-    if (showCustomerForm && !editingCustomerId) {
+  const handleToggleCustomerForm = (customerType: 'customer' | 'medical' = 'customer') => {
+    if (showCustomerForm && !editingCustomerId && formData.customerType === customerType) {
       resetForm();
       return;
     }
 
+    setFormData({ ...emptyCustomerForm, customerType });
+    setEditingCustomerId('');
+    setError('');
+    setMessage('');
     setShowCustomerForm(true);
   };
 
@@ -649,12 +655,24 @@ const Customers = () => {
             type="button"
             className="customer-action-tile"
             style={staffTileStyle}
-            onClick={handleToggleCustomerForm}
+            onClick={() => handleToggleCustomerForm('customer')}
           >
             <span style={staffTileIconStyle}><UserPlus size={20} /></span>
             <span>
-              <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId ? 'Hide Form' : 'Add Customer'}</span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId && formData.customerType !== 'medical' ? 'Hide Form' : 'Add Customer'}</span>
               <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Create customer record</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="customer-action-tile"
+            style={staffTileStyle}
+            onClick={() => handleToggleCustomerForm('medical')}
+          >
+            <span style={staffTileIconStyle}><UserPlus size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId && formData.customerType === 'medical' ? 'Hide Medical Form' : 'Add MEDICAL'}</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Create medical customer record</span>
             </span>
           </button>
           {isAdmin ? <button
@@ -716,7 +734,7 @@ const Customers = () => {
           <div style={cardStyle}>
             <form onSubmit={handleSubmit}>
               <div style={{ color: '#D4AF37', fontWeight: 800, marginBottom: 14 }}>
-                {editingCustomerId ? 'Edit Customer' : 'Add Customer'}
+                {editingCustomerId ? (formData.customerType === 'medical' ? 'Edit Medical' : 'Edit Customer') : (formData.customerType === 'medical' ? 'Add MEDICAL' : 'Add Customer')}
               </div>
 
           <label style={labelStyle}>
@@ -809,7 +827,7 @@ const Customers = () => {
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button type="submit" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} disabled={saving}>
-              {saving ? 'Saving...' : editingCustomerId ? 'Update Customer' : 'Add Customer'}
+              {saving ? 'Saving...' : editingCustomerId ? 'Update Customer' : formData.customerType === 'medical' ? 'Add MEDICAL' : 'Add Customer'}
             </button>
             {editingCustomerId ? (
               <button type="button" style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A' }} onClick={resetForm}>

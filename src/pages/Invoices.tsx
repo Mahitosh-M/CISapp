@@ -1,3 +1,4 @@
+import { getShopCode } from '../utils/shops';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
@@ -249,7 +250,7 @@ const Invoices = () => {
         };
       })
       .filter((invoice) => {
-        const matchesSearch = !term || [getInvoiceDisplayNumber(invoice), invoice.invoiceNumber, invoice.customerName].some((value) => value.toLowerCase().includes(term));
+        const matchesSearch = !term || [getInvoiceDisplayNumber(invoice), invoice.invoiceNumber, invoice.customerName, getShopCode(invoice.shopId), getShopName(invoice.shopId)].some((value) => value.toLowerCase().includes(term));
         const matchesCustomer = customerFilter === 'all' || invoice.customerId === customerFilter;
         return matchesSearch && matchesCustomer;
       });
@@ -916,7 +917,7 @@ const Invoices = () => {
               ) : (
                 invoiceRows.map((invoice) => (
                   <tr key={invoice.id}>
-                    <td style={cellStyle}><strong>{getInvoiceDisplayNumber(invoice)}</strong></td>
+                    <td style={cellStyle}><strong>{getInvoiceDisplayNumber(invoice)}</strong><span title={getShopName(invoice.shopId)} style={{ display: 'inline-block', marginLeft: 8, padding: '3px 7px', borderRadius: 6, background: invoice.shopId === 'SHOP_S' ? '#DBEAFE' : '#DCFCE7', color: '#172554', fontSize: 11, fontWeight: 800 }}>{getShopCode(invoice.shopId) || 'Legacy / shared'}</span></td>
                     <td style={cellStyle}>{invoice.customerName}</td>
                     <td style={cellStyle}>{formatShortDate(invoice.date)}</td>
                     <td style={cellStyle}>{formatShortDate(invoice.effectiveDueDate)}</td>

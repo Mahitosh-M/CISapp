@@ -37,6 +37,8 @@ export interface ShopContributionRow {
 
 export const isShopId = (value: unknown): value is ShopId => value === 'SHOP_A' || value === 'SHOP_S';
 
+export const getShopCode = (shopId?: ShopId) => shopId === 'SHOP_S' ? 'SND' : shopId === 'SHOP_A' ? 'MSK' : '';
+
 export const getShopName = (shopId?: ShopId) => {
   return SHOP_OPTIONS.find((shop) => shop.id === shopId)?.name ?? 'Legacy / shared';
 };
