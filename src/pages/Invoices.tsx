@@ -521,6 +521,8 @@ const Invoices = () => {
       totalSales: invoice.totalSales,
       totalCost: openingBalance ? 0 : invoice.totalCost,
       totalProfit: openingBalance ? 0 : invoice.totalProfit,
+      salesStaffEmail: invoice.salesStaffEmail || '',
+      salesStaffName: invoice.salesStaffName || '',
       notes: invoice.notes,
       ...(isBranchAwareRecord(invoice) ? {
         shopId: invoice.shopId,
@@ -779,6 +781,12 @@ const Invoices = () => {
               {getShopName(editingInvoiceCreationPayment.shopId)}
             </div>
           </div> : null}
+
+          {!editingOpeningBalance ? <label style={labelStyle}>
+            Salesapp Staff email (optional)
+            <input style={inputStyle} type="email" value={formData.salesStaffEmail || ''} placeholder="Staff email used in Salesapp" onChange={(event) => handleFieldChange('salesStaffEmail', event.target.value)} />
+            <small style={{ display: 'block', marginTop: 4, color: '#D7DEEA', fontWeight: 500 }}>Use this only when this sale was produced by that Staff member. Direct customer orders stay blank.</small>
+          </label> : null}
 
           <label style={labelStyle}>
             {editingOpeningBalance ? 'Balance Date' : 'Invoice Date'}
