@@ -13,6 +13,7 @@ import {
   getCustomers,
   getInvoices,
   getInvoicesByCustomerId,
+  getUserProfiles,
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
   getPaymentsByCustomerId,
@@ -22,7 +23,7 @@ import {
 } from '../services/firestoreService';
 import { getCustomerCreditSummary } from '../services/creditService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
-import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId } from '../types';
+import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId, UserProfile } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
@@ -98,6 +99,7 @@ const Invoices = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [staffProfiles, setStaffProfiles] = useState<UserProfile[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('INV-0001');
   const [formData, setFormData] = useState<InvoiceFormData>(buildEmptyInvoiceForm());
@@ -155,11 +157,12 @@ const Invoices = () => {
             ? getInvoicesByCustomerId(customerFilter)
             : getInvoicesByCustomerId(customerFilter, { limitCount: invoiceLimit, sortBy: 'invoiceNumber' });
 
-      const [customerRows, invoiceRows, invoiceNumber, appSettings] = await Promise.all([
+      const [customerRows, invoiceRows, invoiceNumber, appSettings, userRows] = await Promise.all([
         getCustomers(),
         invoiceRead,
         getNextInvoiceNumber(),
-        getAppSettings()
+        getAppSettings(),
+        getUserProfiles()
       ]);
       const paymentRows = customerFilter !== 'all' && showFullCustomerRecords
         ? await getPaymentsByCustomerId(customerFilter)
@@ -170,6 +173,7 @@ const Invoices = () => {
       setPayments(paymentRows);
       setNextInvoiceNumber(invoiceNumber);
       setSettings(appSettings);
+      setStaffProfiles(userRows.filter((user) => user.role === 'Staff' && user.active));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load invoice data.');
     } finally {
@@ -783,9 +787,12 @@ const Invoices = () => {
           </div> : null}
 
           {!editingOpeningBalance ? <label style={labelStyle}>
-            Salesapp Staff email (optional)
-            <input style={inputStyle} type="email" value={formData.salesStaffEmail || ''} placeholder="Staff email used in Salesapp" onChange={(event) => handleFieldChange('salesStaffEmail', event.target.value)} />
-            <small style={{ display: 'block', marginTop: 4, color: '#D7DEEA', fontWeight: 500 }}>Use this only when this sale was produced by that Staff member. Direct customer orders stay blank.</small>
+            Sales staff (optional)
+            <select style={inputStyle} value={formData.salesStaffEmail || ''} onChange={(event) => { const staff = staffProfiles.find((row) => row.email === event.target.value); setFormData((current) => ({ ...current, salesStaffEmail: staff?.email || '', salesStaffName: staff?.name || '' })); }}>
+              <option value="">Direct customer order</option>
+              {staffProfiles.filter((staff) => !formData.shopId || !staff.shopId || staff.shopId === formData.shopId).map((staff) => <option key={staff.id} value={staff.email}>{staff.name} ({staff.email})</option>)}
+            </select>
+            <small style={{ display: 'block', marginTop: 4, color: '#D7DEEA', fontWeight: 500 }}>Select the Staff member only when they brought this sale. Their email must be the same in Salesapp.</small>
           </label> : null}
 
           <label style={labelStyle}>
