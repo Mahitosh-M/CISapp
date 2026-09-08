@@ -1,12 +1,11 @@
-import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AlertCircle, BookOpen, ChevronDown, ChevronUp, CircleDollarSign, Download, FileText, MapPin, ShoppingCart, UserPlus } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, FileText, MapPin, ShoppingCart, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
   createCustomer,
   deleteCustomerRecord,
-  deleteDueCustomerRecord,
   getAppSettings,
   getCustomers,
   getInvoices,
@@ -14,10 +13,9 @@ import {
   getPayments,
   getPaymentsByCustomerId,
   getPaymentTermsForTier,
-  syncDueCustomerRecords,
   updateCustomerRecord
 } from '../services/firestoreService';
-import type { AppSettings, Customer, CustomerFormData, CustomerTier, DueCustomerRecord, Invoice, Payment } from '../types';
+import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
 import { buildCustomerLedger, getLedgerPaymentParts, getPaymentNoteWithoutSplitMarker } from '../utils/customerLedger';
 import { downloadCustomerLedgerPdf } from '../utils/customerLedgerPdf';
 import { applyIntelligenceTiersToCustomers } from '../utils/customerTiering';
@@ -25,7 +23,6 @@ import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
-import { buildDueCustomerRows } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import { getShopName } from '../utils/shops';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
@@ -74,14 +71,6 @@ const Customers = () => {
   const [showBranchPendingCustomers, setShowBranchPendingCustomers] = useState(false);
   const [branchPendingDataLoaded, setBranchPendingDataLoaded] = useState(false);
   const [loadingBranchPendingCustomers, setLoadingBranchPendingCustomers] = useState(false);
-  const [dueCustomers, setDueCustomers] = useState<DueCustomerRecord[]>([]);
-  const [showDueCustomers, setShowDueCustomers] = useState(false);
-  const [dueDataLoaded, setDueDataLoaded] = useState(false);
-  const [loadingDueCustomers, setLoadingDueCustomers] = useState(false);
-  const [deletingDueCustomerId, setDeletingDueCustomerId] = useState('');
-  const [expandedDueCustomerIds, setExpandedDueCustomerIds] = useState<Set<string>>(() => new Set());
-  const [dueMessage, setDueMessage] = useState('');
-  const [dueError, setDueError] = useState('');
   const [showLedger, setShowLedger] = useState(false);
   const [ledgerCustomers, setLedgerCustomers] = useState<Customer[]>([]);
   const [ledgerCustomerListLoaded, setLedgerCustomerListLoaded] = useState(false);
@@ -209,67 +198,6 @@ const Customers = () => {
     } finally {
       setLoadingBranchPendingCustomers(false);
     }
-  };
-
-  const handleToggleDueCustomers = async () => {
-    if (showDueCustomers) {
-      setShowDueCustomers(false);
-      return;
-    }
-
-    setShowDueCustomers(true);
-    setDueMessage('');
-    setDueError('');
-
-    if (dueDataLoaded) return;
-
-    try {
-      setLoadingDueCustomers(true);
-      const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
-        getCustomers(),
-        getInvoices(),
-        getPayments(),
-        getAppSettings()
-      ]);
-      const dueRows = buildDueCustomerRows(customerRows, invoiceRows, paymentRows, appSettings);
-      const syncedRows = await syncDueCustomerRecords(dueRows);
-
-      setDueCustomers(syncedRows);
-      setDueDataLoaded(true);
-    } catch (err) {
-      setDueError(err instanceof Error ? err.message : 'Unable to load overdue customers.');
-    } finally {
-      setLoadingDueCustomers(false);
-    }
-  };
-
-  const handleDuePaid = async (row: DueCustomerRecord) => {
-    try {
-      setDeletingDueCustomerId(row.customerId);
-      setDueMessage('');
-      setDueError('');
-      await deleteDueCustomerRecord(row.customerId);
-      setDueCustomers((current) => current.filter((item) => item.customerId !== row.customerId));
-      setExpandedDueCustomerIds((current) => {
-        const next = new Set(current);
-        next.delete(row.customerId);
-        return next;
-      });
-      setDueMessage(`${row.customerName} removed from DUE.`);
-    } catch (err) {
-      setDueError(err instanceof Error ? err.message : 'Unable to remove the due record.');
-    } finally {
-      setDeletingDueCustomerId('');
-    }
-  };
-
-  const toggleDueInvoiceDetails = (customerId: string) => {
-    setExpandedDueCustomerIds((current) => {
-      const next = new Set(current);
-      if (next.has(customerId)) next.delete(customerId);
-      else next.add(customerId);
-      return next;
-    });
   };
 
   const handleToggleLedger = async () => {
@@ -695,24 +623,6 @@ const Customers = () => {
             className="customer-action-tile"
             style={{
               ...staffTileStyle,
-              ...(showDueCustomers ? { borderColor: '#D4AF37', background: 'var(--role-card-subtle)' } : {})
-            }}
-            onClick={handleToggleDueCustomers}
-            disabled={loadingDueCustomers}
-          >
-            <span style={{ ...staffTileIconStyle, background: '#FDECEC', color: '#B42318' }}><AlertCircle size={20} /></span>
-            <span>
-              <span style={{ display: 'block', fontWeight: 900 }}>{showDueCustomers ? 'Hide DUE' : 'DUE'}</span>
-              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
-                {loadingDueCustomers ? 'Loading overdue invoices' : 'More than 7 days overdue'}
-              </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            className="customer-action-tile"
-            style={{
-              ...staffTileStyle,
               ...(showLedger ? { borderColor: '#D4AF37', background: 'var(--role-card-subtle)' } : {})
             }}
             onClick={handleToggleLedger}
@@ -884,112 +794,6 @@ const Customers = () => {
                   </table>
                 </div>
               </div>
-          </div>
-        ) : null}
-
-        {showDueCustomers ? (
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
-              <div style={{ color: '#D4AF37', fontWeight: 900, fontSize: 18 }}>DUE</div>
-              {!loadingDueCustomers ? (
-                <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{dueCustomers.length}</div>
-              ) : null}
-            </div>
-
-            {dueError ? <div style={{ color: '#FCA5A5', marginBottom: 12 }}>{dueError}</div> : null}
-            {dueMessage ? <div style={{ color: '#4ADE80', marginBottom: 12, fontWeight: 800 }}>{dueMessage}</div> : null}
-
-            <div style={{ overflowX: 'auto', borderRadius: 14, border: '1px solid var(--role-card-border)' }}>
-              <table style={{ ...compactTableStyle, minWidth: 500 }}>
-                <thead>
-                  <tr>
-                    <th style={{ ...headerCellStyle, width: '32%' }}>Customer</th>
-                    <th style={{ ...headerCellStyle, width: '20%' }}>Overdue Days</th>
-                    <th style={{ ...headerCellStyle, width: '28%' }}>Amount</th>
-                    <th style={{ ...headerCellStyle, width: '20%' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingDueCustomers ? (
-                    <tr><td style={cellStyle} colSpan={4}>Loading DUE records...</td></tr>
-                  ) : dueCustomers.length === 0 ? (
-                    <tr><td style={cellStyle} colSpan={4}>No customers have pending invoices overdue by more than 7 days.</td></tr>
-                  ) : (
-                    dueCustomers.map((row) => {
-                      const detailsExpanded = expandedDueCustomerIds.has(row.customerId);
-
-                      return (
-                        <Fragment key={row.customerId}>
-                          <tr className="role-record-row">
-                            <td style={{ ...cellStyle, fontWeight: 900 }}>{row.customerName}</td>
-                            <td style={{ ...cellStyle, color: '#FCA5A5', fontWeight: 900 }}>{row.overdueDays} days</td>
-                            <td style={{ ...cellStyle, fontWeight: 900 }}>
-                              {row.invoices.length > 1 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleDueInvoiceDetails(row.customerId)}
-                                  aria-expanded={detailsExpanded}
-                                  title="Show invoice amounts"
-                                  style={{
-                                    border: 0,
-                                    padding: 0,
-                                    background: 'transparent',
-                                    color: '#F6E6A8',
-                                    font: 'inherit',
-                                    fontWeight: 900,
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 5
-                                  }}
-                                >
-                                  {formatMoney(row.amount)}
-                                  {detailsExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                                </button>
-                              ) : formatMoney(row.amount)}
-                            </td>
-                            <td style={cellStyle}>
-                              <button
-                                type="button"
-                                style={{ ...buttonStyle, width: '100%', padding: '7px 8px', background: '#E8F5EC', color: '#166534', fontSize: 11 }}
-                                disabled={Boolean(deletingDueCustomerId)}
-                                onClick={() => handleDuePaid(row)}
-                              >
-                                {deletingDueCustomerId === row.customerId ? '...' : 'PAID'}
-                              </button>
-                            </td>
-                          </tr>
-                          {detailsExpanded ? (
-                            <tr>
-                              <td style={{ ...cellStyle, paddingTop: 7, paddingBottom: 12 }} colSpan={4}>
-                                <div style={{ display: 'grid', gap: 6 }}>
-                                  {row.invoices.map((invoice) => (
-                                    <div
-                                      key={invoice.invoiceId}
-                                      style={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        gap: 12,
-                                        padding: '7px 9px',
-                                        borderRadius: 8,
-                                        background: 'var(--role-card-subtle)'
-                                      }}
-                                    >
-                                      <span style={{ color: '#D7DEEA', fontWeight: 800 }}>{invoice.invoiceNumber}</span>
-                                      <strong style={{ color: '#FFFFFF' }}>{formatMoney(invoice.amount)}</strong>
-                                    </div>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          ) : null}
-                        </Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
         ) : null}
 
