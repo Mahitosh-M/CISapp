@@ -13,7 +13,6 @@ import {
   getCustomers,
   getInvoices,
   getInvoicesByCustomerId,
-  getUserProfiles,
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
   getPaymentsByCustomerId,
@@ -24,7 +23,7 @@ import {
 import { getSalesappBranchStaff, type SalesStaffDirectoryEntry } from '../services/salesappDirectory';
 import { getCustomerCreditSummary } from '../services/creditService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
-import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId, UserProfile } from '../types';
+import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId } from '../types';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
@@ -100,7 +99,6 @@ const Invoices = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [staffProfiles, setStaffProfiles] = useState<UserProfile[]>([]);
   const [salesStaff, setSalesStaff] = useState<SalesStaffDirectoryEntry[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('INV-0001');
@@ -159,12 +157,11 @@ const Invoices = () => {
             ? getInvoicesByCustomerId(customerFilter)
             : getInvoicesByCustomerId(customerFilter, { limitCount: invoiceLimit, sortBy: 'invoiceNumber' });
 
-      const [customerRows, invoiceRows, invoiceNumber, appSettings, userRows] = await Promise.all([
+      const [customerRows, invoiceRows, invoiceNumber, appSettings] = await Promise.all([
         getCustomers(),
         invoiceRead,
         getNextInvoiceNumber(),
-        getAppSettings(),
-        getUserProfiles()
+        getAppSettings()
       ]);
       const paymentRows = customerFilter !== 'all' && showFullCustomerRecords
         ? await getPaymentsByCustomerId(customerFilter)
@@ -175,7 +172,6 @@ const Invoices = () => {
       setPayments(paymentRows);
       setNextInvoiceNumber(invoiceNumber);
       setSettings(appSettings);
-      setStaffProfiles(userRows.filter((user) => user.role === 'Staff' && user.active));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load invoice data.');
     } finally {
