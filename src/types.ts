@@ -189,6 +189,7 @@ export interface Invoice {
   totalProfit: number;
   salesStaffEmail?: string;
   salesStaffName?: string;
+  salesStaffDirectoryToken?: string;
   customerBalanceBeforeInvoice?: number;
   customerBalanceAfterInvoice?: number;
   notes: string;
@@ -460,6 +461,7 @@ export interface InvoiceFormData {
   totalProfit: number;
   salesStaffEmail?: string;
   salesStaffName?: string;
+  salesStaffDirectoryToken?: string;
   notes: string;
   shopId?: ShopId;
   branchSystemVersion?: number;

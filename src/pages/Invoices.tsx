@@ -21,6 +21,7 @@ import {
   updateInvoiceRecord,
   updatePaymentRecord
 } from '../services/firestoreService';
+import { getSalesappBranchStaff, type SalesStaffDirectoryEntry } from '../services/salesappDirectory';
 import { getCustomerCreditSummary } from '../services/creditService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId, UserProfile } from '../types';
@@ -100,6 +101,7 @@ const Invoices = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [staffProfiles, setStaffProfiles] = useState<UserProfile[]>([]);
+  const [salesStaff, setSalesStaff] = useState<SalesStaffDirectoryEntry[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('INV-0001');
   const [formData, setFormData] = useState<InvoiceFormData>(buildEmptyInvoiceForm());
@@ -184,6 +186,7 @@ const Invoices = () => {
   useEffect(() => {
     loadData();
   }, [customerFilter, invoiceLimit, showFullCustomerRecords]);
+  useEffect(() => { const branch = (assignedStaffShopId ?? formData.shopId) === 'SHOP_S' ? 'SINDHANUR' : (assignedStaffShopId ?? formData.shopId) === 'SHOP_A' ? 'MASKI' : undefined; if (!branch) { setSalesStaff([]); return; } void getSalesappBranchStaff(branch).then(setSalesStaff).catch(() => setSalesStaff([])); }, [assignedStaffShopId, formData.shopId]);
 
   const handleCustomerFilterChange = (value: string) => {
     setShowFullCustomerRecords(false);
@@ -527,6 +530,7 @@ const Invoices = () => {
       totalProfit: openingBalance ? 0 : invoice.totalProfit,
       salesStaffEmail: invoice.salesStaffEmail || '',
       salesStaffName: invoice.salesStaffName || '',
+      salesStaffDirectoryToken: invoice.salesStaffDirectoryToken || '',
       notes: invoice.notes,
       ...(isBranchAwareRecord(invoice) ? {
         shopId: invoice.shopId,
@@ -788,11 +792,11 @@ const Invoices = () => {
 
           {!editingOpeningBalance ? <label style={labelStyle}>
             Sales staff (optional)
-            <select style={inputStyle} value={formData.salesStaffEmail || ''} onChange={(event) => { const staff = staffProfiles.find((row) => row.email === event.target.value); setFormData((current) => ({ ...current, salesStaffEmail: staff?.email || '', salesStaffName: staff?.name || '' })); }}>
+            <select style={inputStyle} value={formData.salesStaffDirectoryToken || ''} onChange={(event) => { const staff = salesStaff.find((row) => row.token === event.target.value); setFormData((current) => ({ ...current, salesStaffDirectoryToken: staff?.token || '', salesStaffName: staff?.name || '', salesStaffEmail: '' })); }}>
               <option value="">Direct customer order</option>
-              {staffProfiles.filter((staff) => !formData.shopId || !staff.shopId || staff.shopId === formData.shopId).map((staff) => <option key={staff.id} value={staff.email}>{staff.name} ({staff.email})</option>)}
+              {salesStaff.map((staff) => <option key={staff.token} value={staff.token}>{staff.name}</option>)}
             </select>
-            <small style={{ display: 'block', marginTop: 4, color: '#D7DEEA', fontWeight: 500 }}>Select the Staff member only when they brought this sale. Their email must be the same in Salesapp.</small>
+            <small style={{ display: 'block', marginTop: 4, color: '#D7DEEA', fontWeight: 500 }}>Direct customer order is the default. Select a Salesapp Staff name only when they brought this sale.</small>
           </label> : null}
 
           <label style={labelStyle}>
