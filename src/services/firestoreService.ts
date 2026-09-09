@@ -727,6 +727,7 @@ const mapInvoiceDoc = (id: string, data: Record<string, unknown>): Invoice => {
     totalProfit,
     salesStaffEmail: data.salesStaffEmail ? String(data.salesStaffEmail) : undefined,
     salesStaffName: data.salesStaffName ? String(data.salesStaffName) : undefined,
+    salesStaffDirectoryToken: data.salesStaffDirectoryToken ? String(data.salesStaffDirectoryToken) : undefined,
     customerBalanceBeforeInvoice: data.customerBalanceBeforeInvoice === undefined
       ? undefined
       : Math.max(0, numberOrZero(data.customerBalanceBeforeInvoice)),
