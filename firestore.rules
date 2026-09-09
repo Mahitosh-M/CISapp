@@ -51,7 +51,8 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isActive() && profile().role == 'Admin';
+      // Accept the legacy spelling used by existing Admin profiles.
+      return isActive() && profile().role in ['Admin', 'admin'];
     }
 
     function isStaff() {
