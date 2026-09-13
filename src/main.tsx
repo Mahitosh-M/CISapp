@@ -1,9 +1,11 @@
+import { AppBackground } from "@/components/ui/tailwind-css-background-snippet";
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import './global.css';
+import './background.css';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -15,7 +17,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        <AppBackground /><App />
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>

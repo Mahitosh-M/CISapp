@@ -1,3 +1,4 @@
+import { assertLoginInput } from "../inputSecurity";
 import { deleteApp, initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
@@ -48,6 +49,7 @@ const getReusableAuthCredential = async (secondaryAuth: ReturnType<typeof getAut
 export const listenToAuthState = (callback: (user: User | null) => void) => onAuthStateChanged(auth, callback);
 
 export const loginWithEmail = async (email: string, password: string) => {
+  assertLoginInput(email, password);
   await setPersistence(auth, browserLocalPersistence);
   const normalizedEmail = normalizeEmail(email);
   return withLoginRateLimit(normalizedEmail, () =>

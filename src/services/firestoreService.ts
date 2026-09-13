@@ -1,3 +1,4 @@
+import { assertUserInput } from "../inputSecurity";
 import {
   addDoc,
   collection,
@@ -1273,6 +1274,7 @@ export const getCustomersByName = async (customerName: string) => {
 };
 
 export const createCustomer = async (customer: CustomerFormData, auditUser?: AuditUser) => {
+  assertUserInput(customer);
   const previousOutstandingAmount = Math.max(0, numberOrZero(customer.previousOutstandingAmount));
   const timestamp = nowIso();
   const customerRef = doc(collection(db, CUSTOMERS));
@@ -1308,6 +1310,7 @@ export const createCustomer = async (customer: CustomerFormData, auditUser?: Aud
 };
 
 export const updateCustomerRecord = async (customerId: string, customer: CustomerFormData, auditUser?: AuditUser) => {
+  assertUserInput(customer);
   const previousOutstandingAmount = Math.max(0, numberOrZero(customer.previousOutstandingAmount));
   const timestamp = nowIso();
   const customerPayload = {
@@ -1503,6 +1506,7 @@ export const getNextInvoiceNumber = async (settings?: AppSettings, invoiceDate?:
 };
 
 export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditUser) => {
+  assertUserInput(invoice);
   invoice = prepareNewInvoicePayload(invoice, auditUser);
   const activeSettings = await getAppSettings();
   const counter = getInvoiceCounterDetails(activeSettings, invoice.date);
@@ -1629,6 +1633,7 @@ export const updateInvoiceRecord = async (
   auditUser?: AuditUser,
   options?: { deferPcAward?: boolean }
 ) => {
+  assertUserInput(invoice);
   const [existingInvoiceSnapshot, requestedCustomer, activeSettings] = await Promise.all([
     getDoc(doc(db, INVOICES, invoiceId)),
     getCustomerById(invoice.customerId),
@@ -2220,6 +2225,7 @@ const runTransactionPostProcessing = async ({
 };
 
 export const createPayment = async (payment: PaymentFormData, auditUser?: AuditUser): Promise<PaymentSaveResult> => {
+  assertUserInput(payment);
   payment = prepareNewPaymentPayload(payment, auditUser);
   const paymentRef = doc(collection(db, PAYMENTS));
   const timestamp = nowIso();
@@ -2306,6 +2312,7 @@ export const updatePaymentRecord = async (
   payment: PaymentFormData,
   auditUser?: AuditUser
 ): Promise<PaymentSaveResult> => {
+  assertUserInput(payment);
   const paymentRef = doc(db, PAYMENTS, paymentId);
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
@@ -2669,6 +2676,7 @@ export const getGiftHistoryByCustomerId = async (customerId: string) => {
 };
 
 export const createGiftHistoryRecord = async (gift: GiftHistoryFormData, auditUser?: AuditUser) => {
+  assertUserInput(gift);
   const docRef = await addDoc(collection(db, GIFT_HISTORY), {
     ...gift,
     createdAt: nowIso(),
@@ -2680,6 +2688,7 @@ export const createGiftHistoryRecord = async (gift: GiftHistoryFormData, auditUs
 };
 
 export const updateGiftHistoryRecord = async (giftId: string, gift: Partial<GiftHistory>, auditUser?: AuditUser) => {
+  assertUserInput(gift);
   await updateDoc(doc(db, GIFT_HISTORY, giftId), {
     ...gift,
     updatedAt: nowIso()
@@ -2702,6 +2711,7 @@ export const getGiftItems = async () => {
 };
 
 export const createGiftItem = async (giftItem: GiftItemFormData, auditUser?: AuditUser) => {
+  assertUserInput(giftItem);
   const payload = sanitizeGiftItemPayload(giftItem);
   const docRef = await addDoc(collection(db, GIFT_ITEMS), {
     ...payload,
@@ -2714,6 +2724,7 @@ export const createGiftItem = async (giftItem: GiftItemFormData, auditUser?: Aud
 };
 
 export const updateGiftItemRecord = async (giftItemId: string, giftItem: GiftItemFormData, auditUser?: AuditUser) => {
+  assertUserInput(giftItem);
   const payload = sanitizeGiftItemPayload(giftItem);
 
   await updateDoc(doc(db, GIFT_ITEMS, giftItemId), {
@@ -2797,6 +2808,7 @@ export const getActiveOffers = async () => {
 };
 
 export const createOffer = async (offer: OfferFormData, auditUser?: AuditUser) => {
+  assertUserInput(offer);
   const payload = sanitizeOfferPayload(offer);
 
   const docRef = await addDoc(collection(db, OFFERS), {
@@ -2811,6 +2823,7 @@ export const createOffer = async (offer: OfferFormData, auditUser?: AuditUser) =
 };
 
 export const updateOfferRecord = async (offerId: string, offer: OfferFormData, auditUser?: AuditUser) => {
+  assertUserInput(offer);
   const payload = sanitizeOfferPayload(offer);
 
   await updateDoc(doc(db, OFFERS, offerId), {
@@ -3471,6 +3484,7 @@ export const getAvailableRewardsForCustomer = async (customerId: string, month =
 };
 
 export const createRewardItem = async (reward: RewardFormData, auditUser?: AuditUser) => {
+  assertUserInput(reward);
   const payload = sanitizeRewardPayload(reward);
   const timestamp = nowIso();
   const docRef = await addDoc(collection(db, REWARD_ITEMS), {
@@ -3484,6 +3498,7 @@ export const createRewardItem = async (reward: RewardFormData, auditUser?: Audit
 };
 
 export const updateRewardItemRecord = async (rewardId: string, reward: RewardFormData, auditUser?: AuditUser) => {
+  assertUserInput(reward);
   const payload = sanitizeRewardPayload(reward);
   await updateDoc(doc(db, REWARD_ITEMS, rewardId), {
     ...payload,

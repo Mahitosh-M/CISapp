@@ -1,3 +1,4 @@
+
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -19,7 +20,8 @@ const getAdmin = async (uid?: string) => {
 };
 
 const requiredString = (value: unknown, label: string, maxLength = 500) => {
-  const clean = String(value || '').trim();
+  if (typeof value !== 'string') throw new HttpsError('invalid-argument', `${label} must be text.`);
+  const clean = value.trim();
   if (!clean) throw new HttpsError('invalid-argument', `${label} is required.`);
   if (clean.length > maxLength) throw new HttpsError('invalid-argument', `${label} is too long.`);
   return clean;
@@ -27,6 +29,7 @@ const requiredString = (value: unknown, label: string, maxLength = 500) => {
 
 export const deleteManagedUser = onCall({ region: REGION }, async (request) => {
   await getAdmin(request.auth?.uid);
+  if (!request.data || typeof request.data !== 'object' || Array.isArray(request.data) || Object.keys(request.data).some(key => !['uid', 'profileId'].includes(key))) throw new HttpsError('invalid-argument', 'Invalid request fields.');
 
   const profileId = requiredString(request.data?.profileId, 'User profile', 160);
   const uid = requiredString(request.data?.uid, 'User UID', 160);

@@ -1,8 +1,10 @@
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  plugins: [react()],
+  resolve: { alias: { '@': new URL('./src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1') } },
+  plugins: [tailwindcss(), react()],
   build: {
     cssCodeSplit: true,
     minify: 'esbuild',

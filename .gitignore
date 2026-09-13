@@ -30,3 +30,16 @@ firestore-debug.log
 ui-debug.log
 firestore-credit-analysis.local.md
 firestore-credit-rules-audit.local.json
+
+# Local configuration and private credentials
+.env
+.env.*
+!.env.example
+*-debug.log*
+*.pem
+*.key
+*.p12
+*.pfx
+**/*service-account*.json
+**/*serviceAccount*.json
+**/credentials.json
