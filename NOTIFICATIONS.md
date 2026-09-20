@@ -110,7 +110,7 @@ After an approved deployment, verify with separate General, Medical, Staff and A
 - Test foreground/background notifications, click navigation, permission denied/revoked and multiple devices.
 - Confirm normal login/logout and invoice/payment/order saving still work when notifications are disabled or unavailable.
 
-Actual device delivery, IAM deployment and browser visual review remain unverified until the approved setup is available. No claim of live end-to-end success is made.
+The Functions, IAM configuration and Hosting bundles are deployed. Live device delivery and browser visual review still require a real opted-in browser and a new business event, so no claim of end-to-end push delivery is made yet.
 
 
 ### Local validation results
@@ -123,8 +123,9 @@ Actual device delivery, IAM deployment and browser visual review remain unverifi
 - Orderapp tests: 23 passed.
 - Lint of new Orderapp Functions source: passed. Full Orderapp lint remains blocked only by the existing `src/inputSecurity.ts:17` no-control-regex error; this unrelated file was not modified.
 - CISapp has no lint script. Both repositories' diff whitespace checks passed.
-- Both local branches remain `dev`; main still points to CISapp `ae32dbe` and Orderapp `9d74d3f`. No push, main merge or deployment was performed.
-- Browser/device delivery was not tested; the in-app browser was unavailable and live Firebase notification configuration was deliberately not changed.
+- CISapp main was released as `d73fbb3`; Orderapp main was released as `2fe920c`. Both GitHub Hosting deployments completed successfully.
+- Seven CISapp notification Functions and the Orderapp relay are active on Node 22. The live CIS bundle contains the registration and Admin clients, and the live worker contains the private-account gate.
+- Unauthenticated access to the private CIS order receiver returns HTTP 403. Browser/device delivery was not tested because no real user permission or business record was created during deployment.
 
 ### Release configuration and cost safeguards
 
