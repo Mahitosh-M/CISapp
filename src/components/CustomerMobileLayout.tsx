@@ -1,8 +1,10 @@
-import { NavLink, Outlet, useOutletContext } from 'react-router-dom';
+import { Outlet, useOutletContext } from 'react-router-dom';
 import { Coins, FileText, Gift, Home, Sparkles, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import NotificationControl from './NotificationControl';
 import InstallAppPrompt from './InstallAppPrompt';
+import BottomNavBar from './ui/bottom-nav-bar';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
 import type { CustomerPortalData } from '../hooks/useCustomerPortalData';
 import { markBonusPcRequestSeen } from '../services/firestoreService';
@@ -120,41 +122,15 @@ const CustomerMobileLayout = () => {
               Logout
             </button>
         </div>
+        <div style={{ marginTop: 8, textAlign: 'right' }}><NotificationControl /></div>
       </header>
 
-      <main style={{ padding: '16px 14px 96px' }}>
+      <main style={{ padding: '16px 14px calc(100px + env(safe-area-inset-bottom, 0px))' }}>
         {portalData.error ? <div style={{ background: '#FDECEC', color: '#7F1D1D', borderRadius: 14, padding: 12, marginBottom: 12 }}>{portalData.error}</div> : null}
         <Outlet context={{ ...portalData, openOrderApp, canOrder: showOrderHome }} />
       </main>
 
-      <nav style={{ position: 'fixed', left: '50%', bottom: 0, transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', borderTop: '1px solid rgba(212,175,55,0.45)', display: 'grid', gridTemplateColumns: `repeat(${visibleNavItems.length}, minmax(0, 1fr))`, gap: 5, padding: '7px 6px 9px', boxShadow: '0 -12px 28px rgba(0,0,0,0.30)', zIndex: 20 }}>
-        {visibleNavItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              style={({ isActive }) => ({
-                textDecoration: 'none',
-                color: item.color,
-                background: isActive ? 'rgba(212,175,55,0.22)' : 'rgba(255,255,255,0.08)',
-                border: isActive ? '1px solid rgba(253,230,138,0.72)' : '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 10,
-                padding: '7px 2px 6px',
-                textAlign: 'center',
-                fontSize: 10,
-                fontWeight: 900,
-                minWidth: 0,
-                boxShadow: isActive ? '0 5px 14px rgba(0,0,0,0.22)' : 'none'
-              })}
-            >
-              <Icon size={22} strokeWidth={2.5} style={{ display: 'block', margin: '0 auto 3px' }} />
-              {item.label}
-            </NavLink>
-          );
-        })}
-      </nav>
+      <BottomNavBar items={visibleNavItems} stickyBottom ariaLabel="Customer navigation" />
 
       <InstallAppPrompt disabled={!['customer', 'Medical'].includes(role ?? '') || Boolean(pcBalancePopup || latestUnreadBonus)} />
 

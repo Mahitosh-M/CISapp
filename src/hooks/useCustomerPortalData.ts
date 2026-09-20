@@ -16,6 +16,7 @@ import {
 import { calculateCustomerCreditSummaryLocally, getCustomerCreditSummary } from '../services/creditService';
 import type { AppSettings, BonusPcRequest, Customer, CustomerApcSummary, CustomerCreditSummary, Invoice, Offer, OverduePcRequest, Payment, RedemptionRequest, RewardItem } from '../types';
 import { buildCustomerScores } from '../utils/customerAnalytics';
+import { buildPartnerLevelJourney, type PartnerLevelJourney } from '../utils/partnerLevelJourney';
 import { calculateDueStatus, calculateInvoiceApcInfo, filterCustomerRecords, isCurrentMonth } from '../utils/customerPortal';
 import { canViewRewardAtLevel, getNextPartnerLevel, getPartnerLevelForTier, getPcThresholdProgress } from '../utils/loyalty';
 import { getBusinessInvoices } from '../utils/openingBalance';
@@ -43,6 +44,7 @@ const optionalCustomerRead = async <T,>(read: () => Promise<T>, fallback: T) => 
 export const useCustomerPortalData = () => {
   const { userProfile } = useAuth();
   const [customer, setCustomer] = useState<Customer>();
+  const [partnerJourney, setPartnerJourney] = useState<PartnerLevelJourney>();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -86,6 +88,7 @@ export const useCustomerPortalData = () => {
     try {
       setLoading(true);
       setError('');
+      setPartnerJourney(undefined);
 
       let linkedCustomer = userProfile.customerId ? await getCustomerById(userProfile.customerId) : undefined;
 
@@ -157,6 +160,9 @@ export const useCustomerPortalData = () => {
         ? calculateCustomerCreditSummaryLocally(customerWithIntelligenceTier, scopedInvoices, scopedPayments, appSettings, customerCreditSummary)
         : customerCreditSummary;
 
+      setPartnerJourney(linkedCustomer && intelligenceResult
+        ? buildPartnerLevelJourney(linkedCustomer, scopedInvoices, scopedPayments, appSettings, intelligenceResult)
+        : undefined);
       setCustomer(customerWithIntelligenceTier);
       setInvoices(scopedInvoices);
       setPayments(scopedPayments);
@@ -201,6 +207,7 @@ export const useCustomerPortalData = () => {
   return {
     userProfile,
     customer,
+    partnerJourney,
     invoices,
     payments,
     invoiceViews,

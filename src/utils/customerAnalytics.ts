@@ -57,6 +57,11 @@ export const SCORE_WEIGHTS = {
   loyalty: 0.05
 };
 
+export const PARTNER_REVIEW_DAYS = 60;
+export const PARTNER_PURCHASE_MINIMUMS: Record<CustomerTier, number> = {
+  'Tier 4': 0, 'Tier 3': 5000, 'Tier 2': 15000, 'Tier 1': 25000
+};
+
 const ONBOARDING_MIN_TARGET = 4000;
 export const HEALTHY_INVOICE_MARGIN_PERCENT = 20;
 
@@ -133,7 +138,7 @@ const formatPeriodDate = (date: Date) => {
 // Admin targets are monthly, so scores compare this window against a two-month average.
 const getCurrentRollingWindow = (referenceDate: Date): DateWindow => {
   const end = endOfDay(referenceDate);
-  const start = startOfDay(addDays(referenceDate, -59));
+  const start = startOfDay(addDays(referenceDate, 1 - PARTNER_REVIEW_DAYS));
   return { start, end };
 };
 
@@ -460,17 +465,17 @@ const applyTierGates = (
     reasons.push('Payment risk caps automatic upgrade at Silver.');
   }
 
-  if (finalTier === 'Tier 1' && (customerMonthlySales < 25000 || paymentDisciplineScore < 90)) {
+  if (finalTier === 'Tier 1' && (customerMonthlySales < PARTNER_PURCHASE_MINIMUMS['Tier 1'] || paymentDisciplineScore < 90)) {
     finalTier = 'Tier 2';
     reasons.push('Score qualifies for Platinum, but sales/payment gate allows Gold.');
   }
 
-  if (finalTier === 'Tier 2' && customerMonthlySales < 15000) {
+  if (finalTier === 'Tier 2' && customerMonthlySales < PARTNER_PURCHASE_MINIMUMS['Tier 2']) {
     finalTier = 'Tier 3';
     reasons.push('Score qualifies for Gold, but sales gate allows Silver.');
   }
 
-  if (finalTier === 'Tier 3' && customerMonthlySales < 5000) {
+  if (finalTier === 'Tier 3' && customerMonthlySales < PARTNER_PURCHASE_MINIMUMS['Tier 3']) {
     finalTier = 'Tier 4';
     reasons.push('Score qualifies for Silver, but sales gate allows Active.');
   }
@@ -479,6 +484,65 @@ const applyTierGates = (
     tier: finalTier,
     tierCapReason: reasons[0]
   };
+};
+
+// Customer-facing explanations reuse the same gates as level qualification.
+// This helper does not change or persist a customer's level.
+export type PartnerUpgradeContext = Pick<CustomerScore,
+  'tier' | 'onboardingStage' | 'isOnboarding' | 'paymentDisciplineScore'
+  | 'customerMonthlySales' | 'totalSales' | 'outstanding' | 'intelligenceScore'>;
+
+export const getPartnerUpgradeReasons = (
+  requestedTier: CustomerTier,
+  customer: Customer,
+  invoices: Invoice[],
+  payments: Payment[],
+  settings: AppSettings,
+  current: PartnerUpgradeContext,
+  referenceDate: Date
+): string[] => {
+  if (tierOrder[requestedTier] <= tierOrder[current.tier]) return [];
+  const allBusinessInvoices = getBusinessInvoices(invoices).filter((invoice) => invoice.customerId === customer.id);
+  const window = getCurrentRollingWindow(referenceDate);
+  const recentInvoices = allBusinessInvoices.filter((invoice) => isDateInsideWindow(invoice.date, window));
+  const exposure = getOverdueExposure(recentInvoices, payments, window.end,
+    current.customerMonthlySales, customer.tier, settings);
+  const previousOutstanding = getPreviousOutstandingFallback(customer, allBusinessInvoices);
+  const outstandingBase = Math.max(current.totalSales + previousOutstanding, current.outstanding, 1);
+  const reasons: string[] = [];
+  // Isolate each restriction so an unrelated onboarding cap cannot hide the
+  // actual payment restriction for the requested level.
+  const isBlocked = (
+    paymentDiscipline = 100,
+    severity: OverdueExposure['severity'] = 'none',
+    unpaidRatio = 0,
+    stage: OnboardingStage = 'Stage D',
+    onboarding = false
+  ) => applyTierGates(requestedTier, Number.POSITIVE_INFINITY,
+    paymentDiscipline, severity, unpaidRatio, stage, onboarding).tier !== requestedTier;
+
+  if (isBlocked(100, 'none', 0, current.onboardingStage, current.isOnboarding)) {
+    if (current.onboardingStage === 'Stage A') reasons.push('Only one order so far. More than one order is needed to move above Active.');
+    else if (current.onboardingStage === 'Stage B') reasons.push('Your purchase history is still new. This level needs more than 30 days of history.');
+    else reasons.push('Platinum needs at least 60 days of purchase history, with orders in two different months.');
+  }
+  if (isBlocked(100, exposure.severity)) {
+    reasons.push(exposure.severity === 'serious'
+      ? 'Overdue bills are blocking an upgrade above Active. Clear your overdue payments.'
+      : 'Overdue bills are blocking an upgrade above Silver. Clear your overdue payments.');
+  }
+  if (isBlocked(current.paymentDisciplineScore)) {
+    reasons.push('Recent late payments are holding back this level. Build a record of paying each bill on time.');
+  }
+  if (isBlocked(100, 'none', current.outstanding / outstandingBase)) {
+    reasons.push('Your unpaid balance is too high for this level. Reduce it by paying your bills.');
+  }
+  if (reasons.length === 0) {
+    reasons.push(tierOrder[assignTier(current.intelligenceScore)] < tierOrder[requestedTier]
+      ? 'Your overall account history does not yet qualify for this level. Ask the shop to review what is still needed.'
+      : 'Your purchase target is complete, but this level is not active. Ask the shop to review your account.');
+  }
+  return reasons;
 };
 
 export const calculateSalesPerformanceScore = (customerMonthlySales: number, monthlySalesTarget: number, fallbackScore: number) => {

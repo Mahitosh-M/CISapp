@@ -16,6 +16,7 @@ const Analytics = lazy(() => import('./pages/Analytics'));
 const Login = lazy(() => import('./pages/Login'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Admin = lazy(() => import('./pages/Admin'));
+const Notifications = lazy(() => import('./pages/Notifications'));
 const Loyalty = lazy(() => import('./pages/Loyalty'));
 const OverduePcRequests = lazy(() => import('./pages/OverduePcRequests'));
 const Credit = lazy(() => import('./pages/Credit'));
@@ -87,6 +88,7 @@ const App = () => {
           <Route path="overdue-pc-requests" element={<ProtectedRoute allowedRoles={['Admin']}><OverduePcRequests /></ProtectedRoute>} />
           <Route path="credit" element={<ProtectedRoute allowedRoles={['Admin']}><Credit /></ProtectedRoute>} />
           <Route path="admin" element={<ProtectedRoute allowedRoles={['Admin']}><Admin /></ProtectedRoute>} />
+          <Route path="notifications" element={<ProtectedRoute allowedRoles={['Admin']}><Notifications /></ProtectedRoute>} />
           <Route path="settings" element={<ProtectedRoute allowedRoles={['Admin']}><Settings /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Route>

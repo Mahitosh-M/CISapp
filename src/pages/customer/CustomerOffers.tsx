@@ -2,6 +2,7 @@ import { CalendarDays, Landmark, Tags } from 'lucide-react';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import ExternalImage from '../../components/ExternalImage';
+import CustomerLevelJourney from '../../components/CustomerLevelJourney';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../../utils/offers';
 
@@ -25,7 +26,7 @@ const customerPromoImageStyle = {
 };
 
 const CustomerOffers = () => {
-  const { offers } = useCustomerPortalContext();
+  const { offers, partnerJourney, loading, refreshData } = useCustomerPortalContext();
   const activeOffers = useMemo(() => {
     // Inactive offer filtering: customer carousel only shows currently active offers.
     return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer)));
@@ -35,6 +36,8 @@ const CustomerOffers = () => {
     <div>
       <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Offers</div>
       <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>Latest active schemes from the business.</div>
+
+      <CustomerLevelJourney journey={partnerJourney} loading={loading} onRefresh={() => void refreshData()} />
 
       {activeOffers.length === 0 ? (
         <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#67738E' }}>
