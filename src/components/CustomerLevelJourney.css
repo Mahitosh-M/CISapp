@@ -1,0 +1,223 @@
+.partner-journey { --partner-ink: #f7f4ff; color: var(--partner-ink); margin-bottom: 32px; font-size: 14px; line-height: 1.5; }
+.partner-journey *, .partner-journey *::before, .partner-journey *::after { box-sizing: border-box; }
+.partner-journey h2, .partner-journey h3, .partner-journey p { margin: 0; }
+.partner-journey-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.partner-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #c4b5fd; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.partner-journey h2 { margin-top: 5px; font-size: clamp(22px, 5vw, 28px); font-weight: 900; line-height: 1.2; }
+.partner-journey-heading p, .partner-poster-heading p { margin-top: 7px; color: #d0c8e5; font-size: 13px; }
+.partner-refresh { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; padding: 0; border: 1px solid #c4b5fd55; border-radius: 14px; color: #ede9fe; background: #30205c; cursor: pointer; }
+.partner-refresh:disabled { opacity: .6; cursor: wait; }
+.partner-refreshing { animation: partnerSpin 1s linear infinite; }
+.partner-month-summary { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; margin-bottom: 14px; border: 1px solid #a78bfa55; border-radius: 20px; background: linear-gradient(115deg, #1e2362, #42266c); box-shadow: 0 12px 26px #0003; }
+.partner-month-summary > div { min-width: 0; padding: 17px 16px; }
+.partner-month-summary > div + div { border-left: 1px solid #ffffff24; }
+.partner-month-summary span, .partner-target > span { display: block; font-size: 10px; color: #d7cff0; font-weight: 800; letter-spacing: .06em; }
+.partner-month-summary strong { display: block; margin-top: 6px; font-size: clamp(17px, 3vw, 23px); line-height: 1.25; overflow-wrap: anywhere; }
+.partner-month-summary > div:last-child strong { color: #fde68a; }
+.partner-payment-note { display: flex; gap: 12px; padding: 16px; border: 1px solid #6ee7b744; border-radius: 17px; background: #0c302c; margin-bottom: 13px; color: #d1fae5; }
+.partner-payment-note > svg { flex-shrink: 0; margin-top: 2px; }
+.partner-payment-note strong { display: block; font-size: 17px; line-height: 1.3; }
+.partner-payment-note p { margin-top: 5px; font-size: 12px; }
+.partner-payment-note.has-due { color: #ffe1e4; border-color: #fb718566; background: linear-gradient(110deg, #471b31, #361c3b); }
+.partner-payment-note.needs-check { color: #fef3c7; border-color: #fcd34d55; background: #392a25; }
+.partner-payment-note a { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; margin-top: 5px; color: inherit; font-weight: 800; text-underline-offset: 3px; }
+.partner-period-note { color: #cbc2df; font-size: 12px; margin-bottom: 14px !important; }
+.partner-level-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; grid-auto-rows: 1fr; }
+.partner-level-card { position: relative; min-width: 0; overflow: hidden; padding: 17px; border: 1px solid #b39add55; border-top: 3px solid var(--level-accent); border-radius: 21px; background: radial-gradient(ellipse at top right, #7650bb3b, transparent 60%), linear-gradient(145deg, #1c234d, #2b1c4f 64%, #171c3c); box-shadow: 0 13px 28px #07051840; transition: transform 180ms ease, box-shadow 180ms ease; }
+.partner-level-card.is-current { box-shadow: 0 0 0 1px var(--level-accent), 0 14px 32px #07051855; }
+.partner-level-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 12px; }
+.partner-level-icon { display: grid; place-items: center; width: 45px; height: 45px; flex-shrink: 0; border-radius: 14px; border: 1px solid #ffffff22; color: var(--level-accent); background: #ffffff0d; }
+.partner-level-status { padding: 4px 7px; border-radius: 999px; color: var(--level-accent); background: #060b2299; font-size: 10px; font-weight: 800; text-align: center; }
+.partner-level-card h3 { color: var(--level-accent); font-size: 19px; line-height: 1.25; font-weight: 900; }
+.partner-level-purpose { min-height: 38px; margin-top: 7px !important; color: #d6cfe5; font-size: 12px; }
+.partner-target { margin: 15px 0 12px; padding: 12px 10px; border: 1px solid #ffffff14; border-radius: 13px; background: #0c112b99; }
+.partner-target > span { font-size: 9px; }
+.partner-target > strong { display: block; margin-top: 5px; font-size: clamp(21px, 4.5vw, 28px); font-weight: 900; color: #fff; line-height: 1.2; overflow-wrap: anywhere; }
+.partner-progress-label { display: flex; justify-content: space-between; align-items: center; gap: 5px; margin-bottom: 7px; color: #dcd6ec; font-size: 11px; }
+.partner-progress-label strong { color: var(--level-accent); font-size: 13px; }
+.partner-progress-track { height: 9px; overflow: hidden; border-radius: 999px; background: #060b25; border: 1px solid #ffffff1a; }
+.partner-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8b5cf6, var(--level-accent)); transition: width 450ms ease; }
+.partner-target-detail { margin-top: 9px !important; color: #d4cbe5; font-size: 11px; line-height: 1.65; }
+.partner-card-payment { display: flex; align-items: center; gap: 6px; margin-top: 13px; padding-top: 12px; border-top: 1px solid #ffffff18; color: #f3dfba; font-size: 11px; font-weight: 700; }
+.partner-card-payment svg { flex-shrink: 0; }
+.partner-howto { margin-top: 10px; }
+.partner-howto summary, .partner-target-explanation summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 7px 0; color: #eee8ff; font-size: 12px; font-weight: 800; list-style: none; cursor: pointer; }
+.partner-journey summary::-webkit-details-marker { display: none; }
+.partner-journey summary svg { flex-shrink: 0; transition: transform 160ms ease; }
+.partner-journey details[open] > summary > svg { transform: rotate(180deg); }
+.partner-steps { display: grid; gap: 12px; margin: 7px 0 1px; padding: 0; list-style: none; }
+.partner-steps li { display: flex; gap: 8px; color: #e0d9eb; font-size: 12px; }
+.partner-steps svg { flex-shrink: 0; margin-top: 2px; color: var(--level-accent); }
+.partner-target-explanation { padding: 6px 3px; margin: 7px 0 19px; }
+.partner-target-explanation p { margin: 4px 0 10px; color: #d0c6e1; font-size: 12px; }
+.partner-benefits-poster { position: relative; padding: 21px; overflow: hidden; border: 1px solid #d4af3766; border-radius: 24px; background: radial-gradient(ellipse at top right, #8b5cf638, transparent 60%), linear-gradient(140deg, #121d43, #312153 60%, #162748); }
+.partner-poster-heading { display: flex; gap: 13px; align-items: flex-start; margin-bottom: 20px; }
+.partner-poster-heading > svg { color: #fde68a; margin-top: 8px; flex-shrink: 0; }
+.partner-poster-heading h2 { font-size: 24px; }
+.partner-benefits-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.partner-benefit { min-width: 0; padding: 16px; border: 1px solid #ffffff20; border-radius: 17px; background: #ffffff08; }
+.partner-benefit h3 { display: flex; align-items: center; gap: 8px; color: var(--level-accent); font-size: 16px; line-height: 1.3; }
+.partner-benefit h3 svg { flex-shrink: 0; }
+.partner-benefit ul { display: grid; gap: 15px; padding: 0; margin: 19px 0 0; list-style: none; }
+.partner-benefit li { display: flex; align-items: flex-start; gap: 9px; }
+.partner-benefit li svg { color: var(--level-accent); flex-shrink: 0; margin-top: 1px; }
+.partner-benefit strong { display: block; color: #f6f1ff; font-size: 12px; line-height: 1.4; }
+.partner-benefit p { margin-top: 4px; color: #d1c6e1; font-size: 11px; line-height: 1.6; }
+.partner-poster-note { margin-top: 18px !important; font-size: 11px; color: #ccc2db; }
+.partner-rewards-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 10px 15px; margin-top: 15px; color: #1c1845; background: linear-gradient(100deg, #fde68a, #e8c968); border-radius: 12px; text-decoration: none; font-size: 13px; font-weight: 900; }
+.partner-journey a:focus-visible, .partner-journey button:focus-visible, .partner-journey summary:focus-visible { outline: 3px solid #fde68a; outline-offset: 4px; border-radius: 8px; }
+.partner-journey-empty { display: flex; align-items: center; gap: 12px; padding: 20px; background: #251c46; border-radius: 18px; }
+@keyframes partnerSpin { to { transform: rotate(360deg); } }
+@media (hover: hover) and (pointer: fine) { .partner-level-card:hover { transform: translateY(-3px); box-shadow: 0 20px 32px #07051860; } }
+@media (max-width: 540px) { .partner-benefits-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .partner-benefit { padding: 16px; } .partner-benefit ul { grid-template-columns: repeat(2, minmax(0, 1fr)); } .partner-benefits-poster { padding: 17px; } .partner-level-card { padding: 13px; } .partner-level-grid { gap: 11px; } .partner-level-card h3 { font-size: 17px; } }
+@media (max-width: 360px) { .partner-level-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .partner-benefit ul { grid-template-columns: 1fr; } .partner-month-summary { grid-template-columns: 1fr; } .partner-month-summary > div + div { border-left: 0; border-top: 1px solid #ffffff24; } }
+@media (prefers-reduced-motion: reduce) { .partner-journey *, .partner-journey *::before, .partner-journey *::after { animation: none !important; transition: none !important; transform: none !important; } }
+
+/* Tier colours shared by purchase cards and their benefit tiles. */
+.partner-level-active { --tier-background: linear-gradient(135deg, #eff6ff, #bfdbfe 65%, #93c5fd); }
+.partner-level-silver { --tier-background: linear-gradient(135deg, #f8fafc, #cbd5e1 55%, #e2e8f0); }
+.partner-level-gold { --tier-background: linear-gradient(135deg, #fffbeb, #fde68a 55%, #e9bc4a); }
+.partner-level-platinum { --tier-background: linear-gradient(135deg, #24211b, #080808 60%, #191711); }
+.partner-level-card, .partner-benefit { color: #172033; background: var(--tier-background); border-color: #ffffff99; }
+.partner-level-card { border-top-color: var(--level-accent); }
+.partner-level-icon { background: #ffffff80; border-color: #ffffffcc; }
+.partner-level-status { color: var(--level-accent); background: #ffffffbb; }
+.partner-target { background: #ffffff99; border-color: #ffffffcc; }
+.partner-target > span, .partner-progress-label, .partner-target-detail { color: #334155; }
+.partner-target > strong, .partner-benefit strong { color: #172033; }
+.partner-progress-track { background: #ffffffb3; border-color: #64748b44; }
+.partner-progress-track > span { background: var(--level-accent); }
+.partner-card-payment { color: #854d0e; border-top-color: #47556933; }
+.partner-howto summary, .partner-steps li { color: #243247; }
+.partner-coin-benefit { grid-column: 1 / -1; }
+.partner-coin-benefit > div { min-width: 0; flex: 1; }
+.partner-coin-comparison { display: grid; gap: 5px; margin: 9px 0 0; }
+.partner-coin-comparison > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 9px; border-radius: 8px; background: #ffffff66; font-size: 12px; }
+.partner-coin-comparison > .is-selected { background: #ffffffcc; box-shadow: inset 3px 0 var(--level-accent); font-weight: 900; }
+.partner-coin-comparison dd { margin: 0; white-space: nowrap; color: var(--level-accent); font-size: 15px; font-weight: 900; }
+
+/* Shared rows keep all four cards aligned without expanding them for details. */
+.partner-level-card { display: grid; grid-template-rows: auto 2.5em minmax(94px, auto) auto auto minmax(42px, auto) 44px; gap: 10px; align-content: start; }
+.partner-level-card-top { margin-bottom: 0; }
+.partner-level-card h3 { align-self: center; }
+.partner-target { margin: 0; display: flex; flex-direction: column; justify-content: center; }
+.partner-target > span { min-height: 2.8em; display: flex; align-items: center; }
+.partner-purchase-progress { min-height: 44px; }
+.partner-progress-label { min-height: 2.8em; margin-bottom: 5px; }
+.partner-purchase-amounts { display: grid; gap: 7px; margin: 0; }
+.partner-purchase-amounts > div { padding: 9px 10px; border-radius: 10px; border: 1px solid #ffffff99; }
+.partner-purchase-amounts dt { font-size: 10px; font-weight: 800; line-height: 1.4; }
+.partner-purchase-amounts dd { margin: 3px 0 0; font-size: clamp(17px, 3vw, 23px); font-weight: 900; line-height: 1.2; overflow-wrap: anywhere; }
+.partner-bought { background: #d1fae5; color: #065f46; }
+.partner-month-target { background: #e0e7ff; color: #3730a3; }
+.partner-card-payment { margin-top: 0; padding-top: 8px; }
+.partner-howto-button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 5px 0; border: 0; background: transparent; color: #243247; font: inherit; font-size: 12px; font-weight: 800; text-align: left; cursor: pointer; }
+.partner-howto-button svg { flex-shrink: 0; }
+.partner-howto-button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.partner-action-panel { padding: 16px; margin-top: 14px; border-radius: 16px; border: 1px solid #c4b5fd66; background: #241e3e; }
+.partner-action-panel h3 { color: #f5d782; }
+.partner-action-panel .partner-steps li { color: #eee8ff; }
+.partner-action-panel .partner-steps svg { color: #f5d782; }
+.partner-action-panel .partner-steps .is-pending { color: #ffedd5; }
+.partner-action-panel .partner-steps .is-pending svg { color: #fb923c; }
+.partner-action-panel .partner-steps .is-blocked { color: #ffe4e6; }
+.partner-action-panel .partner-steps .is-blocked svg { color: #fb7185; }
+.partner-all-clear { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: #bbf7d0; font-size: 12px; font-weight: 800; }
+.partner-all-clear svg { flex-shrink: 0; color: #4ade80; }
+.partner-benefits-grid { grid-auto-rows: 1fr; }
+.partner-benefit { display: grid; grid-template-rows: 42px 1fr; }
+.partner-benefit ul { grid-template-columns: 1fr; grid-template-rows: 34px auto 34px 34px; gap: 10px; margin-top: 12px; }
+.partner-benefit li { align-items: center; }
+.partner-coin-comparison { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.partner-coin-comparison > div { flex-direction: column; gap: 2px; padding: 6px 3px; font-size: 10px; }
+.partner-coin-comparison dd { font-size: 13px; }
+.partner-coin-comparison > div:not(.is-selected) { opacity: .75; }
+.partner-level-platinum { color: #f5d782; border-color: #b9974866; }
+.partner-level-platinum .partner-level-icon, .partner-level-platinum .partner-level-status, .partner-level-platinum .partner-target { background: #f5d78212; border-color: #f5d78240; }
+.partner-level-platinum .partner-target > span, .partner-level-platinum .partner-target > strong, .partner-level-platinum .partner-progress-label, .partner-level-platinum .partner-card-payment, .partner-level-platinum .partner-howto-button, .partner-level-platinum strong { color: #f5d782; }
+.partner-level-platinum .partner-progress-track { background: #f5d78222; border-color: #f5d78233; }
+.partner-level-platinum .partner-card-payment { border-color: #f5d78233; }
+.partner-level-platinum .partner-purchase-amounts > div { color: #f5d782; border-color: #b9974877; }
+.partner-level-platinum .partner-bought { background: #332b15; }
+.partner-level-platinum .partner-month-target { background: #211b0d; }
+.partner-level-platinum .partner-coin-comparison > div { background: #f5d7820f; }
+.partner-level-platinum .partner-coin-comparison > .is-selected { background: #f5d78224; }
+
+.partner-level-grid { grid-template-rows: var(--level-rows); margin-bottom: 20px; }
+.partner-level-grid > .partner-level-card { grid-column: var(--card-column); grid-row: var(--card-row); }
+.partner-level-grid > .partner-action-panel { grid-column: 1 / -1; grid-row: var(--panel-row); margin-top: 0; }
+
+.partner-target > .partner-target-completed { font-size: clamp(13px, 3.3vw, 17px); white-space: nowrap; overflow-wrap: normal; }
+
+.partner-level-card { grid-template-rows: auto 2.5em minmax(94px, auto) auto auto minmax(42px, 1fr) 44px; }
+/* The pinned note replaces both amount boxes, keeping the same card rows. */
+.partner-level-card { grid-template-rows: auto 2.5em minmax(94px, auto) auto minmax(140px, 1fr) minmax(42px, auto) 44px; }
+.partner-purchase-slot { display: flex; min-width: 0; }
+.partner-purchase-slot > .partner-purchase-amounts { flex: 1; min-width: 0; grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.partner-upgrade-notice { position: relative; isolation: isolate; flex: 1; min-width: 0; margin: 13px 3px 6px; padding: 25px 11px 25px; border: 1px solid #e2cc62; border-radius: 2px 3px 5px 23px; background: linear-gradient(135deg, #fff3a0 0%, #fff8ba 40%, #ffe875 100%); color: #513914; box-shadow: 2px 7px 9px #00000030, inset -2px -3px 6px #d6b74422; transform: rotate(-1.2deg); }
+.partner-upgrade-notice::after { content: ''; position: absolute; bottom: -1px; left: -1px; width: 25px; height: 23px; border-radius: 0 3px 0 22px; background: linear-gradient(45deg, #d0ad40, #fff2a0 53%, #f8dd6a 55%, #ffed92); box-shadow: 2px -2px 4px #8b6d1726; }
+.partner-upgrade-notice > strong { display: block; color: #694014; font-size: 12px; font-weight: 900; line-height: 1.35; }
+.partner-upgrade-notice p { margin-top: 7px; font-size: 11px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.partner-notice-pin { position: absolute; top: -9px; left: calc(50% - 7px); width: 14px; height: 22px; border-radius: 6px 6px 9px 9px; background: linear-gradient(90deg, #a80914, #ee283b 55%, #bc0f20); box-shadow: 2px 5px 4px #0004; transform: rotate(27deg); }
+.partner-notice-pin::before { content: ''; position: absolute; top: -4px; left: -2px; width: 18px; height: 16px; border-radius: 50%; border: 1px solid #b51320; background: radial-gradient(circle at 35% 25%, #ff7480, #e72436 50%, #b40819); }
+.partner-notice-pin::after { content: ''; position: absolute; z-index: -1; top: 18px; left: 6px; width: 3px; height: 13px; border-radius: 0 0 2px 2px; background: linear-gradient(90deg, #64748b, #e2e8f0, #64748b); }
+.partner-level-platinum .partner-upgrade-notice { color: #513914; }
+.partner-level-platinum .partner-upgrade-notice > strong { color: #694014; }
+
+/* Keep two cards per row on phones, including the expanded steps panel. */
+@media (max-width: 540px) {
+  .partner-level-grid, .partner-benefits-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .partner-level-card { padding: 10px; }
+  .partner-level-icon { width: 34px; height: 34px; border-radius: 10px; }
+  .partner-level-icon svg { width: 23px; height: 23px; }
+  .partner-level-status { padding: 4px 5px; font-size: 9px; }
+  .partner-level-card h3 { font-size: 16px; }
+  .partner-upgrade-notice { margin-right: 1px; margin-left: 1px; padding-right: 8px; padding-left: 8px; }
+  .partner-benefits-poster { padding: 12px; }
+  .partner-benefit { padding: 9px; }
+  .partner-benefit h3 { gap: 5px; font-size: 13px; overflow-wrap: anywhere; }
+  .partner-benefit h3 svg { width: 18px; height: 18px; }
+  .partner-benefit ul { grid-template-columns: 1fr; grid-template-rows: minmax(44px, auto) auto minmax(44px, auto) minmax(44px, auto); gap: 8px; }
+  .partner-benefit li { gap: 5px; min-width: 0; }
+  .partner-benefit li > svg { width: 15px; height: 15px; }
+  .partner-benefit strong { font-size: 11px; overflow-wrap: anywhere; }
+  .partner-benefit .partner-coin-benefit { display: block; }
+  .partner-coin-benefit > svg { display: none; }
+  .partner-coin-comparison { gap: 4px; }
+  .partner-coin-comparison > div { padding: 6px 2px; font-size: 9px; }
+  .partner-coin-comparison dd { font-size: 11px; }
+}
+@media (max-width: 360px) {
+  .partner-level-grid, .partner-benefits-grid { gap: 7px; }
+  .partner-level-card { padding: 8px; }
+  .partner-target { padding-right: 7px; padding-left: 7px; }
+  .partner-level-card h3 { font-size: 15px; }
+  .partner-purchase-amounts > div { padding-right: 7px; padding-left: 7px; }
+  .partner-benefits-poster { padding: 9px; }
+  .partner-benefit { padding: 7px; }
+}
+
+/* Compact the content rows without shrinking text or touch targets. */
+.partner-journey { margin-bottom: 20px; }
+.partner-journey-heading { margin-bottom: 10px; }
+.partner-period-note { margin-bottom: 8px !important; }
+.partner-level-grid { margin-bottom: 12px; }
+.partner-level-card { grid-template-rows: auto 2.5em minmax(64px, auto) auto minmax(110px, 1fr) auto 44px; gap: 6px; }
+.partner-target { padding-top: 8px; padding-bottom: 8px; }
+.partner-target > span { min-height: 0; line-height: 1.4; }
+.partner-target > strong { margin-top: 4px; }
+.partner-purchase-progress { min-height: 0; }
+.partner-progress-label { min-height: 0; margin-bottom: 4px; }
+.partner-purchase-amounts { gap: 5px; }
+.partner-purchase-amounts > div { padding-top: 6px; padding-bottom: 6px; }
+.partner-purchase-amounts dd { margin-top: 2px; }
+.partner-card-payment { padding-top: 6px; }
+.partner-upgrade-notice { padding-top: 20px; padding-bottom: 20px; margin-bottom: 3px; }
+.partner-upgrade-notice p { margin-top: 5px; }
+.partner-poster-heading { margin-bottom: 12px; gap: 9px; }
+.partner-benefit { grid-template-rows: minmax(34px, auto) 1fr; }
+.partner-benefit ul { grid-template-rows: minmax(28px, auto) auto minmax(28px, auto) minmax(28px, auto); gap: 6px; margin-top: 6px; }
+.partner-coin-comparison { margin-top: 6px; }
+.partner-coin-comparison > div { padding-top: 4px; padding-bottom: 4px; }
+.partner-action-panel { padding: 12px; }
+.partner-steps { gap: 8px; }
