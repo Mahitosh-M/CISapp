@@ -1,7 +1,8 @@
-import { Info, ArrowUpRight, CalendarCheck, CalendarClock, CheckCircle2, ChevronDown, Coins, Crown, Gift, Handshake, Medal, RefreshCw, ShieldCheck, ShoppingBag, Sparkles, Tags, Trophy, Wallet } from 'lucide-react';
+import { ArrowUpRight, CalendarCheck, CalendarClock, CheckCircle2, ChevronDown, CircleX, Clock3, Coins, Crown, Gift, Handshake, Medal, RefreshCw, ShieldCheck, ShoppingBag, Sparkles, Tags, Trophy, Wallet } from 'lucide-react';
 import { Fragment, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import type { PartnerLevelJourney, PartnerLevelTile } from '../utils/partnerLevelJourney';
+import { formatDate } from '../utils/formatters';
 import './CustomerLevelJourney.css';
 
 const visual = {
@@ -13,25 +14,44 @@ const visual = {
 const amount = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const stateText = { current: 'Your level', included: 'Included', next: 'Next level', higher: 'Aim higher' };
 
-function Steps({ level, journey }: { level: PartnerLevelTile; journey: PartnerLevelJourney }) {
+export function PartnerLevelSteps({ level, journey }: { level: PartnerLevelTile; journey: PartnerLevelJourney }) {
+  const pending = [
+    !level.startingLevel && !level.purchaseMet
+      ? { key: 'purchase', icon: ShoppingBag, text: `Buy ${amount(level.remaining)} more before this month ends.` }
+      : undefined,
+    journey.dueToday > 0
+      ? { key: 'due-today', icon: Clock3, text: `Pay ${amount(journey.dueToday)} today.` }
+      : undefined,
+    journey.nextDueAmount > 0 && journey.nextDueDate
+      ? { key: 'next-due', icon: Clock3, text: `Pay ${amount(journey.nextDueAmount)} by ${formatDate(journey.nextDueDate)}.` }
+      : undefined,
+    journey.undatedBalance > 0
+      ? { key: 'undated', icon: Wallet, text: 'Ask the shop to confirm the payment date for your older balance.' }
+      : undefined,
+    level.upgradeReasons.length === 0 && level.historyMessage
+      ? { key: 'history', icon: CalendarClock, text: level.unlockDate
+        ? `Locked until ${formatDate(level.unlockDate)}. ${level.historyMessage}`
+        : level.historyMessage }
+      : undefined,
+    level.upgradeReasons.length === 0 && level.paymentMessage
+      ? { key: 'payment', icon: ShieldCheck, text: level.paymentMessage }
+      : undefined
+  ].filter((item): item is { key: string; icon: typeof ShoppingBag; text: string } => Boolean(item));
+  const blocked = [
+    journey.overdue > 0
+      ? { key: 'overdue', text: `Clear ${amount(journey.overdue)} overdue now. Late payment may block this level.` }
+      : undefined,
+    ...level.upgradeReasons.map((reason, index) => ({ key: `reason-${index}`, text: reason }))
+  ].filter((item): item is { key: string; text: string } => Boolean(item));
+
+  if (pending.length === 0 && blocked.length === 0) {
+    return <div className="partner-all-clear"><CheckCircle2 size={18} aria-hidden="true" />No pending requirements for this level.</div>;
+  }
+
   return (
     <ul className="partner-steps">
-      <li><ShoppingBag size={17} aria-hidden="true" /><span>{level.startingLevel
-        ? 'Work towards the Silver target.'
-        : level.purchaseMet ? 'Purchase target completed.'
-          : `Buy ${amount(level.remaining)} more this month to meet this level’s purchase requirement.`}</span></li>
-      <li><Wallet size={17} aria-hidden="true" /><span>{journey.dueNow > 0
-        ? `Pay ${amount(journey.dueNow)} due now.`
-        : journey.undatedBalance > 0 ? 'Check the payment date for your older or undated balance with the shop.'
-          : 'Keep paying each bill by its due date.'}</span></li>
-      {level.upgradeReasons.map((reason) => <li key={reason}><Info size={17} aria-hidden="true" /><span>{reason}</span></li>)}
-      {level.upgradeReasons.length === 0 && level.historyMessage && <li><CalendarClock size={17} aria-hidden="true" /><span>{level.historyMessage}</span></li>}
-      {level.upgradeReasons.length === 0 && level.paymentMessage && <li><ShieldCheck size={17} aria-hidden="true" /><span>{level.paymentMessage}</span></li>}
-      {level.state === 'next' || level.state === 'higher' ? (
-        <li><Sparkles size={17} aria-hidden="true" /><span>Buying alone does not confirm an upgrade. Your payment record and purchase history also matter.</span></li>
-      ) : level.state === 'current' && !level.startingLevel ? (
-        <li><ShieldCheck size={17} aria-hidden="true" /><span>Keep meeting these requirements to stay at {level.name.replace(' Partner', '')}. Your level can change as older purchases leave the 60-day period.</span></li>
-      ) : null}
+      {pending.map(({ key, icon: Icon, text }) => <li className="is-pending" key={key}><Icon size={17} aria-hidden="true" /><span>{text}</span></li>)}
+      {blocked.map(({ key, text }) => <li className="is-blocked" key={key}><CircleX size={17} aria-hidden="true" /><span>{text}</span></li>)}
     </ul>
   );
 }
@@ -116,7 +136,7 @@ export default function CustomerLevelJourney({ journey, loading, onRefresh }: {
               <button className="partner-howto-button" type="button" aria-expanded={selectedTier === level.tier} aria-controls={selectedTier === level.tier ? 'partner-action-panel' : undefined} onClick={() => setSelectedTier(selectedTier === level.tier ? undefined : level.tier)}>What should I do? <ChevronDown size={17} aria-hidden="true" /></button>
             </article>
             {selectedTier === level.tier && <div id="partner-action-panel" className="partner-action-panel" style={{ '--panel-row': row + 2, '--panel-mobile-row': index + 2 } as CSSProperties}>
-              <h3>{level.name} · Next steps</h3><Steps level={level} journey={journey} />
+              <h3>{level.name} · Next steps</h3><PartnerLevelSteps level={level} journey={journey} />
             </div>}
             </Fragment>
           );

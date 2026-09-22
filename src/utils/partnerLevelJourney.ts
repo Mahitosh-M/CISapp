@@ -21,6 +21,7 @@ export interface PartnerLevelTile {
   startingLevel: boolean;
   historyMessage?: string;
   paymentMessage?: string;
+  unlockDate?: string;
   upgradeReasons: string[];
   creditDays: number;
   earnsCoins: boolean;
@@ -40,6 +41,7 @@ export interface PartnerLevelJourney {
   dueNow: number;
   futureDue: number;
   nextDueDate?: string;
+  nextDueAmount: number;
   undatedBalance: number;
   levels: PartnerLevelTile[];
 }
@@ -69,9 +71,17 @@ export function buildPartnerLevelJourney(
   const overdue = positive(dated.filter((view) => view.daysRemaining < 0).reduce((sum, view) => sum + view.outstandingAmount, 0));
   const dueToday = positive(dated.filter((view) => view.daysRemaining === 0).reduce((sum, view) => sum + view.outstandingAmount, 0));
   const future = dated.filter((view) => view.daysRemaining > 0).sort((a, b) => a.invoice.dueDate.localeCompare(b.invoice.dueDate));
+  const nextDueDate = future[0]?.invoice.dueDate;
+  const nextDueAmount = positive(future
+    .filter((view) => view.invoice.dueDate === nextDueDate)
+    .reduce((sum, view) => sum + view.outstandingAmount, 0));
   const undatedBalance = positive(getPreviousOutstandingFallback(customer, ownInvoices)
     + unpaid.filter((view) => view.status === 'Due date not set').reduce((sum, view) => sum + view.outstandingAmount, 0));
   const currentIndex = TIERS.indexOf(internal.tier);
+  const activityStart = [...ownInvoices]
+    .map((invoice) => invoice.date.slice(0, 10))
+    .filter(Boolean)
+    .sort()[0] || customer.createdAt?.slice(0, 10) || '';
   // Compare the same eligible invoice, normalized to 10 PC at Active's rate.
   // Only example coin amounts reach the view; no invoice margin is exposed.
   const activeCoinRate = getGiftPercentageForTier('Tier 4', settings);
@@ -92,10 +102,18 @@ export function buildPartnerLevelJourney(
       else if (internal.onboardingStage === 'Stage B' && index >= 2) historyMessage = 'Keep ordering and paying on time. Your account needs more than 30 days of purchase history for this level.';
       else if (internal.onboardingStage === 'Stage C' && index === 3) historyMessage = 'Build at least 60 days of purchase history, with orders in two months, to reach Platinum.';
     }
+    const earliestUnlockDate = index > currentIndex && activityStart
+      ? tier === 'Tier 1' && internal.onboardingStage !== 'Stage D'
+        ? addDaysToDateString(activityStart, 60)
+        : (tier === 'Tier 2' || tier === 'Tier 1') && (internal.onboardingStage === 'Stage A' || internal.onboardingStage === 'Stage B')
+          ? addDaysToDateString(activityStart, 31)
+          : undefined
+      : undefined;
+    const unlockDate = earliestUnlockDate && earliestUnlockDate > today ? earliestUnlockDate : undefined;
     return {
       tier, name: getTierDisplayName(tier), state, monthlyTarget, remaining,
       progress: monthlyTarget > 0 ? Math.min(100, Math.max(0, Math.floor(Math.max(0, thisMonthPurchases) / monthlyTarget * 100))) : 100,
-      purchaseMet: remaining === 0, startingLevel, historyMessage,
+      purchaseMet: remaining === 0, startingLevel, historyMessage, unlockDate,
       upgradeReasons: remaining === 0 && index > currentIndex
         ? getPartnerUpgradeReasons(tier, customer, invoices, payments, settings, internal, new Date(`${today}T12:00:00`))
         : [],
@@ -113,6 +131,6 @@ export function buildPartnerLevelJourney(
     asOf: today, windowStart, currentName: getTierDisplayName(internal.tier), thisMonthPurchases, earlierPurchases,
     overdue, dueToday, dueNow: positive(overdue + dueToday),
     futureDue: positive(future.reduce((sum, view) => sum + view.outstandingAmount, 0)),
-    nextDueDate: future[0]?.invoice.dueDate, undatedBalance, levels
+    nextDueDate, nextDueAmount, undatedBalance, levels
   };
 }

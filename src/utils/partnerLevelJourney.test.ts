@@ -6,7 +6,7 @@ import type { Customer, Invoice, Payment } from '../types';
 import { DEFAULT_SETTINGS } from './settings';
 import { buildCustomerScores, type PartnerUpgradeContext } from './customerAnalytics';
 import { buildPartnerLevelJourney } from './partnerLevelJourney';
-import CustomerLevelJourney from '../components/CustomerLevelJourney';
+import CustomerLevelJourney, { PartnerLevelSteps } from '../components/CustomerLevelJourney';
 
 const customer: Customer = {
   id: 'customer-1', name: 'Customer', mobile: '', area: '', tier: 'Tier 4',
@@ -83,6 +83,8 @@ describe('customer-facing partner-level goals', () => {
     expect(journey.dueToday).toBe(500);
     expect(journey.dueNow).toBe(1800);
     expect(journey.futureDue).toBe(700);
+    expect(journey.nextDueDate).toBe('2026-10-01');
+    expect(journey.nextDueAmount).toBe(700);
     expect(journey.undatedBalance).toBe(300);
     expect(build(rows, [payment('late', 2000), payment('today', 500)]).dueNow).toBe(0);
   });
@@ -129,6 +131,21 @@ describe('customer-facing partner-level goals', () => {
     expect(html).not.toMatch(/score|profit|margin/i);
     expect(JSON.stringify(journey)).not.toMatch(/score|profit|margin/i);
     expect(html).toContain('/customer/invoices');
+    expect(html).not.toContain('Purchase target completed.');
+    expect(html).not.toContain('Keep paying each bill by its due date.');
+  });
+
+  it('shows only pending or blocking actions and includes an onboarding unlock date', () => {
+    const newCustomer = { ...customer, createdAt: '2026-09-01' };
+    const rows = [invoice('first', '2026-09-01', 4500, { savedDueDate: '2026-09-20' })];
+    const score = buildCustomerScores([newCustomer], rows, [], new Date('2026-09-14T12:00:00'), DEFAULT_SETTINGS)[0];
+    const journey = buildPartnerLevelJourney(newCustomer, rows, [], DEFAULT_SETTINGS, score, '2026-09-14');
+    expect(journey.levels[3].unlockDate).toBe('2026-10-31');
+    const html = renderToStaticMarkup(createElement(PartnerLevelSteps, { level: journey.levels[3], journey }));
+    expect(html).toContain('Buy ₹45,500 more before this month ends.');
+    expect(html).toContain('Locked until 31-10-2026.');
+    expect(html).toContain('Pay ₹4,500 by 20-09-2026.');
+    expect(html).not.toContain('Purchase target completed.');
   });
 
   it('shows a new-account blocker on completed higher targets but never on current or incomplete levels', () => {

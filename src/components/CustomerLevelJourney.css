@@ -118,6 +118,12 @@
 .partner-action-panel h3 { color: #f5d782; }
 .partner-action-panel .partner-steps li { color: #eee8ff; }
 .partner-action-panel .partner-steps svg { color: #f5d782; }
+.partner-action-panel .partner-steps .is-pending { color: #ffedd5; }
+.partner-action-panel .partner-steps .is-pending svg { color: #fb923c; }
+.partner-action-panel .partner-steps .is-blocked { color: #ffe4e6; }
+.partner-action-panel .partner-steps .is-blocked svg { color: #fb7185; }
+.partner-all-clear { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: #bbf7d0; font-size: 12px; font-weight: 800; }
+.partner-all-clear svg { flex-shrink: 0; color: #4ade80; }
 .partner-benefits-grid { grid-auto-rows: 1fr; }
 .partner-benefit { display: grid; grid-template-rows: 42px 1fr; }
 .partner-benefit ul { grid-template-columns: 1fr; grid-template-rows: 34px auto 34px 34px; gap: 10px; margin-top: 12px; }
