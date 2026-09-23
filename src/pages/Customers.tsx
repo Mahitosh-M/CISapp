@@ -319,7 +319,7 @@ const Customers = () => {
       setFormData((current) => ({
         ...current,
         tier,
-        paymentTerms: getPaymentTermsForTier(tier)
+        paymentTerms: current.customerType === 'medical' ? '15 day credit' : getPaymentTermsForTier(tier)
       }));
       return;
     }
@@ -441,7 +441,11 @@ const Customers = () => {
       return;
     }
 
-    setFormData({ ...emptyCustomerForm, customerType });
+    setFormData({
+      ...emptyCustomerForm,
+      customerType,
+      paymentTerms: customerType === 'medical' ? '15 day credit' : emptyCustomerForm.paymentTerms
+    });
     setEditingCustomerId('');
     setError('');
     setMessage('');

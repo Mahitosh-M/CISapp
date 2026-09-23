@@ -660,6 +660,16 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await assertSucceeds(addBranchReceiptBatch(database, 'SHOP_A').commit());
   });
 
+  it.each(['Admin', 'Staff'] as const)('allows %s payment entry against a fractional cash balance', async (role) => {
+    await seed(role, true, 'SHOP_S');
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'shopCash', 'SHOP_S'), initializedShopCash('SHOP_S', 32376.02, 120497));
+    });
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertSucceeds(addBranchReceiptBatch(database, 'SHOP_S', 500).commit());
+    expect((await getDoc(doc(database, 'shopCash', 'SHOP_S'))).data()?.availableBalance).toBe(32376.02 + 500);
+  });
+
   it('denies assigned Staff branch payment and cash writes for the other shop', async () => {
     await seed('Staff', true, 'SHOP_A');
     const database = testEnvironment.authenticatedContext('team-user').firestore();

@@ -6,7 +6,7 @@ import { sortInvoicesByUrgency } from '../../utils/customerPortal';
 const CustomerInvoices = () => {
   const { invoiceViews } = useCustomerPortalContext();
   const visibleInvoices = useMemo(
-    () => sortInvoicesByUrgency(invoiceViews.filter((invoice) => invoice.outstandingAmount > 0)),
+    () => sortInvoicesByUrgency(invoiceViews),
     [invoiceViews]
   );
 
@@ -18,7 +18,7 @@ const CustomerInvoices = () => {
 
       {visibleInvoices.length === 0 ? (
         <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#166534', fontWeight: 900 }}>
-          No outstanding invoices.
+          No invoices yet.
         </div>
       ) : (
         visibleInvoices.map((invoiceView) => <CustomerInvoiceCard key={invoiceView.invoice.id} invoiceView={invoiceView} />)

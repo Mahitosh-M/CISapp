@@ -56,10 +56,11 @@ export function PartnerLevelSteps({ level, journey }: { level: PartnerLevelTile;
   );
 }
 
-export default function CustomerLevelJourney({ journey, loading, onRefresh }: {
+export default function CustomerLevelJourney({ journey, loading, onRefresh, hideCreditDays = false }: {
   journey?: PartnerLevelJourney;
   loading: boolean;
   onRefresh: () => void;
+  hideCreditDays?: boolean;
 }) {
   const [selectedTier, setSelectedTier] = useState<string>();
   const selectedIndex = journey?.levels.findIndex((level) => level.tier === selectedTier) ?? -1;
@@ -149,7 +150,7 @@ export default function CustomerLevelJourney({ journey, loading, onRefresh }: {
           return <article className={`partner-benefit partner-level-${label}`} key={level.tier} style={{ '--level-accent': accent } as CSSProperties}>
             <h3><Icon size={22} aria-hidden="true" />{level.name}</h3>
             <ul>
-              <li><CalendarCheck size={20} aria-hidden="true" /><div><strong>{level.creditDays > 0 ? `Up to ${level.creditDays} days to pay` : 'Pay when you buy'}</strong></div></li>
+              {!hideCreditDays && <li><CalendarCheck size={20} aria-hidden="true" /><div><strong>{level.creditDays > 0 ? `Up to ${level.creditDays} days to pay` : 'Pay when you buy'}</strong></div></li>}
               {level.earnsCoins && <li className="partner-coin-benefit"><Coins size={20} aria-hidden="true" /><div><strong>Partner Coins · Same invoice</strong>
                 <dl className="partner-coin-comparison">{(journey.levels[journey.levels.length - 1]?.coinComparison ?? []).map((comparison) => (
                   <div key={comparison.tier} className={comparison.tier === level.tier ? 'is-selected' : ''}>

@@ -178,7 +178,9 @@ export const recalculateCustomerDerivedData = async (
     if (scoreWithAvailablePc.tier !== customer.tier) {
       batch.update(doc(db, CUSTOMERS, customerId), {
         tier: scoreWithAvailablePc.tier,
-        paymentTerms: getPaymentTermsLabel(scoreWithAvailablePc.tier, settings),
+        paymentTerms: customer.customerType === 'medical'
+          ? '15 day credit'
+          : getPaymentTermsLabel(scoreWithAvailablePc.tier, settings),
         updatedAt: calculatedAt
       });
     }

@@ -38,4 +38,11 @@ describe('stable invoice-time terms', () => {
     expect(terms.savedDueDate).toBe('2026-07-16');
     expect(terms.finalPcCutoffDate).toBe('2026-07-19');
   });
+
+  it('uses the fixed 15-day Medical credit period when provided', () => {
+    const terms = buildInvoiceTimeTerms('2026-07-01', '', 'Tier 4', DEFAULT_SETTINGS, undefined, 15);
+
+    expect(terms.creditDaysAtInvoice).toBe(15);
+    expect(terms.savedDueDate).toBe('2026-07-16');
+  });
 });

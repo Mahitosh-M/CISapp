@@ -212,7 +212,9 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const tier = ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'].includes(String(input.customer.tier))
     ? String(input.customer.tier)
     : 'Tier 4';
-  const creditDays = Math.max(0, Math.round(numberOrZero(input.settings.creditDays?.[tier])));
+  const creditDays = input.customer.customerType === 'medical'
+    ? 15
+    : Math.max(0, Math.round(numberOrZero(input.settings.creditDays?.[tier])));
   const ninetyDaysAgo = addDays(today, -89);
   const invoiceRows = buildInvoiceRows(input, today);
   const historyRows = invoiceRows.filter((row) => !row.openingBalance && row.creditInvoice && row.invoiceDate <= today);

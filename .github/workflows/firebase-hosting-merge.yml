@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+      VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
       VITE_SALESAPP_FIREBASE_CONFIG: ${{ secrets.VITE_SALESAPP_FIREBASE_CONFIG }}
     steps:
       - uses: actions/checkout@v4

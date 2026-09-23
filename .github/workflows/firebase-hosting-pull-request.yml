@@ -13,12 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+      VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
       VITE_SALESAPP_FIREBASE_CONFIG: ${{ secrets.VITE_SALESAPP_FIREBASE_CONFIG }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci && npm run build
       - run: npm --prefix functions ci && npm --prefix functions test
