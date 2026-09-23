@@ -250,7 +250,11 @@ export const sendNotificationBroadcast = onCall(options, async request => {
 
 // IAM-private: only the Orderapp trigger service account receives Cloud Run Invoker on this function.
 // No public client credential or cross-project Firestore read access is needed.
-export const notifyStaffOfCustomerOrder = onRequest({ ...options, invoker: 'private', cors: false }, async (request, response) => {
+export const notifyStaffOfCustomerOrder = onRequest({
+  ...options,
+  invoker: 'serviceAccount:notification-relay@orderapp-35200.iam.gserviceaccount.com',
+  cors: false,
+}, async (request, response) => {
   if (request.method !== 'POST') { response.status(405).end(); return; }
   try {
     fields(request.body, ['orderId', 'customerId']);
