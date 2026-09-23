@@ -270,8 +270,8 @@ service cloud.firestore {
           && afterSummary.data.lastCashOperationId == paymentId
           && afterSummary.data.lastCashOperationType == 'payment'
           && (exists(path)
-            ? afterSummary.data.availableBalance - get(path).data.availableBalance == delta
-              && afterSummary.data.totalCollections - get(path).data.totalCollections == delta
+            ? afterSummary.data.availableBalance == get(path).data.availableBalance + delta
+              && afterSummary.data.totalCollections == get(path).data.totalCollections + delta
             : afterSummary.data.availableBalance == delta
               && afterSummary.data.totalCollections == delta));
     }
@@ -312,10 +312,10 @@ service cloud.firestore {
           'lastCashOperationType',
           'updatedAt'
         ])
-        && request.resource.data.availableBalance - resource.data.availableBalance
-          == delta
-        && request.resource.data.totalCollections - resource.data.totalCollections
-          == delta;
+        && request.resource.data.availableBalance
+          == resource.data.availableBalance + delta
+        && request.resource.data.totalCollections
+          == resource.data.totalCollections + delta;
     }
 
     function hasInvoiceDeleteSummaryMarker(invoiceId, shopId, paymentAmount) {

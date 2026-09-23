@@ -2,6 +2,16 @@ import { FormEvent, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
+const getLoginErrorMessage = (error: unknown) => {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+  const message = error instanceof Error ? error.message : '';
+  if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'Invalid email or password.';
+  if (code.includes('user-disabled')) return 'This account is disabled. Please contact Admin.';
+  if (code.includes('too-many-requests') || message.startsWith('Too many login attempts.')) return message.startsWith('Too many login attempts.') ? message : 'Too many login attempts. Please try again later.';
+  if (message === 'This login is inactive. Please contact Admin.' || message.includes('currently unavailable')) return message;
+  return 'Unable to sign in. Check your email and password, then try again.';
+};
+
 const Login = () => {
   const { firebaseUser, role, login } = useAuth();
   const [email, setEmail] = useState('');
@@ -21,7 +31,7 @@ const Login = () => {
       setError('');
       await login(email, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to login.');
+      setError(getLoginErrorMessage(err));
     } finally {
       setSaving(false);
     }

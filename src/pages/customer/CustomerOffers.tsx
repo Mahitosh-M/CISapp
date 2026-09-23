@@ -26,7 +26,7 @@ const customerPromoImageStyle = {
 };
 
 const CustomerOffers = () => {
-  const { offers, partnerJourney, loading, refreshData } = useCustomerPortalContext();
+  const { offers, partnerJourney, loading, refreshData, customer } = useCustomerPortalContext();
   const activeOffers = useMemo(() => {
     // Inactive offer filtering: customer carousel only shows currently active offers.
     return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer)));
@@ -37,7 +37,7 @@ const CustomerOffers = () => {
       <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Offers</div>
       <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>Latest active schemes from the business.</div>
 
-      <CustomerLevelJourney journey={partnerJourney} loading={loading} onRefresh={() => void refreshData()} />
+      <CustomerLevelJourney journey={partnerJourney} loading={loading} onRefresh={() => void refreshData()} hideCreditDays={customer?.customerType === 'medical'} />
 
       {activeOffers.length === 0 ? (
         <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#67738E' }}>

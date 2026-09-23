@@ -657,6 +657,8 @@ export const getPaymentTermsForTier = (tier: CustomerTier) => {
   return getPaymentTermsLabel(tier);
 };
 
+const MEDICAL_PAYMENT_TERMS = '15 day credit';
+
 export const getCreditDaysForTier = (tier: CustomerTier) => {
   return DEFAULT_SETTINGS.creditDays[tier];
 };
@@ -685,7 +687,7 @@ const mapCustomerDoc = (id: string, data: Record<string, unknown>): Customer => 
     latestOutstandingInvoiceId: data.latestOutstandingInvoiceId ? String(data.latestOutstandingInvoiceId) : undefined,
     overdueAmount: data.overdueAmount === undefined ? undefined : numberOrZero(data.overdueAmount),
     financialSummaryUpdatedAt: data.financialSummaryUpdatedAt ? String(data.financialSummaryUpdatedAt) : undefined,
-    paymentTerms: String(data.paymentTerms || getPaymentTermsLabel(tier)),
+    paymentTerms: String(data.paymentTerms || (data.customerType === 'medical' ? MEDICAL_PAYMENT_TERMS : getPaymentTermsLabel(tier))),
     notes: String(data.notes || ''),
     status: data.status ? String(data.status) : '',
     createdAt: String(data.createdAt || ''),
@@ -1281,6 +1283,7 @@ export const createCustomer = async (customer: CustomerFormData, auditUser?: Aud
   const batch = writeBatch(db);
   const customerPayload = {
     ...customer,
+    ...(customer.customerType === 'medical' ? { paymentTerms: MEDICAL_PAYMENT_TERMS } : {}),
     previousOutstandingAmount: 0,
     totalOutstandingAmount: previousOutstandingAmount,
     invoiceOutstandingAmount: 0,
@@ -1315,6 +1318,7 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
   const timestamp = nowIso();
   const customerPayload = {
     ...customer,
+    ...(customer.customerType === 'medical' ? { paymentTerms: MEDICAL_PAYMENT_TERMS } : {}),
     previousOutstandingAmount: 0
   };
 
@@ -1363,7 +1367,9 @@ export const syncCustomerPartnerLevelsFromFirestore = async () => {
     updates.map((score) =>
       updateDoc(doc(db, CUSTOMERS, score.customerId), {
         tier: score.tier,
-        paymentTerms: getPaymentTermsLabel(score.tier, appSettings),
+        paymentTerms: customersById.get(score.customerId)?.customerType === 'medical'
+          ? MEDICAL_PAYMENT_TERMS
+          : getPaymentTermsLabel(score.tier, appSettings),
         updatedAt: timestamp
       })
     )
@@ -1536,7 +1542,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     const nextSequence = currentSequence + 1;
     invoiceNumber = `${counter.prefix}-${String(nextSequence).padStart(4, '0')}`;
     const customerTier = (customerSnapshot.data().tier as CustomerTier | undefined) || 'Tier 4';
-    const invoiceTerms = buildInvoiceTimeTerms(invoice.date, invoice.dueDate, customerTier, activeSettings);
+    const medicalCreditDays = customerSnapshot.data().customerType === 'medical' ? 15 : undefined;
+    const invoiceTerms = buildInvoiceTimeTerms(invoice.date, invoice.dueDate, customerTier, activeSettings, undefined, medicalCreditDays);
     const advanceBalance = customerSnapshot.exists()
       ? Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
       : 0;
@@ -1667,7 +1674,8 @@ export const updateInvoiceRecord = async (
         invoice.dueDate,
         customer.tier,
         activeSettings,
-        preserveExistingTerms ? existingInvoice : undefined
+        preserveExistingTerms ? existingInvoice : undefined,
+        customer.customerType === 'medical' ? 15 : undefined
       );
 
   await updateDoc(doc(db, INVOICES, invoiceId), {

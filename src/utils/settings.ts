@@ -396,11 +396,12 @@ export const buildInvoiceTimeTerms = (
     | 'bufferDaysAtInvoice'
     | 'savedDueDate'
     | 'termsEstimated'
-  >>
+  >>,
+  creditDaysOverride?: number
 ) => {
   const tierAtInvoice = existing?.tierAtInvoice ?? tier;
   const creditDaysAtInvoice = Math.max(0, Math.round(
-    existing?.creditDaysAtInvoice ?? getCreditDaysForTierFromSettings(tierAtInvoice, settings)
+    existing?.creditDaysAtInvoice ?? creditDaysOverride ?? getCreditDaysForTierFromSettings(tierAtInvoice, settings)
   ));
   const bufferDaysAtInvoice = Math.max(0, Math.round(
     existing?.bufferDaysAtInvoice ?? getPaymentBufferForTier(tierAtInvoice, settings)

@@ -82,6 +82,12 @@ describe('advisory credit calculation', () => {
     expect(tier1.summary.creditDays).not.toBe(tier4.summary.creditDays);
   });
 
+  it('uses 15 credit days for Medical customers regardless of level', () => {
+    const medical = calculate([], [], { name: 'Medical One', tier: 'Tier 4', customerType: 'medical' });
+
+    expect(medical.summary.creditDays).toBe(15);
+  });
+
   it('caps an automatic increase at 20 percent', () => {
     const invoices = [
       invoice('a', 30_000, '2026-05-01', '2026-05-11', 10),
