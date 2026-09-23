@@ -252,7 +252,7 @@ export const sendNotificationBroadcast = onCall(options, async request => {
 // No public client credential or cross-project Firestore read access is needed.
 export const notifyStaffOfCustomerOrder = onRequest({
   ...options,
-  invoker: 'serviceAccount:notification-relay@orderapp-35200.iam.gserviceaccount.com',
+  invoker: 'notification-relay@orderapp-35200.iam.gserviceaccount.com',
   cors: false,
 }, async (request, response) => {
   if (request.method !== 'POST') { response.status(405).end(); return; }
