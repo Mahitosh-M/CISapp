@@ -1265,6 +1265,20 @@ export const getCustomersByBranchId = async (branchId: NonNullable<Customer['bra
   });
 };
 
+export const listenToCustomersByBranchId = (
+  branchId: NonNullable<Customer['branchId']>,
+  onChange: (customers: Customer[]) => void,
+  onError?: (error: Error) => void
+) => onSnapshot(
+  query(collection(db, CUSTOMERS), where('branchId', '==', branchId)),
+  (snapshot) => onChange(
+    snapshot.docs
+      .map((customerDoc) => mapCustomerDoc(customerDoc.id, customerDoc.data()))
+      .sort((left, right) => left.name.localeCompare(right.name))
+  ),
+  (error) => onError?.(error)
+);
+
 export const getCustomerById = async (customerId: string) => {
   if (!customerId) return undefined;
   const customerSnapshot = await getDoc(doc(db, CUSTOMERS, customerId));
@@ -1412,6 +1426,16 @@ export const getInvoicesByShopId = async (shopId: ShopId) => {
     return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
   });
 };
+
+export const listenToInvoicesByShopId = (
+  shopId: ShopId,
+  onChange: (invoices: Invoice[]) => void,
+  onError?: (error: Error) => void
+) => onSnapshot(
+  query(collection(db, INVOICES), where('shopId', '==', shopId)),
+  (snapshot) => onChange(snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()))),
+  (error) => onError?.(error)
+);
 
 export const getInvoicesByCustomerId = async (customerId: string, options?: DateRangeQueryOptions) => {
   const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints({ ...options, customerId }));
@@ -1873,6 +1897,16 @@ export const getPaymentsByShopId = async (shopId: ShopId) => {
     return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
   });
 };
+
+export const listenToPaymentsByShopId = (
+  shopId: ShopId,
+  onChange: (payments: Payment[]) => void,
+  onError?: (error: Error) => void
+) => onSnapshot(
+  query(collection(db, PAYMENTS), where('shopId', '==', shopId)),
+  (snapshot) => onChange(snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()))),
+  (error) => onError?.(error)
+);
 
 export const getPaymentsBySplitPaymentGroupIds = async (groupIds: string[]) => {
   const uniqueGroupIds = [...new Set(groupIds.filter(Boolean))];

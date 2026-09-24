@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CircleDollarSign, RefreshCw } from 'lucide-react';
+import { CircleDollarSign } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
   getAppSettings,
-  getCustomersByBranchId,
-  getInvoicesByShopId,
-  getPaymentsByShopId
+  listenToCustomersByBranchId,
+  listenToInvoicesByShopId,
+  listenToPaymentsByShopId
 } from '../services/firestoreService';
 import type { AppSettings, Customer, Invoice, Payment } from '../types';
 import { getTodayDateString } from '../utils/dateUtils';
@@ -41,7 +41,7 @@ const Collections = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const loadCollections = async () => {
+  useEffect(() => {
     if (!staffShopId) {
       setCustomers([]);
       setInvoices([]);
@@ -51,28 +51,49 @@ const Collections = () => {
       return;
     }
 
-    try {
-      setLoading(true);
-      setError('');
-      const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
-        getCustomersByBranchId(getBranchForShop(staffShopId)),
-        getInvoicesByShopId(staffShopId),
-        getPaymentsByShopId(staffShopId),
-        getAppSettings()
-      ]);
-      setCustomers(customerRows);
-      setInvoices(invoiceRows);
-      setPayments(paymentRows);
-      setSettings(appSettings);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load collection records.');
-    } finally {
+    let active = true;
+    const pendingSources = new Set(['customers', 'invoices', 'payments', 'settings']);
+    const markLoaded = (source: string) => {
+      pendingSources.delete(source);
+      if (pendingSources.size === 0 && active) setLoading(false);
+    };
+    const handleError = (err: Error) => {
+      if (!active) return;
+      setError(err.message || 'Unable to load collection records.');
       setLoading(false);
-    }
-  };
+    };
 
-  useEffect(() => {
-    void loadCollections();
+    setLoading(true);
+    setError('');
+    const stopCustomers = listenToCustomersByBranchId(getBranchForShop(staffShopId), (rows) => {
+      if (!active) return;
+      setCustomers(rows);
+      markLoaded('customers');
+    }, handleError);
+    const stopInvoices = listenToInvoicesByShopId(staffShopId, (rows) => {
+      if (!active) return;
+      setInvoices(rows);
+      markLoaded('invoices');
+    }, handleError);
+    const stopPayments = listenToPaymentsByShopId(staffShopId, (rows) => {
+      if (!active) return;
+      setPayments(rows);
+      markLoaded('payments');
+    }, handleError);
+    void getAppSettings()
+      .then((appSettings) => {
+        if (!active) return;
+        setSettings(appSettings);
+        markLoaded('settings');
+      })
+      .catch((err: unknown) => handleError(err instanceof Error ? err : new Error('Unable to load collection settings.')));
+
+    return () => {
+      active = false;
+      stopCustomers();
+      stopInvoices();
+      stopPayments();
+    };
   }, [staffShopId]);
 
   const rows = useMemo<CollectionCustomerRow[]>(() => {
@@ -125,9 +146,6 @@ const Collections = () => {
               <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Total overdue</div>
               <div style={{ color: '#FCA5A5', fontSize: 21, fontWeight: 900, marginTop: 3 }}>{formatMoney(totalOverdue)}</div>
             </div>
-            <button type="button" onClick={() => void loadCollections()} disabled={loading} aria-label="Refresh collections" style={{ width: 36, height: 36, border: '1px solid #5B6A83', borderRadius: 10, background: '#17233B', color: '#FFFFFF', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: loading ? 'wait' : 'pointer' }}>
-              <RefreshCw size={16} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
-            </button>
           </div>
         </div>
 
