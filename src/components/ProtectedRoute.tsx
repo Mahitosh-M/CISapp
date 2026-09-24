@@ -23,14 +23,7 @@ const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(role)) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--app-page-background)', color: '#FFFFFF', padding: 24 }}>
-        <div style={{ background: '#FFFFFF', color: '#11185A', borderRadius: 16, padding: 24, maxWidth: 460 }}>
-          <h2 style={{ marginTop: 0 }}>Access Restricted</h2>
-          <p>This page is protected for a different role.</p>
-        </div>
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   return children;
