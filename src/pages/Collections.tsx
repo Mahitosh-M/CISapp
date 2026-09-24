@@ -3,13 +3,17 @@ import { CircleDollarSign, Download } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
+  getAppSettings,
   listenToCustomersByBranchId,
+  listenToInvoicesByShopId,
   listenToPaymentsByShopId
 } from '../services/firestoreService';
-import type { Customer, Payment, ShopId } from '../types';
+import type { AppSettings, Customer, Invoice, Payment, ShopId } from '../types';
 import { downloadCollectionsPdf } from '../utils/collectionsPdf';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney, formatShortDate } from '../utils/formatters';
+import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { DEFAULT_SETTINGS, getEffectiveInvoiceDueDate } from '../utils/settings';
 import { getAssignedStaffShopId, getShopName } from '../utils/shops';
 
 type CollectionCustomerRow = {
@@ -38,7 +42,9 @@ const Collections = () => {
       : [];
   const [selectedShopId, setSelectedShopId] = useState<ShopId | undefined>(staffShopId);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -50,6 +56,7 @@ const Collections = () => {
   useEffect(() => {
     if (!selectedShopId) {
       setCustomers([]);
+      setInvoices([]);
       setPayments([]);
       setError('Your staff account is not assigned to a branch. Ask an Admin to assign your branch.');
       setLoading(false);
@@ -57,7 +64,7 @@ const Collections = () => {
     }
 
     let active = true;
-    const pendingSources = new Set(['customers', 'payments']);
+    const pendingSources = new Set(['customers', 'invoices-a', 'invoices-s', 'payments-a', 'payments-s', 'settings']);
     const markLoaded = (source: string) => {
       pendingSources.delete(source);
       if (pendingSources.size === 0 && active) setLoading(false);
@@ -71,25 +78,50 @@ const Collections = () => {
     setLoading(true);
     setError('');
     setCustomers([]);
+    setInvoices([]);
     setPayments([]);
+    const invoicesByShop = new Map<ShopId, Invoice[]>();
+    const paymentsByShop = new Map<ShopId, Payment[]>();
+    const setShopInvoices = (shopId: ShopId, rows: Invoice[]) => {
+      invoicesByShop.set(shopId, rows);
+      setInvoices([...invoicesByShop.values()].flat());
+      markLoaded(`invoices-${shopId === 'SHOP_A' ? 'a' : 's'}`);
+    };
+    const setShopPayments = (shopId: ShopId, rows: Payment[]) => {
+      paymentsByShop.set(shopId, rows);
+      setPayments([...paymentsByShop.values()].flat());
+      markLoaded(`payments-${shopId === 'SHOP_A' ? 'a' : 's'}`);
+    };
     const stopCustomers = listenToCustomersByBranchId(getBranchForShop(selectedShopId), (rows) => {
       if (!active) return;
       setCustomers(rows);
       markLoaded('customers');
     }, handleError);
-    const stopPayments = listenToPaymentsByShopId(selectedShopId, (rows) => {
+    const stopShopAInvoices = listenToInvoicesByShopId('SHOP_A', (rows) => { if (active) setShopInvoices('SHOP_A', rows); }, handleError);
+    const stopShopSInvoices = listenToInvoicesByShopId('SHOP_S', (rows) => { if (active) setShopInvoices('SHOP_S', rows); }, handleError);
+    const stopShopAPayments = listenToPaymentsByShopId('SHOP_A', (rows) => { if (active) setShopPayments('SHOP_A', rows); }, handleError);
+    const stopShopSPayments = listenToPaymentsByShopId('SHOP_S', (rows) => { if (active) setShopPayments('SHOP_S', rows); }, handleError);
+    void getAppSettings().then((appSettings) => {
       if (!active) return;
-      setPayments(rows);
-      markLoaded('payments');
-    }, handleError);
+      setSettings(appSettings);
+      markLoaded('settings');
+    }).catch((err: unknown) => handleError(err instanceof Error ? err : new Error('Unable to load collection settings.')));
     return () => {
       active = false;
       stopCustomers();
-      stopPayments();
+      stopShopAInvoices();
+      stopShopSInvoices();
+      stopShopAPayments();
+      stopShopSPayments();
     };
   }, [selectedShopId]);
 
   const rows = useMemo<CollectionCustomerRow[]>(() => {
+    const paymentsByInvoiceId = payments.reduce((totals, payment) => {
+      totals.set(payment.invoiceId, (totals.get(payment.invoiceId) ?? 0) + getInvoicePaymentEffect(payment));
+      return totals;
+    }, new Map<string, number>());
+    const today = getTodayDateString();
     return customers
       .map((customer) => {
         const paymentDates = payments
@@ -97,16 +129,20 @@ const Collections = () => {
           .map((payment) => payment.date)
           .sort();
         const lastPaymentDate = paymentDates[paymentDates.length - 1];
+        const notYetDueAmount = invoices
+          .filter((invoice) => invoice.customerId === customer.id)
+          .filter((invoice) => getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings) >= today)
+          .reduce((sum, invoice) => sum + getPendingAmount(invoice.totalSales, paymentsByInvoiceId.get(invoice.id) ?? 0), 0);
         return {
           customer,
-          outstandingAmount: Math.max(0, customer.totalOutstandingAmount ?? 0),
+          outstandingAmount: Math.max(0, (customer.totalOutstandingAmount ?? 0) - notYetDueAmount),
           lastPaymentDate,
           lastPaymentDays: getDaysSince(lastPaymentDate)
         };
       })
       .filter((row) => row.outstandingAmount > 0)
       .sort((left, right) => right.outstandingAmount - left.outstandingAmount || left.customer.name.localeCompare(right.customer.name));
-  }, [customers, payments]);
+  }, [customers, invoices, payments, settings]);
 
   const totalOverdue = useMemo(() => rows.reduce((sum, row) => sum + row.outstandingAmount, 0), [rows]);
 
