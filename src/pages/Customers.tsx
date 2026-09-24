@@ -23,6 +23,7 @@ import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
+import { buildOverdueInvoiceRisks } from '../utils/overdueUtils';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import { getShopName } from '../utils/shops';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
@@ -46,6 +47,13 @@ const emptyCustomerForm: CustomerFormData = {
 
 type CustomerTextField = Exclude<keyof CustomerFormData, 'previousOutstandingAmount'>;
 type LedgerRange = 'last_10' | 'last_month' | 'last_3_months' | 'overall';
+
+type CollectionCustomerRow = {
+  customer: Customer;
+  overdueAmount: number;
+  lastPaymentDate?: string;
+  lastPaymentDays?: number;
+};
 
 const LEDGER_RANGES: Array<{ id: LedgerRange; label: string }> = [
   { id: 'last_10', label: 'Last 10 Transactions' },
@@ -71,6 +79,10 @@ const Customers = () => {
   const [showBranchPendingCustomers, setShowBranchPendingCustomers] = useState(false);
   const [branchPendingDataLoaded, setBranchPendingDataLoaded] = useState(false);
   const [loadingBranchPendingCustomers, setLoadingBranchPendingCustomers] = useState(false);
+  const [showCollection, setShowCollection] = useState(false);
+  const [collectionCustomers, setCollectionCustomers] = useState<Customer[]>([]);
+  const [collectionCustomersLoaded, setCollectionCustomersLoaded] = useState(false);
+  const [loadingCollectionCustomers, setLoadingCollectionCustomers] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
   const [ledgerCustomers, setLedgerCustomers] = useState<Customer[]>([]);
   const [ledgerCustomerListLoaded, setLedgerCustomerListLoaded] = useState(false);
@@ -177,6 +189,36 @@ const Customers = () => {
 
   const getStoredCustomerTotal = (customer: Customer) => customer.totalOutstandingAmount ?? 0;
 
+  const collectionRows = useMemo<CollectionCustomerRow[]>(() => {
+    const overdueByCustomerId = new Map<string, number>();
+    buildOverdueInvoiceRisks(collectionCustomers, invoices, payments, settings).forEach((invoice) => {
+      overdueByCustomerId.set(invoice.customerId, (overdueByCustomerId.get(invoice.customerId) ?? 0) + invoice.overdueAmount);
+    });
+
+    const today = getTodayDateString();
+    return collectionCustomers
+      .map((customer) => {
+        const overdueAmount = overdueByCustomerId.get(customer.id) ?? 0;
+        const paymentDates = payments
+          .filter((payment) => payment.customerId === customer.id)
+          .map((payment) => payment.date)
+          .filter(Boolean)
+          .sort();
+        const lastPaymentDate = paymentDates[paymentDates.length - 1];
+        const lastPaymentDays = lastPaymentDate
+          ? Math.max(0, Math.floor((new Date(`${today}T00:00:00`).getTime() - new Date(`${lastPaymentDate}T00:00:00`).getTime()) / 86400000))
+          : undefined;
+        return { customer, overdueAmount, lastPaymentDate, lastPaymentDays };
+      })
+      .filter((row) => row.overdueAmount > 0)
+      .sort((left, right) => right.overdueAmount - left.overdueAmount || left.customer.name.localeCompare(right.customer.name));
+  }, [collectionCustomers, invoices, payments, settings]);
+
+  const collectionOverdueTotal = useMemo(
+    () => collectionRows.reduce((sum, row) => sum + row.overdueAmount, 0),
+    [collectionRows]
+  );
+
   const handleToggleBranchPendingCustomers = async () => {
     if (showBranchPendingCustomers) {
       setShowBranchPendingCustomers(false);
@@ -197,6 +239,27 @@ const Customers = () => {
       setError(err instanceof Error ? err.message : 'Unable to load customers without a branch.');
     } finally {
       setLoadingBranchPendingCustomers(false);
+    }
+  };
+
+  const handleToggleCollection = async () => {
+    if (showCollection) {
+      setShowCollection(false);
+      return;
+    }
+
+    setShowCollection(true);
+    if (collectionCustomersLoaded) return;
+
+    try {
+      setLoadingCollectionCustomers(true);
+      setError('');
+      setCollectionCustomers(await getCustomers());
+      setCollectionCustomersLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load collection customers.');
+    } finally {
+      setLoadingCollectionCustomers(false);
     }
   };
 
@@ -622,6 +685,24 @@ const Customers = () => {
               </span>
             </span>
           </button> : null}
+          {isAdmin ? <button
+            type="button"
+            className="customer-action-tile"
+            style={{
+              ...staffTileStyle,
+              ...(showCollection ? { borderColor: '#FCA5A5', background: 'var(--role-card-subtle)' } : {})
+            }}
+            onClick={handleToggleCollection}
+            disabled={loadingCollectionCustomers}
+          >
+            <span style={{ ...staffTileIconStyle, background: '#FDECEC', color: '#B91C1C' }}><CircleDollarSign size={20} /></span>
+            <span>
+              <span style={{ display: 'block', fontWeight: 900 }}>{showCollection ? 'Hide Collection' : 'Collection'}</span>
+              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>
+                {loadingCollectionCustomers ? 'Loading overdue balances' : 'Overdue amount and last payment'}
+              </span>
+            </span>
+          </button> : null}
           <button
             type="button"
             className="customer-action-tile"
@@ -798,6 +879,52 @@ const Customers = () => {
                   </table>
                 </div>
               </div>
+          </div>
+        ) : null}
+
+        {isAdmin && showCollection ? (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div>
+                <div style={{ color: '#FCA5A5', fontSize: 18, fontWeight: 900 }}>COLLECTION</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Customers with overdue balances.</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Total overdue</div>
+                <div style={{ color: '#FCA5A5', fontSize: 21, fontWeight: 900, marginTop: 3 }}>{formatMoney(collectionOverdueTotal)}</div>
+              </div>
+            </div>
+
+            <div style={{ ...latestFiveScrollStyle, overflowX: 'auto', borderRadius: 14, border: '1px solid var(--role-card-border)' }}>
+              <table style={{ ...compactTableStyle, minWidth: 620 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...headerCellStyle, width: '34%' }}>Customer</th>
+                    <th style={{ ...headerCellStyle, width: '19%' }}>Area</th>
+                    <th style={{ ...headerCellStyle, width: '20%', textAlign: 'right' }}>Total overdue</th>
+                    <th style={{ ...headerCellStyle, width: '27%' }}>Last payment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingCollectionCustomers ? (
+                    <tr><td style={cellStyle} colSpan={4}>Loading collection customers...</td></tr>
+                  ) : collectionRows.length === 0 ? (
+                    <tr><td style={cellStyle} colSpan={4}>No overdue customer balances.</td></tr>
+                  ) : collectionRows.map((row) => (
+                    <tr className="role-record-row" key={row.customer.id}>
+                      <td style={{ ...cellStyle, fontWeight: 900 }}>{row.customer.name}</td>
+                      <td style={cellStyle}>{row.customer.area || '-'}</td>
+                      <td style={{ ...cellStyle, textAlign: 'right', color: '#FCA5A5', fontWeight: 900 }}>{formatMoney(row.overdueAmount)}</td>
+                      <td style={cellStyle}>
+                        {row.lastPaymentDate
+                          ? <><strong>{formatShortDate(row.lastPaymentDate)}</strong><div style={{ color: '#FDE68A', fontSize: 10, fontWeight: 800, marginTop: 3 }}>{row.lastPaymentDays} days ago</div></>
+                          : <span style={{ color: '#FCA5A5', fontWeight: 800 }}>No payment recorded</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
 
