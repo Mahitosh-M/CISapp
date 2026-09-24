@@ -3,22 +3,18 @@ import { CircleDollarSign, Download } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  getAppSettings,
   listenToCustomersByBranchId,
-  listenToInvoicesByShopId,
   listenToPaymentsByShopId
 } from '../services/firestoreService';
-import type { AppSettings, Customer, Invoice, Payment, ShopId } from '../types';
+import type { Customer, Payment, ShopId } from '../types';
 import { downloadCollectionsPdf } from '../utils/collectionsPdf';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney, formatShortDate } from '../utils/formatters';
-import { buildOverdueInvoiceRisks } from '../utils/overdueUtils';
-import { DEFAULT_SETTINGS } from '../utils/settings';
 import { getAssignedStaffShopId, getShopName } from '../utils/shops';
 
 type CollectionCustomerRow = {
   customer: Customer;
-  overdueAmount: number;
+  outstandingAmount: number;
   lastPaymentDate?: string;
   lastPaymentDays?: number;
 };
@@ -35,11 +31,14 @@ const getDaysSince = (date?: string) => {
 const Collections = () => {
   const { userProfile } = useAuth();
   const staffShopId = getAssignedStaffShopId(userProfile);
+  const visibleShopIds: ShopId[] = staffShopId === 'SHOP_A'
+    ? ['SHOP_A', 'SHOP_S']
+    : staffShopId === 'SHOP_S'
+      ? ['SHOP_S']
+      : [];
   const [selectedShopId, setSelectedShopId] = useState<ShopId | undefined>(staffShopId);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -51,7 +50,6 @@ const Collections = () => {
   useEffect(() => {
     if (!selectedShopId) {
       setCustomers([]);
-      setInvoices([]);
       setPayments([]);
       setError('Your staff account is not assigned to a branch. Ask an Admin to assign your branch.');
       setLoading(false);
@@ -59,7 +57,7 @@ const Collections = () => {
     }
 
     let active = true;
-    const pendingSources = new Set(['customers', 'invoices', 'payments', 'settings']);
+    const pendingSources = new Set(['customers', 'payments']);
     const markLoaded = (source: string) => {
       pendingSources.delete(source);
       if (pendingSources.size === 0 && active) setLoading(false);
@@ -73,45 +71,25 @@ const Collections = () => {
     setLoading(true);
     setError('');
     setCustomers([]);
-    setInvoices([]);
     setPayments([]);
     const stopCustomers = listenToCustomersByBranchId(getBranchForShop(selectedShopId), (rows) => {
       if (!active) return;
       setCustomers(rows);
       markLoaded('customers');
     }, handleError);
-    const stopInvoices = listenToInvoicesByShopId(selectedShopId, (rows) => {
-      if (!active) return;
-      setInvoices(rows);
-      markLoaded('invoices');
-    }, handleError);
     const stopPayments = listenToPaymentsByShopId(selectedShopId, (rows) => {
       if (!active) return;
       setPayments(rows);
       markLoaded('payments');
     }, handleError);
-    void getAppSettings()
-      .then((appSettings) => {
-        if (!active) return;
-        setSettings(appSettings);
-        markLoaded('settings');
-      })
-      .catch((err: unknown) => handleError(err instanceof Error ? err : new Error('Unable to load collection settings.')));
-
     return () => {
       active = false;
       stopCustomers();
-      stopInvoices();
       stopPayments();
     };
   }, [selectedShopId]);
 
   const rows = useMemo<CollectionCustomerRow[]>(() => {
-    const overdueByCustomerId = new Map<string, number>();
-    buildOverdueInvoiceRisks(customers, invoices, payments, settings).forEach((invoice) => {
-      overdueByCustomerId.set(invoice.customerId, (overdueByCustomerId.get(invoice.customerId) ?? 0) + invoice.overdueAmount);
-    });
-
     return customers
       .map((customer) => {
         const paymentDates = payments
@@ -121,28 +99,27 @@ const Collections = () => {
         const lastPaymentDate = paymentDates[paymentDates.length - 1];
         return {
           customer,
-          overdueAmount: overdueByCustomerId.get(customer.id) ?? 0,
+          outstandingAmount: Math.max(0, customer.totalOutstandingAmount ?? 0),
           lastPaymentDate,
           lastPaymentDays: getDaysSince(lastPaymentDate)
         };
       })
-      .filter((row) => row.overdueAmount > 0)
-      .sort((left, right) => right.overdueAmount - left.overdueAmount || left.customer.name.localeCompare(right.customer.name));
-  }, [customers, invoices, payments, settings]);
+      .filter((row) => row.outstandingAmount > 0)
+      .sort((left, right) => right.outstandingAmount - left.outstandingAmount || left.customer.name.localeCompare(right.customer.name));
+  }, [customers, payments]);
 
-  const totalOverdue = useMemo(() => rows.reduce((sum, row) => sum + row.overdueAmount, 0), [rows]);
+  const totalOverdue = useMemo(() => rows.reduce((sum, row) => sum + row.outstandingAmount, 0), [rows]);
 
   const handleDownloadPdf = async () => {
     if (!selectedShopId || rows.length === 0) return;
     try {
       setDownloadingPdf(true);
       await downloadCollectionsPdf({
-        shopName: getShopName(selectedShopId),
         totalOverdue,
         rows: rows.map((row) => ({
           customerName: row.customer.name,
           area: row.customer.area,
-          overdueAmount: row.overdueAmount,
+          overdueAmount: row.outstandingAmount,
           lastPaymentDate: row.lastPaymentDate,
           lastPaymentDays: row.lastPaymentDays
         }))
@@ -172,7 +149,7 @@ const Collections = () => {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-            {(['SHOP_S', 'SHOP_A'] as ShopId[]).map((shopId) => (
+            {visibleShopIds.map((shopId) => (
               <button
                 key={shopId}
                 type="button"
@@ -182,7 +159,7 @@ const Collections = () => {
                 {getShopName(shopId)}
               </button>
             ))}
-            <div style={{ textAlign: 'right' }}>
+            <div style={{ textAlign: 'center', minWidth: 118 }}>
               <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Total overdue</div>
               <div style={{ color: '#FCA5A5', fontSize: 21, fontWeight: 900, marginTop: 3 }}>{formatMoney(totalOverdue)}</div>
             </div>
@@ -200,7 +177,7 @@ const Collections = () => {
               <thead>
                 <tr style={{ background: 'rgba(17, 24, 90, 0.26)' }}>
                   {['Customer', 'Area', 'Total overdue', 'Last payment'].map((heading) => (
-                    <th key={heading} style={{ color: '#D7DEEA', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3, textAlign: heading === 'Total overdue' ? 'right' : 'left', padding: '11px 12px' }}>{heading}</th>
+                    <th key={heading} style={{ color: '#D7DEEA', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3, textAlign: heading === 'Total overdue' || heading === 'Area' ? 'center' : 'left', padding: '11px 12px', width: heading === 'Total overdue' || heading === 'Area' ? '1%' : undefined, whiteSpace: heading === 'Total overdue' || heading === 'Area' ? 'nowrap' : undefined }}>{heading}</th>
                   ))}
                 </tr>
               </thead>
@@ -210,8 +187,8 @@ const Collections = () => {
                 {!loading && rows.map((row) => (
                   <tr className="role-record-row" key={row.customer.id}>
                     <td style={{ padding: '13px 12px', color: '#FFFFFF', fontWeight: 900 }}>{row.customer.name}</td>
-                    <td style={{ padding: '13px 12px', color: '#D7DEEA' }}>{row.customer.area || '-'}</td>
-                    <td style={{ padding: '13px 12px', color: '#FCA5A5', fontWeight: 900, textAlign: 'right' }}>{formatMoney(row.overdueAmount)}</td>
+                    <td style={{ padding: '13px 12px', color: '#D7DEEA', textAlign: 'center', width: '1%', whiteSpace: 'nowrap' }}>{row.customer.area || '-'}</td>
+                    <td style={{ padding: '13px 12px', color: '#FCA5A5', fontWeight: 900, textAlign: 'center', width: '1%', whiteSpace: 'nowrap' }}>{formatMoney(row.outstandingAmount)}</td>
                     <td style={{ padding: '13px 12px', color: '#FFFFFF' }}>
                       {row.lastPaymentDate ? <><strong>{formatShortDate(row.lastPaymentDate)}</strong><div style={{ color: '#FDE68A', fontSize: 10, fontWeight: 800, marginTop: 3 }}>{row.lastPaymentDays} days ago</div></> : <span style={{ color: '#FCA5A5', fontWeight: 800 }}>No payment recorded</span>}
                     </td>

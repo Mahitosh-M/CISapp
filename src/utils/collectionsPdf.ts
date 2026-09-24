@@ -9,14 +9,11 @@ interface CollectionPdfRow {
 }
 
 interface CollectionsPdfOptions {
-  shopName: string;
   totalOverdue: number;
   rows: CollectionPdfRow[];
 }
 
-const safeFilePart = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-export const downloadCollectionsPdf = async ({ shopName, totalOverdue, rows }: CollectionsPdfOptions) => {
+export const downloadCollectionsPdf = async ({ totalOverdue, rows }: CollectionsPdfOptions) => {
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable')
@@ -31,7 +28,7 @@ export const downloadCollectionsPdf = async ({ shopName, totalOverdue, rows }: C
   document.setTextColor(255, 255, 255);
   document.setFont('helvetica', 'bold');
   document.setFontSize(17);
-  document.text(`${shopName} Collections`, 10, 13);
+  document.text('Collections', 10, 13);
   document.setFont('helvetica', 'normal');
   document.setFontSize(9);
   document.text('Overdue customer balances', 10, 20);
@@ -75,5 +72,5 @@ export const downloadCollectionsPdf = async ({ shopName, totalOverdue, rows }: C
     document.text(`Page ${pageNumber} of ${pageCount}`, pageWidth - 10, 291, { align: 'right' });
   }
 
-  document.save(`${safeFilePart(shopName) || 'shop'}-collections-${new Date().toISOString().slice(0, 10)}.pdf`);
+  document.save(`collections-${new Date().toISOString().slice(0, 10)}.pdf`);
 };
