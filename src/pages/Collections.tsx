@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CircleDollarSign } from 'lucide-react';
+import { CircleDollarSign, Download } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -8,7 +8,8 @@ import {
   listenToInvoicesByShopId,
   listenToPaymentsByShopId
 } from '../services/firestoreService';
-import type { AppSettings, Customer, Invoice, Payment } from '../types';
+import type { AppSettings, Customer, Invoice, Payment, ShopId } from '../types';
+import { downloadCollectionsPdf } from '../utils/collectionsPdf';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney, formatShortDate } from '../utils/formatters';
 import { buildOverdueInvoiceRisks } from '../utils/overdueUtils';
@@ -34,15 +35,21 @@ const getDaysSince = (date?: string) => {
 const Collections = () => {
   const { userProfile } = useAuth();
   const staffShopId = getAssignedStaffShopId(userProfile);
+  const [selectedShopId, setSelectedShopId] = useState<ShopId | undefined>(staffShopId);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
-    if (!staffShopId) {
+    setSelectedShopId(staffShopId);
+  }, [staffShopId]);
+
+  useEffect(() => {
+    if (!selectedShopId) {
       setCustomers([]);
       setInvoices([]);
       setPayments([]);
@@ -65,17 +72,20 @@ const Collections = () => {
 
     setLoading(true);
     setError('');
-    const stopCustomers = listenToCustomersByBranchId(getBranchForShop(staffShopId), (rows) => {
+    setCustomers([]);
+    setInvoices([]);
+    setPayments([]);
+    const stopCustomers = listenToCustomersByBranchId(getBranchForShop(selectedShopId), (rows) => {
       if (!active) return;
       setCustomers(rows);
       markLoaded('customers');
     }, handleError);
-    const stopInvoices = listenToInvoicesByShopId(staffShopId, (rows) => {
+    const stopInvoices = listenToInvoicesByShopId(selectedShopId, (rows) => {
       if (!active) return;
       setInvoices(rows);
       markLoaded('invoices');
     }, handleError);
-    const stopPayments = listenToPaymentsByShopId(staffShopId, (rows) => {
+    const stopPayments = listenToPaymentsByShopId(selectedShopId, (rows) => {
       if (!active) return;
       setPayments(rows);
       markLoaded('payments');
@@ -94,7 +104,7 @@ const Collections = () => {
       stopInvoices();
       stopPayments();
     };
-  }, [staffShopId]);
+  }, [selectedShopId]);
 
   const rows = useMemo<CollectionCustomerRow[]>(() => {
     const overdueByCustomerId = new Map<string, number>();
@@ -122,9 +132,29 @@ const Collections = () => {
 
   const totalOverdue = useMemo(() => rows.reduce((sum, row) => sum + row.overdueAmount, 0), [rows]);
 
+  const handleDownloadPdf = async () => {
+    if (!selectedShopId || rows.length === 0) return;
+    try {
+      setDownloadingPdf(true);
+      await downloadCollectionsPdf({
+        shopName: getShopName(selectedShopId),
+        totalOverdue,
+        rows: rows.map((row) => ({
+          customerName: row.customer.name,
+          area: row.customer.area,
+          overdueAmount: row.overdueAmount,
+          lastPaymentDate: row.lastPaymentDate,
+          lastPaymentDays: row.lastPaymentDays
+        }))
+      });
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   return (
     <div>
-      <SectionHeader title="Collections" description={staffShopId ? `${getShopName(staffShopId)} overdue customer balances` : 'Overdue customer balances'} />
+      <SectionHeader title="Collections" description={selectedShopId ? `${getShopName(selectedShopId)} overdue customer balances` : 'Overdue customer balances'} />
 
       <div style={{
         background: 'var(--role-card-background)',
@@ -141,11 +171,24 @@ const Collections = () => {
               <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 3 }}>Customers who need payment follow-up</div>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+            {(['SHOP_S', 'SHOP_A'] as ShopId[]).map((shopId) => (
+              <button
+                key={shopId}
+                type="button"
+                onClick={() => setSelectedShopId(shopId)}
+                style={{ border: `1px solid ${selectedShopId === shopId ? '#D4AF37' : '#5B6A83'}`, borderRadius: 9, background: selectedShopId === shopId ? '#D4AF37' : '#17233B', color: selectedShopId === shopId ? '#11185A' : '#FFFFFF', padding: '8px 10px', fontSize: 11, fontWeight: 900, cursor: 'pointer' }}
+              >
+                {getShopName(shopId)}
+              </button>
+            ))}
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: '#D7DEEA', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Total overdue</div>
               <div style={{ color: '#FCA5A5', fontSize: 21, fontWeight: 900, marginTop: 3 }}>{formatMoney(totalOverdue)}</div>
             </div>
+            <button type="button" onClick={() => void handleDownloadPdf()} disabled={loading || rows.length === 0 || downloadingPdf} style={{ border: 0, borderRadius: 9, background: '#E8F5EC', color: '#166534', padding: '9px 11px', fontSize: 11, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: loading || rows.length === 0 || downloadingPdf ? 'wait' : 'pointer', opacity: loading || rows.length === 0 || downloadingPdf ? 0.55 : 1 }}>
+              <Download size={15} />{downloadingPdf ? 'Preparing...' : 'PDF'}
+            </button>
           </div>
         </div>
 
