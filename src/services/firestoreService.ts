@@ -1255,6 +1255,16 @@ export const getCustomers = async (options?: CustomerQueryOptions) => {
   });
 };
 
+export const getCustomersByBranchId = async (branchId: NonNullable<Customer['branchId']>) => {
+  return getCached(cacheKey(CUSTOMERS, { branchId }), async () => {
+    const customersQuery = query(collection(db, CUSTOMERS), where('branchId', '==', branchId));
+    const snapshot = await getDocs(customersQuery);
+    return snapshot.docs
+      .map((customerDoc) => mapCustomerDoc(customerDoc.id, customerDoc.data()))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  });
+};
+
 export const getCustomerById = async (customerId: string) => {
   if (!customerId) return undefined;
   const customerSnapshot = await getDoc(doc(db, CUSTOMERS, customerId));
@@ -1390,6 +1400,14 @@ export const deleteCustomerRecord = async (customerId: string, auditUser?: Audit
 export const getInvoices = async (options?: DateRangeQueryOptions) => {
   return getCached(cacheKey(INVOICES, options), async () => {
     const invoicesQuery = query(collection(db, INVOICES), ...buildInvoiceQueryConstraints(options));
+    const snapshot = await getDocs(invoicesQuery);
+    return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
+  });
+};
+
+export const getInvoicesByShopId = async (shopId: ShopId) => {
+  return getCached(cacheKey(INVOICES, { shopId }), async () => {
+    const invoicesQuery = query(collection(db, INVOICES), where('shopId', '==', shopId));
     const snapshot = await getDocs(invoicesQuery);
     return snapshot.docs.map((invoiceDoc) => mapInvoiceDoc(invoiceDoc.id, invoiceDoc.data()));
   });
@@ -1843,6 +1861,14 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
 export const getPayments = async (options?: DateRangeQueryOptions) => {
   return getCached(cacheKey(PAYMENTS, options), async () => {
     const paymentsQuery = query(collection(db, PAYMENTS), ...buildPaymentQueryConstraints(options));
+    const snapshot = await getDocs(paymentsQuery);
+    return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
+  });
+};
+
+export const getPaymentsByShopId = async (shopId: ShopId) => {
+  return getCached(cacheKey(PAYMENTS, { shopId }), async () => {
+    const paymentsQuery = query(collection(db, PAYMENTS), where('shopId', '==', shopId));
     const snapshot = await getDocs(paymentsQuery);
     return snapshot.docs.map((paymentDoc) => mapPaymentDoc(paymentDoc.id, paymentDoc.data()));
   });

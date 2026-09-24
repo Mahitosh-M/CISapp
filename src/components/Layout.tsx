@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import NotificationControl from './NotificationControl';
-import { Bell, BarChart3, BrainCircuit, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Users } from 'lucide-react';
+import { Bell, BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,10 +13,12 @@ interface NavItem {
   icon: LucideIcon;
   mobileColor: string;
   adminOnly?: boolean;
+  staffOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
   { to: '/customers', label: 'Customers', icon: Users, mobileColor: '#67E8F9' },
+  { to: '/collections', label: 'Collections', icon: CircleDollarSign, mobileColor: '#FCA5A5', staffOnly: true },
   { to: '/invoices', label: 'Invoices', icon: FileText, mobileColor: '#86EFAC' },
   { to: '/payments', label: 'Payments', icon: CreditCard, mobileColor: '#FDE047' },
   { to: '/intelligence', label: 'Intelligence', icon: BrainCircuit, mobileColor: '#C4B5FD', adminOnly: true },
@@ -36,9 +38,10 @@ const Layout = () => {
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const visibleNavItems = navItems.filter((item) => {
     if (item.adminOnly) return userProfile?.role === 'Admin';
+    if (item.staffOnly) return userProfile?.role === 'Staff';
     return true;
   });
-  const mobilePriorityOrder = ['/invoices', '/payments', '/customers', '/'];
+  const mobilePriorityOrder = ['/invoices', '/payments', '/customers', '/collections', '/'];
   const mobileNavItems = isMobile
     ? [
         ...mobilePriorityOrder.flatMap((path) => visibleNavItems.filter((item) => item.to === path)),
