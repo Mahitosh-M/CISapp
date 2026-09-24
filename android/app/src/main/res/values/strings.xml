@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">COINS</string>
+    <string name="title_activity_main">COINS</string>
+    <string name="package_name">com.cisapp.partner</string>
+    <string name="custom_url_scheme">com.cisapp.partner</string>
+</resources>

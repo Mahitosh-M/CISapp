@@ -43,3 +43,4 @@ firestore-credit-rules-audit.local.json
 **/*service-account*.json
 **/*serviceAccount*.json
 **/credentials.json
+android/app/google-services.json

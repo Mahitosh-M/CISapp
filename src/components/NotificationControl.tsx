@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Bell, BellOff } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../contexts/AuthContext';
 import { disableNotifications, enableNotifications, notificationsConfigured, notificationsOptedIn } from '../services/notificationService';
 
@@ -8,17 +9,18 @@ export default function NotificationControl() {
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const isNativeAndroid = Capacitor.getPlatform() === 'android';
   useEffect(() => {
     if (!notificationsConfigured || !userProfile?.active || !notificationsOptedIn()) return;
     let current = true;
     setBusy(true);
     enableNotifications(userProfile.uid, userProfile.role, false)
-      .then(() => { if (current) setEnabled(Notification.permission === 'granted'); })
+      .then(() => { if (current) setEnabled(isNativeAndroid || Notification.permission === 'granted'); })
       .catch(() => { if (current) setError('Notifications paused. Tap to retry.'); })
       .finally(() => { if (current) setBusy(false); });
     return () => { current = false; };
-  }, [userProfile?.uid, userProfile?.role, userProfile?.active]);
-  if (!notificationsConfigured || !userProfile || !('Notification' in window)) return null;
+  }, [isNativeAndroid, userProfile?.uid, userProfile?.role, userProfile?.active]);
+  if (!notificationsConfigured || !userProfile || (!isNativeAndroid && !('Notification' in window))) return null;
   const toggle = async () => {
     setBusy(true); setError('');
     try {

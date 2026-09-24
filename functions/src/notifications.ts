@@ -36,7 +36,9 @@ function text(value: unknown, max: number): string {
 }
 
 // A token has one owner, including on shared browsers. Serialize topic changes using a short lease.
-async function syncDevice(uid: string, token: string, remove: boolean, existingOnly = false) {
+type DevicePlatform = 'web' | 'android';
+
+async function syncDevice(uid: string, token: string, remove: boolean, platform: DevicePlatform = 'web', existingOnly = false) {
   const db = getFirestore();
   const id = hash(token);
   const ownerRef = db.doc(`notificationTokenOwners/${id}`);
@@ -88,7 +90,7 @@ async function syncDevice(uid: string, token: string, remove: boolean, existingO
         transaction.delete(devices(uid).doc(id));
       }
       else {
-        transaction.set(devices(uid).doc(id), { token, active: true, platform: 'web', topics, updatedAt: FieldValue.serverTimestamp() });
+        transaction.set(devices(uid).doc(id), { token, active: true, platform, topics, updatedAt: FieldValue.serverTimestamp() });
         transaction.set(ownerRef, { uid, leaseUntil: 0 });
       }
     });
@@ -105,9 +107,10 @@ async function syncDevice(uid: string, token: string, remove: boolean, existingO
 
 export const syncNotificationDevice = onCall(options, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to enable notifications.');
-  fields(request.data, ['token', 'remove']);
+  fields(request.data, ['token', 'remove', 'platform']);
   const token = text(request.data.token, 4096);
   if (token.length < 20 || /\s/.test(token) || typeof request.data.remove !== 'boolean') throw new HttpsError('invalid-argument', 'Invalid device registration.');
+  const platform: DevicePlatform = request.data.platform === undefined ? 'web' : request.data.platform === 'android' ? 'android' : request.data.platform === 'web' ? 'web' : (() => { throw new HttpsError('invalid-argument', 'Invalid notification platform.'); })();
   const uid = request.auth.uid;
   if (!request.data.remove) {
     const profile = await profileFor(uid);
@@ -117,13 +120,13 @@ export const syncNotificationDevice = onCall(options, async request => {
     if (currentDevice?.data().active === true) {
       const topics = await membership(uid);
       const owner = (await getFirestore().doc(`notificationTokenOwners/${hash(token)}`).get()).data();
-      if (owner?.uid === uid && !owner.leaseUntil && JSON.stringify(currentDevice.data().topics) === JSON.stringify(topics)) {
+      if (owner?.uid === uid && !owner.leaseUntil && currentDevice.data().platform === platform && JSON.stringify(currentDevice.data().topics) === JSON.stringify(topics)) {
         return { topics }; // No topic churn or writes on an unchanged installation.
       }
     }
     if (existing.size >= 10 && !existing.docs.some(doc => doc.id === hash(token))) throw new HttpsError('resource-exhausted', 'Ten devices are already registered for this account.');
   }
-  return { topics: await syncDevice(uid, token, request.data.remove) };
+  return { topics: await syncDevice(uid, token, request.data.remove, platform) };
 });
 
 async function refreshDevices(uid: string) {
@@ -131,7 +134,7 @@ async function refreshDevices(uid: string) {
   const rows = await devices(uid).get();
   const active = (await profileFor(uid)).active === true;
   for (const device of rows.docs) {
-    try { await syncDevice(uid, device.data().token, !active, true); }
+      try { await syncDevice(uid, device.data().token, !active, device.data().platform === 'android' ? 'android' : 'web', true); }
     catch (error) {
       if (!(error instanceof HttpsError) || error.code !== 'not-found') throw error;
       // Permanently expired devices have already been removed; do not retry them.
@@ -178,14 +181,23 @@ async function sendPrivate(uid: string, data: Record<string, string>) {
   const registrations = await devices(uid).where('active', '==', true).get();
   for (let start = 0; start < registrations.size; start += 500) {
     const chunk = registrations.docs.slice(start, start + 500);
-    const result = await getMessaging().sendEachForMulticast({
-      tokens: chunk.map(doc => doc.data().token), data: { ...data, recipientUid: uid },
-      webpush: { headers: { TTL: '3600', Urgency: 'normal' } }
-    });
-    for (let i = 0; i < result.responses.length; i++) {
-      if (permanent(result.responses[i].error?.code)) await removeInvalid(chunk[i].ref, uid);
-    }
-    if (result.failureCount) logger.warn('Some notification devices could not be reached.', { failed: result.failureCount });
+    const send = async (deviceRows: typeof chunk, native: boolean) => {
+      if (!deviceRows.length) return;
+      const result = await getMessaging().sendEachForMulticast({
+        tokens: deviceRows.map(doc => doc.data().token),
+        data: { ...data, recipientUid: uid },
+        ...(native ? {
+          notification: { title: data.title, body: data.body },
+          android: { priority: 'high' as const }
+        } : { webpush: { headers: { TTL: '3600', Urgency: 'normal' } } })
+      });
+      for (let i = 0; i < result.responses.length; i++) {
+        if (permanent(result.responses[i].error?.code)) await removeInvalid(deviceRows[i].ref, uid);
+      }
+      if (result.failureCount) logger.warn('Some notification devices could not be reached.', { failed: result.failureCount, native });
+    };
+    await send(chunk.filter(doc => doc.data().platform === 'android'), true);
+    await send(chunk.filter(doc => doc.data().platform !== 'android'), false);
   }
 }
 async function customerRecipients(customerId: string): Promise<string[]> {
