@@ -13,6 +13,7 @@ import {
   getPayments,
   getPaymentsByCustomerId,
   getPaymentTermsForTier,
+  updateCustomerBranch,
   updateCustomerRecord
 } from '../services/firestoreService';
 import type { AppSettings, Customer, CustomerFormData, CustomerTier, Invoice, Payment } from '../types';
@@ -69,6 +70,12 @@ const Customers = () => {
   const [searchCustomers, setSearchCustomers] = useState<Customer[] | null>(null);
   const [loadingSearchCustomers, setLoadingSearchCustomers] = useState(false);
   const [showBranchPendingCustomers, setShowBranchPendingCustomers] = useState(false);
+  const [showBranchChange, setShowBranchChange] = useState(false);
+  const [branchChangeCustomers, setBranchChangeCustomers] = useState<Customer[]>([]);
+  const [branchChangeDataLoaded, setBranchChangeDataLoaded] = useState(false);
+  const [selectedBranchChangeCustomerId, setSelectedBranchChangeCustomerId] = useState('');
+  const [selectedBranchChangeValue, setSelectedBranchChangeValue] = useState<'SINDHANUR' | 'MASKI'>('SINDHANUR');
+  const [savingBranchChange, setSavingBranchChange] = useState(false);
   const [branchPendingDataLoaded, setBranchPendingDataLoaded] = useState(false);
   const [loadingBranchPendingCustomers, setLoadingBranchPendingCustomers] = useState(false);
   const [showLedger, setShowLedger] = useState(false);
@@ -197,6 +204,52 @@ const Customers = () => {
       setError(err instanceof Error ? err.message : 'Unable to load customers without a branch.');
     } finally {
       setLoadingBranchPendingCustomers(false);
+    }
+  };
+
+  const handleToggleBranchChange = async () => {
+    if (showBranchChange) {
+      setShowBranchChange(false);
+      return;
+    }
+
+    setShowBranchChange(true);
+    if (branchChangeDataLoaded) return;
+
+    try {
+      setLoadingBranchPendingCustomers(true);
+      setError('');
+      setBranchChangeCustomers(await getCustomers());
+      setBranchChangeDataLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load customers for branch change.');
+    } finally {
+      setLoadingBranchPendingCustomers(false);
+    }
+  };
+
+  const handleChangeCustomerBranch = async () => {
+    const customer = branchChangeCustomers.find((row) => row.id === selectedBranchChangeCustomerId);
+    if (!customer) {
+      setError('Select a customer first.');
+      return;
+    }
+
+    try {
+      setSavingBranchChange(true);
+      setError('');
+      await updateCustomerBranch(customer.id, selectedBranchChangeValue);
+      const applyBranch = (row: Customer) => row.id === customer.id ? { ...row, branchId: selectedBranchChangeValue } : row;
+      setBranchChangeCustomers((current) => current.map(applyBranch));
+      setBranchPendingCustomers((current) => current.filter((row) => row.id !== customer.id));
+      setCustomers((current) => current.map(applyBranch));
+      setSearchCustomers((current) => current ? current.map(applyBranch) : current);
+      setMessage(`${customer.name} is now assigned to ${selectedBranchChangeValue}.`);
+      setSelectedBranchChangeCustomerId('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to change customer branch.');
+    } finally {
+      setSavingBranchChange(false);
     }
   };
 
@@ -760,8 +813,49 @@ const Customers = () => {
                   <div style={{ color: '#D7DEEA', fontSize: 12 }}>
                     Assign SINDHANUR or MASKI. A customer disappears from this list immediately after saving.
                   </div>
-                  <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{branchPendingCustomers.length} customer(s)</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ color: '#FFFFFF', fontWeight: 900 }}>{branchPendingCustomers.length} customer(s)</div>
+                    <button
+                      type="button"
+                      style={{ ...buttonStyle, background: '#E8EDF4', color: '#11185A', padding: '7px 10px', fontSize: 11 }}
+                      onClick={() => void handleToggleBranchChange()}
+                      disabled={loadingBranchPendingCustomers}
+                    >
+                      {showBranchChange ? 'Hide Change Branch' : 'Change Branch'}
+                    </button>
+                  </div>
                 </div>
+
+                {showBranchChange ? <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 12, padding: 12, marginBottom: 12 }}>
+                  <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 10 }}>Changes the customer assignment for staff follow-up. It does not change invoices, payments, or Collection Health.</div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end' }}>
+                    <label style={{ ...labelStyle, flex: '1 1 240px' }}>
+                      Customer
+                      <select
+                        style={inputStyle}
+                        value={selectedBranchChangeCustomerId}
+                        onChange={(event) => {
+                          const customer = branchChangeCustomers.find((row) => row.id === event.target.value);
+                          setSelectedBranchChangeCustomerId(event.target.value);
+                          setSelectedBranchChangeValue(customer?.branchId ?? 'SINDHANUR');
+                        }}
+                      >
+                        <option value="">Select customer</option>
+                        {branchChangeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{formatCustomerSelectLabel(customer)}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ ...labelStyle, flex: '0 1 150px' }}>
+                      New branch
+                      <select style={inputStyle} value={selectedBranchChangeValue} onChange={(event) => setSelectedBranchChangeValue(event.target.value as 'SINDHANUR' | 'MASKI')}>
+                        <option value="SINDHANUR">SINDHANUR</option>
+                        <option value="MASKI">MASKI</option>
+                      </select>
+                    </label>
+                    <button type="button" style={{ ...buttonStyle, background: '#D4AF37', color: '#11185A' }} onClick={() => void handleChangeCustomerBranch()} disabled={savingBranchChange || !selectedBranchChangeCustomerId}>
+                      {savingBranchChange ? 'Saving...' : 'Save Branch'}
+                    </button>
+                  </div>
+                </div> : null}
 
                 <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
                   <table style={compactTableStyle}>

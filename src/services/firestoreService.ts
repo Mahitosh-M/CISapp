@@ -1375,6 +1375,16 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
 
 };
 
+// Customer assignment controls staff workload. Invoice shop remains the source of truth
+// for branch financial analytics, so this deliberately does not touch invoices or payments.
+export const updateCustomerBranch = async (customerId: string, branchId: 'SINDHANUR' | 'MASKI') => {
+  await updateDoc(doc(db, CUSTOMERS, customerId), {
+    branchId,
+    updatedAt: nowIso()
+  });
+  clearFirestoreSessionCache();
+};
+
 export const syncCustomerPartnerLevelsFromFirestore = async () => {
   const [customerRows, invoiceRows, paymentRows, appSettings] = await Promise.all([
     getCustomers(),
