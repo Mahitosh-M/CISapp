@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { BarChart3, CircleDollarSign, Lightbulb, PieChart as PieChartIcon, Scale } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
 import SectionTileNav from '../components/SectionTileNav';
@@ -15,6 +15,7 @@ import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
+import { buildCollectionHealth, getCollectionInsight, getMedian, type CollectionAgeBucket } from '../utils/collectionHealth';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import {
   buildShopContributionRows,
@@ -26,7 +27,7 @@ import {
 } from '../utils/shops';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
-type AnalyticsSection = 'overview' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
+type AnalyticsSection = 'overview' | 'collection' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
 
 interface ShopPieDatum {
   shopId: string;
@@ -38,6 +39,7 @@ interface ShopPieDatum {
 
 const analyticsSections = [
   { id: 'overview', label: 'Performance Overview', icon: BarChart3 },
+  { id: 'collection', label: 'Collection Health', icon: CircleDollarSign },
   { id: 'breakeven', label: 'Breakeven Analysis', icon: Scale },
   { id: 'contribution', label: 'Customer Contribution', icon: PieChartIcon },
   { id: 'insights', label: 'Business Insights', icon: Lightbulb },
@@ -108,6 +110,22 @@ const isCompleteMonthRange = (fromDate: string, toDate: string) => {
   return end.getDate() === monthEnd;
 };
 
+const getCollectionTrendMonths = (toDate: string, count = 6) => {
+  const end = parseDateKey(toDate);
+  if (!end) return [];
+  return Array.from({ length: count }, (_, index) => {
+    const monthDate = new Date(end.getFullYear(), end.getMonth() - (count - index - 1), 1);
+    const month = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
+    const monthEnd = formatDateKey(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
+    return {
+      month,
+      fromDate: `${month}-01`,
+      toDate: month === toDate.slice(0, 7) ? toDate : monthEnd,
+      label: formatMonthLabel(month)
+    };
+  });
+};
+
 const getSignalColor = (tone: 'good' | 'watch' | 'risk') => {
   if (tone === 'good') return '#1B7F3A';
   if (tone === 'watch') return '#B7791F';
@@ -128,6 +146,10 @@ const Analytics = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [monthlySnapshots, setMonthlySnapshots] = useState<BusinessMonthlySnapshot[]>([]);
+  const [collectionInvoices, setCollectionInvoices] = useState<Invoice[]>([]);
+  const [collectionPayments, setCollectionPayments] = useState<Payment[]>([]);
+  const [collectionHistoryKey, setCollectionHistoryKey] = useState('');
+  const [collectionLoading, setCollectionLoading] = useState(false);
   const [snapshotRangeLoaded, setSnapshotRangeLoaded] = useState('');
   const [loadedDetailRange, setLoadedDetailRange] = useState('');
   const [loading, setLoading] = useState(true);
@@ -191,10 +213,56 @@ const Analytics = () => {
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [activeFromDate, activeRangeKey, activeSection, activeToDate, analyticsScope, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
+
+  useEffect(() => {
+    if (activeSection !== 'collection' || collectionHistoryKey === activeToDate) return;
+    let active = true;
+    setCollectionLoading(true);
+    setError('');
+    // Collection health needs payment history before the selected period to reconstruct
+    // the opening balance. It runs only while this dedicated section is open.
+    Promise.all([getInvoices({ toDate: activeToDate }), getPayments({ toDate: activeToDate })])
+      .then(([invoiceRows, paymentRows]) => {
+        if (!active) return;
+        setCollectionInvoices(invoiceRows);
+        setCollectionPayments(paymentRows);
+        setCollectionHistoryKey(activeToDate);
+      })
+      .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load collection history.'))
+      .finally(() => active && setCollectionLoading(false));
+    return () => { active = false; };
+  }, [activeSection, activeToDate, collectionHistoryKey]);
   const allocatedFixedCost = useMemo(
     () => selectedDateKeys.reduce((sum, date) => sum + getDailyFixedCost(settings.fixedMonthlyCosts, date), 0),
     [selectedDateKeys, settings.fixedMonthlyCosts]
   );
+
+  const collectionHealth = useMemo(() => buildCollectionHealth(
+    collectionInvoices,
+    collectionPayments,
+    activeFromDate,
+    activeToDate,
+    settings,
+    analyticsScope
+  ), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
+
+  const collectionTrendRows = useMemo(() => getCollectionTrendMonths(activeToDate).map((month) => {
+    const all = buildCollectionHealth(collectionInvoices, collectionPayments, month.fromDate, month.toDate, settings, 'overall');
+    const ashoka = all.byShop.SHOP_A;
+    const smpa = all.byShop.SHOP_S;
+    return {
+      ...month,
+      due: analyticsScope === 'overall' ? all.period.totalDue : all.byShop[analyticsScope].totalDue,
+      collected: analyticsScope === 'overall' ? all.period.dueCollectedCash : all.byShop[analyticsScope].dueCollectedCash,
+      closingOverdue: analyticsScope === 'overall' ? all.period.closingOverdue : all.byShop[analyticsScope].closingOverdue,
+      ashokaDue: ashoka.totalDue,
+      ashokaCollected: ashoka.dueCollectedCash,
+      ashokaOverdue: ashoka.closingOverdue,
+      smpaDue: smpa.totalDue,
+      smpaCollected: smpa.dueCollectedCash,
+      smpaOverdue: smpa.closingOverdue
+    };
+  }), [activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
 
   const filteredInvoices = useMemo(() => {
     const dateRows = getBusinessInvoices(invoices).filter((invoice) => isDateInRange(invoice.date, activeFromDate, activeToDate));
@@ -770,14 +838,14 @@ const Analytics = () => {
               <div style={{ color: '#D7DEEA', marginTop: 6 }}>{formatPercent(analysis.margin)} margin</div>
             </div>
             <div style={cardStyle}>
-              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Collected</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Collection-to-Sales</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{formatMoney(analysis.collected)}</div>
-              <div style={{ color: '#D7DEEA', marginTop: 6 }}>{formatPercent(analysis.collectionRate)} of sales</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>{formatPercent(analysis.collectionRate)}; payment date compared with invoice date</div>
             </div>
             <div style={cardStyle}>
-              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Collection Gap</div>
+              <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Sales less receipts</div>
               <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: analysis.outstanding > 0 ? '#B42318' : '#1B7F3A' }}>{formatMoney(analysis.outstanding)}</div>
-              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Sales less receipts in range</div>
+              <div style={{ color: '#D7DEEA', marginTop: 6 }}>Cash-flow comparison; older invoices may be paid here</div>
             </div>
             {branchContribution ? <div style={cardStyle}>
               <div style={{ color: '#D7DEEA', fontWeight: 800 }}>Sales Contribution</div>
@@ -802,6 +870,78 @@ const Analytics = () => {
             </div>
           ) : null}
         </> : null}
+
+          {activeSection === 'collection' ? <>
+            {collectionLoading ? <div style={{ ...cardStyle, marginBottom: 18, color: '#D7DEEA', fontWeight: 800 }}>Loading invoice allocation history…</div> : <>
+              <div style={gridStyle}>
+                {[
+                  ['Total Due for Collection', collectionHealth.period.totalDue, '#D4AF37'],
+                  ['Due Actually Collected', collectionHealth.period.dueCollectedCash, '#1B7F3A'],
+                  ['Uncollected Due', collectionHealth.period.uncollectedDue, '#B42318'],
+                  ['Closing Overdue', collectionHealth.period.closingOverdue, '#B42318']
+                ].map(([label, value, color]) => (
+                  <div key={String(label)} style={{ ...cardStyle, borderTop: `4px solid ${color}` }}>
+                    <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>{label}</div>
+                    <div style={{ color: String(color), fontSize: 25, fontWeight: 900, marginTop: 7 }}>{formatMoney(Number(value))}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ ...cardStyle, marginBottom: 18 }}>
+                <div style={{ color: '#D4AF37', fontWeight: 900 }}>Collection position</div>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0, 1fr))', gap: 10, marginTop: 12 }}>
+                  {[
+                    ['Opening overdue', collectionHealth.period.openingOverdue],
+                    ['Became due', collectionHealth.period.becameDue],
+                    ['Old overdue settled', collectionHealth.period.oldOverdueRecovered],
+                    ['Fresh overdue created', collectionHealth.period.freshOverdue]
+                  ].map(([label, value]) => <div key={String(label)} style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12 }}><div style={{ color: '#D7DEEA', fontSize: 11, fontWeight: 800 }}>{label}</div><div style={{ fontWeight: 900, marginTop: 5 }}>{formatMoney(Number(value))}</div></div>)}
+                </div>
+                {collectionHealth.period.dueSettledDiscount > 0 ? <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 12 }}>Approved cash discounts settled {formatMoney(collectionHealth.period.dueSettledDiscount)} of due debt. This is excluded from cash collected.</div> : null}
+              </div>
+
+              {analyticsScope === 'overall' ? <div style={{ ...cardStyle, marginBottom: 18, overflowX: 'auto' }}>
+                <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Branch comparison by invoice shop</div>
+                <table style={tableStyle}><thead><tr>{['Branch', 'Total due', 'Due collected', 'Uncollected', 'Closing overdue'].map((header) => <th key={header} style={{ ...cellStyle, textAlign: 'left', background: 'var(--role-card-subtle)' }}>{header}</th>)}</tr></thead><tbody>{SHOP_OPTIONS.map((shop) => {
+                  const row = collectionHealth.byShop[shop.id];
+                  return <tr key={shop.id}><td style={cellStyle}><strong>{shop.name}</strong></td><td style={cellStyle}>{formatMoney(row.totalDue)}</td><td style={{ ...cellStyle, color: '#1B7F3A', fontWeight: 900 }}>{formatMoney(row.dueCollectedCash)}</td><td style={{ ...cellStyle, color: '#B42318', fontWeight: 900 }}>{formatMoney(row.uncollectedDue)}</td><td style={{ ...cellStyle, color: '#B42318', fontWeight: 900 }}>{formatMoney(row.closingOverdue)}</td></tr>;
+                })}</tbody></table>
+              </div> : null}
+
+              <div style={gridStyle}>
+                <div style={cardStyle}>
+                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Due vs collected trend</div>
+                  <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><BarChart data={collectionTrendRows}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashokaDue" name="ASHOKA due" fill="#D4AF37" radius={[4, 4, 0, 0]} /><Bar dataKey="ashokaCollected" name="ASHOKA collected" fill="#1B7F3A" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaDue" name="SMPA due" fill="#56CCF2" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaCollected" name="SMPA collected" fill="#7C3AED" radius={[4, 4, 0, 0]} /></> : <><Bar dataKey="due" name="Due" fill="#D4AF37" radius={[5, 5, 0, 0]} /><Bar dataKey="collected" name="Collected" fill="#1B7F3A" radius={[5, 5, 0, 0]} /></>}</BarChart></ResponsiveContainer>
+                </div>
+                <div style={cardStyle}>
+                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Closing overdue trend</div>
+                  <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><LineChart data={collectionTrendRows}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Line type="monotone" dataKey="ashokaOverdue" name="ASHOKA overdue" stroke="#D4AF37" strokeWidth={3} dot /><Line type="monotone" dataKey="smpaOverdue" name="SMPA overdue" stroke="#56CCF2" strokeWidth={3} dot /></> : <Line type="monotone" dataKey="closingOverdue" name="Closing overdue" stroke="#EB5757" strokeWidth={3} dot />}</LineChart></ResponsiveContainer>
+                </div>
+              </div>
+
+              <div style={gridStyle}>
+                <div style={cardStyle}>
+                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Overdue ageing</div>
+                  <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><BarChart data={(['1-7', '8-15', '16-30', '31-60', '60+'] as CollectionAgeBucket[]).map((bucket) => ({ bucket, ashoka: collectionHealth.ageingByShop.SHOP_A[bucket], smpa: collectionHealth.ageingByShop.SHOP_S[bucket], selected: analyticsScope === 'overall' ? 0 : collectionHealth.ageingByShop[analyticsScope][bucket] }))}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis dataKey="bucket" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashoka" name="ASHOKA" fill="#D4AF37" /><Bar dataKey="smpa" name="SMPA" fill="#56CCF2" /></> : <Bar dataKey="selected" name={getShopName(analyticsScope)} fill="#EB5757" />}</BarChart></ResponsiveContainer>
+                </div>
+                <div style={cardStyle}>
+                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Top overdue customers</div>
+                  {collectionHealth.topCustomers.length === 0 ? <div style={{ minHeight: 240, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No overdue at the selected period end.</div> : <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><BarChart layout="vertical" data={collectionHealth.topCustomers}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis type="number" tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis type="category" dataKey="customerName" width={isMobile ? 86 : 118} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} /><Bar dataKey="overdueAmount" name="Overdue" fill="#EB5757" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>}
+                </div>
+              </div>
+
+              <div style={{ ...cardStyle, marginBottom: 18 }}>
+                <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Collection diagnostics</div>
+                <div style={{ display: 'grid', gap: 9 }}>{SHOP_OPTIONS.filter((shop) => analyticsScope === 'overall' || analyticsScope === shop.id).map((shop) => <div key={shop.id} style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12, color: '#FFFFFF' }}>{getCollectionInsight(shop.id, collectionHealth.byShop[shop.id])}</div>)}
+                  {collectionHealth.topCustomers.length >= 3 && collectionHealth.period.closingOverdue > 0 ? <div style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12 }}>Top 3 customers account for {formatPercent((collectionHealth.topCustomers.slice(0, 3).reduce((sum, row) => sum + row.overdueAmount, 0) / collectionHealth.period.closingOverdue) * 100)} of closing overdue.</div> : null}
+                  {getMedian(collectionHealth.period.paymentDelays) !== undefined ? (() => {
+                    const medianDelay = Math.round(getMedian(collectionHealth.period.paymentDelays) ?? 0);
+                    return <div style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12 }}>Median settlement timing for invoices fully settled in this period: {medianDelay >= 0 ? `${medianDelay} days after` : `${Math.abs(medianDelay)} days before`} the due date.</div>;
+                  })() : null}
+                </div>
+              </div>
+            </>}
+          </> : null}
 
           {activeSection === 'breakeven' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
