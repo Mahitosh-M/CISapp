@@ -16,6 +16,7 @@ import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
 import { buildCollectionHealth, getCollectionInsight, getMedian, type CollectionAgeBucket } from '../utils/collectionHealth';
+import { buildCreditCapitalImpact, CAPITAL_RATE } from '../utils/creditCapitalImpact';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import {
   buildShopContributionRows,
@@ -27,7 +28,7 @@ import {
 } from '../utils/shops';
 
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
-type AnalyticsSection = 'overview' | 'collection' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
+type AnalyticsSection = 'overview' | 'collection' | 'capital' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
 
 interface ShopPieDatum {
   shopId: string;
@@ -40,6 +41,7 @@ interface ShopPieDatum {
 const analyticsSections = [
   { id: 'overview', label: 'Performance Overview', icon: BarChart3 },
   { id: 'collection', label: 'Collection Health', icon: CircleDollarSign },
+  { id: 'capital', label: 'Credit Capital Impact', icon: CircleDollarSign },
   { id: 'breakeven', label: 'Breakeven Analysis', icon: Scale },
   { id: 'contribution', label: 'Customer Contribution', icon: PieChartIcon },
   { id: 'insights', label: 'Business Insights', icon: Lightbulb },
@@ -215,7 +217,7 @@ const Analytics = () => {
   }, [activeFromDate, activeRangeKey, activeSection, activeToDate, analyticsScope, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
 
   useEffect(() => {
-    if (activeSection !== 'collection' || collectionHistoryKey === activeToDate) return;
+    if (!['collection', 'capital'].includes(activeSection ?? '') || collectionHistoryKey === activeToDate) return;
     let active = true;
     setCollectionLoading(true);
     setError('');
@@ -245,6 +247,8 @@ const Analytics = () => {
     settings,
     analyticsScope
   ), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
+
+  const capitalImpact = useMemo(() => buildCreditCapitalImpact(collectionInvoices, collectionPayments, activeFromDate, activeToDate, settings, analyticsScope), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
 
   const collectionTrendRows = useMemo(() => getCollectionTrendMonths(activeToDate).map((month) => {
     const all = buildCollectionHealth(collectionInvoices, collectionPayments, month.fromDate, month.toDate, settings, 'overall');
@@ -943,6 +947,13 @@ const Analytics = () => {
             </>}
           </> : null}
 
+          {activeSection === 'capital' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
+            <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>Credit & Collection Capital Impact</div>
+            <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 14 }}>Estimated working-capital cost uses a {Math.round(CAPITAL_RATE * 100)}% annual management benchmark. Opportunity cost is not estimated because turnover and reinvestment data are not available.</div>
+            <div style={gridStyle}>{[['Credit receivables',capitalImpact.receivables],['Overdue receivables',capitalImpact.overdue],['Estimated capital cost',capitalImpact.capitalCost],['Calculated profit',capitalImpact.profit],['Credit-adjusted contribution',capitalImpact.profit-capitalImpact.capitalCost]].map(([label,value])=><div key={String(label)} style={cardStyle}><div style={{color:'#D7DEEA',fontSize:12,fontWeight:800}}>{label}</div><div style={{fontSize:24,fontWeight:900,marginTop:6,color:String(label).includes('Overdue')||String(label).includes('cost')?'#FCA5A5':'#FFFFFF'}}>{formatMoney(Number(value))}</div></div>)}</div>
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:16}}><div style={{background:'var(--role-card-subtle)',borderRadius:10,padding:12}}><strong>Average days outstanding</strong><div style={{fontSize:22,fontWeight:900,marginTop:5}}>{Math.round(capitalImpact.averageDays)} days</div></div><div style={{background:'var(--role-card-subtle)',borderRadius:10,padding:12}}><strong>Overdue percentage</strong><div style={{fontSize:22,fontWeight:900,marginTop:5}}>{capitalImpact.receivables?formatPercent(capitalImpact.overdue/capitalImpact.receivables*100):'—'}</div></div></div>
+            <div style={{overflowX:'auto'}}><table style={tableStyle}><thead><tr>{['Customer','Outstanding','Overdue','Days outstanding','Overdue days','Calculated profit','Capital cost','Credit impact %'].map(h=><th key={h} style={{...cellStyle,background:'var(--role-card-subtle)',textAlign:'left'}}>{h}</th>)}</tr></thead><tbody>{capitalImpact.rows.slice(0,20).map(r=>{const pct=r.profit>0?r.capitalCost/r.profit*100:undefined;return <tr key={r.customerId}><td style={cellStyle}><strong>{r.customerName}</strong></td><td style={cellStyle}>{formatMoney(r.outstanding)}</td><td style={cellStyle}>{formatMoney(r.overdue)}</td><td style={cellStyle}>{r.days}</td><td style={cellStyle}>{r.overdueDays}</td><td style={cellStyle}>{formatMoney(r.profit)}</td><td style={cellStyle}>{formatMoney(r.capitalCost)}</td><td style={cellStyle}>{pct===undefined?'N/A':formatPercent(pct)}</td></tr>})}{capitalImpact.rows.length===0?<tr><td style={cellStyle} colSpan={8}>No credit receivables for this period.</td></tr>:null}</tbody></table></div>
+          </div> : null}
           {activeSection === 'breakeven' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
@@ -1134,3 +1145,4 @@ const Analytics = () => {
 };
 
 export default Analytics;
+
