@@ -7,7 +7,6 @@ import { logger } from 'firebase-functions';
 
 initializeApp();
 
-export { syncNotificationDevice, notificationUserChanged, notificationCustomerGroupChanged, notifyInvoiceCreated, notifyPaymentCreated, sendNotificationBroadcast, notifyStaffOfCustomerOrder } from './notifications';
 
 const db = getFirestore();
 const adminAuth = getAuth();

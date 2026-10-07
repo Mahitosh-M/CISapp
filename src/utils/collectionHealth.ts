@@ -1,3 +1,4 @@
+import { isValidBonusInvoice } from './bonusPc';
 import type { AppSettings, Invoice, Payment, ShopId } from '../types';
 import { getBusinessInvoices } from './openingBalance';
 import { getAmountAppliedToInvoice, getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
@@ -202,4 +203,28 @@ export const getCollectionInsight = (shopId: ShopId, period: CollectionHealthPer
   if (netChange > 0) return `${shop} closing overdue increased by ₹${Math.round(netChange).toLocaleString('en-IN')} in this period.`;
   if (netChange < 0) return `${shop} closing overdue reduced by ₹${Math.round(Math.abs(netChange)).toLocaleString('en-IN')} in this period.`;
   return `${shop} closing overdue was unchanged in this period.`;
+};
+
+export const buildSalesCollectionSummary = (
+  invoices: Invoice[], payments: Payment[], fromDate: string, toDate: string,
+  scope: AnalyticsShopScope = 'overall'
+) => {
+  const selectedInvoices = getBusinessInvoices(invoices).filter((invoice) =>
+    isValidBonusInvoice(invoice) && invoice.date >= fromDate && invoice.date <= toDate
+    && (scope === 'overall' || (isBranchAwareRecord(invoice) && invoice.shopId === scope))
+  );
+  let sales = 0;
+  let collected = 0;
+  let discounts = 0;
+  selectedInvoices.forEach((invoice) => {
+    sales += Math.max(0, invoice.totalSales);
+    const parts = paymentsForInvoice(invoice, payments, toDate);
+    collected += parts.reduce((sum, part) => sum + part.cash, 0);
+    discounts += parts.reduce((sum, part) => sum + part.discount, 0);
+  });
+  return {
+    sales, collected, discounts,
+    outstanding: Math.max(0, sales - collected - discounts),
+    collectionPercent: sales > 0 ? collected / sales * 100 : undefined
+  };
 };

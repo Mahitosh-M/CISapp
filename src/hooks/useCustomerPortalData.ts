@@ -1,3 +1,4 @@
+import { withCurrentCustomerNames } from '../utils/customerLabels';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -113,8 +114,8 @@ export const useCustomerPortalData = () => {
       ]);
       pcBalanceReadAtRef.current = Date.now();
 
-      const scopedInvoices = filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
-      const scopedPayments = filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName });
+      const scopedInvoices = withCurrentCustomerNames(filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName }), linkedCustomer ? [linkedCustomer] : []);
+      const scopedPayments = withCurrentCustomerNames(filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName }), linkedCustomer ? [linkedCustomer] : []);
       const businessInvoices = getBusinessInvoices(scopedInvoices);
       const intelligenceResult = linkedCustomer ? buildCustomerScores([linkedCustomer], businessInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
       const customerWithIntelligenceTier = linkedCustomer && intelligenceResult ? { ...linkedCustomer, tier: intelligenceResult.tier } : linkedCustomer;

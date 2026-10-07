@@ -1,3 +1,4 @@
+import SalesCollectionDonut from '../components/SalesCollectionDonut';
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { BarChart3, CircleDollarSign, Lightbulb, PieChart as PieChartIcon, Scale } from 'lucide-react';
@@ -15,7 +16,7 @@ import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
-import { buildCollectionHealth, getCollectionInsight, getMedian, type CollectionAgeBucket } from '../utils/collectionHealth';
+import { buildCollectionHealth, buildSalesCollectionSummary, getCollectionInsight, getMedian, type CollectionAgeBucket } from '../utils/collectionHealth';
 import { buildCreditCapitalImpact, CAPITAL_RATE } from '../utils/creditCapitalImpact';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import {
@@ -264,6 +265,10 @@ const Analytics = () => {
     settings,
     analyticsScope
   ), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
+
+  const salesCollection = useMemo(() => buildSalesCollectionSummary(
+    collectionInvoices, collectionPayments, activeFromDate, activeToDate, analyticsScope
+  ), [collectionInvoices, collectionPayments, activeFromDate, activeToDate, analyticsScope]);
 
   const capitalImpact = useMemo(() => buildCreditCapitalImpact(collectionInvoices, collectionPayments, activeFromDate, activeToDate, settings, analyticsScope), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
   const capitalRiskSplit = useMemo(() => {
@@ -894,7 +899,7 @@ const Analytics = () => {
         </div>
       </div>
 
-      <SectionTileNav items={analyticsSections} activeId={activeSection} onSelect={setActiveSection} singleRow />
+      <SectionTileNav items={analyticsSections} activeId={activeSection} onSelect={(section) => setActiveSection((current) => current === section ? null : section)} singleRow />
 
       {activeSection === 'overview' ? <>
           <div style={gridStyle}>
@@ -996,8 +1001,9 @@ const Analytics = () => {
                   <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart data={(['1-7', '8-15', '16-30', '31-60', '60+'] as CollectionAgeBucket[]).map((bucket) => ({ bucket, ashoka: collectionHealth.ageingByShop.SHOP_A[bucket], smpa: collectionHealth.ageingByShop.SHOP_S[bucket], selected: analyticsScope === 'overall' ? 0 : collectionHealth.ageingByShop[analyticsScope][bucket] }))}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="bucket" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashoka" name="ASHOKA" fill="url(#analytics-gold)" /><Bar dataKey="smpa" name="SMPA" fill="url(#analytics-blue)" /></> : <Bar dataKey="selected" name={getShopName(analyticsScope)} fill="url(#analytics-red)" />}</BarChart></ResponsiveContainer>
                 </div>
                 <div style={cardStyle}>
-                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Top overdue customers</div>
-                  {collectionHealth.topCustomers.length === 0 ? <div style={{ minHeight: 240, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No overdue at the selected period end.</div> : <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart layout="vertical" data={collectionHealth.topCustomers}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis type="number" tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis type="category" dataKey="customerName" width={isMobile ? 86 : 118} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} /><Bar dataKey="overdueAmount" name="Overdue" fill="url(#analytics-red)" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>}
+                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>Actual sales vs collected</div>
+                  <div style={{ color: '#D7DEEA', fontSize: 12, lineHeight: 1.45, marginBottom: 12 }}>Sales invoiced in the selected period and payments allocated to those invoices by {formatDate(activeToDate)}. Includes applied advances; excludes collections for older invoices.</div>
+                  <SalesCollectionDonut key={`${activeFromDate}:${activeToDate}:${analyticsScope}`} sales={salesCollection.sales} collected={salesCollection.collected} outstanding={salesCollection.outstanding} discounts={salesCollection.discounts} />
                 </div>
               </div>
 

@@ -1351,6 +1351,7 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
       ...customerPayload,
       updatedAt: timestamp
     });
+    clearFirestoreSessionCache();
     await syncCustomerFinancialSummary(customerId);
     return;
   }
@@ -1370,8 +1371,8 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
     }
   });
 
-  await syncCustomerFinancialSummary(customerId);
   clearFirestoreSessionCache();
+  await syncCustomerFinancialSummary(customerId);
 
 };
 

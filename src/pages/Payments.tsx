@@ -18,7 +18,7 @@ import {
 } from '../services/firestoreService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { Customer, Invoice, Payment, PaymentFormData, ShopId } from '../types';
-import { formatCustomerSelectLabel } from '../utils/customerLabels';
+import { formatCustomerSelectLabel, withCurrentCustomerNames } from '../utils/customerLabels';
 import { getPaymentNoteWithoutSplitMarker, groupPaymentTransactions } from '../utils/customerLedger';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatMoney, formatShortDate } from '../utils/formatters';
@@ -61,8 +61,10 @@ const createSplitPaymentGroupId = () => {
 
 const Payments = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [storedInvoices, setInvoices] = useState<Invoice[]>([]);
+  const invoices = useMemo(() => withCurrentCustomerNames(storedInvoices, customers), [storedInvoices, customers]);
+  const [storedPayments, setPayments] = useState<Payment[]>([]);
+  const payments = useMemo(() => withCurrentCustomerNames(storedPayments, customers), [storedPayments, customers]);
   const [customerPayments, setCustomerPayments] = useState<Payment[]>([]);
   const [loadingCustomerPayments, setLoadingCustomerPayments] = useState(false);
   const [formData, setFormData] = useState<PaymentFormData>(emptyPaymentForm);

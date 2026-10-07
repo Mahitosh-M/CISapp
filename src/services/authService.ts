@@ -1,4 +1,3 @@
-import { disableNotifications, resetNotificationAccount } from './notificationService';
 import { assertLoginInput } from "../inputSecurity";
 import { deleteApp, initializeApp } from 'firebase/app';
 import {
@@ -48,7 +47,6 @@ const getReusableAuthCredential = async (secondaryAuth: ReturnType<typeof getAut
 };
 
 export const listenToAuthState = (callback: (user: User | null) => void) => onAuthStateChanged(auth, (user) => {
-  void resetNotificationAccount(user?.uid ?? null).catch(() => undefined);
   callback(user);
 });
 
@@ -62,7 +60,6 @@ export const loginWithEmail = async (email: string, password: string) => {
 };
 
 export const logoutUser = async () => {
-  await disableNotifications(false).catch(() => undefined);
   return signOut(auth);
 };
 

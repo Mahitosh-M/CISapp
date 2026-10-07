@@ -1,6 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import NotificationControl from './NotificationControl';
-import { Bell, BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Users } from 'lucide-react';
+import { BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,7 +26,6 @@ const navItems: NavItem[] = [
   { to: '/overdue-pc-requests', label: 'PC', icon: Coins, mobileColor: '#FCD34D', adminOnly: true },
   { to: '/credit', label: 'Credit', icon: Landmark, mobileColor: '#5EEAD4', adminOnly: true },
   { to: '/admin', label: 'Admin', icon: ShieldCheck, mobileColor: '#FDBA74', adminOnly: true },
-  { to: '/notifications', label: 'Notifications', icon: Bell, mobileColor: '#FDE047', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, mobileColor: '#CBD5E1', adminOnly: true }
 ];
 
@@ -217,7 +215,6 @@ const Layout = () => {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: isMobile ? 0 : 'auto' }}>
             <div style={{ color: '#D4AF37', fontWeight: 700 }}>{userProfile?.role ?? 'User'}</div>
-            <NotificationControl />
             <button
               type="button"
               onClick={logout}

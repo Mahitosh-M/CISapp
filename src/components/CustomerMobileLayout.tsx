@@ -2,7 +2,6 @@ import { Outlet, useOutletContext } from 'react-router-dom';
 import { Coins, FileText, Gift, Home, Sparkles, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import NotificationControl from './NotificationControl';
 import InstallAppPrompt from './InstallAppPrompt';
 import BottomNavBar from './ui/bottom-nav-bar';
 import { useCustomerPortalData } from '../hooks/useCustomerPortalData';
@@ -122,7 +121,6 @@ const CustomerMobileLayout = () => {
               Logout
             </button>
         </div>
-        <div style={{ marginTop: 8, textAlign: 'right' }}><NotificationControl /></div>
       </header>
 
       <main style={{ padding: '16px 14px calc(100px + env(safe-area-inset-bottom, 0px))' }}>

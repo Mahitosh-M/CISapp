@@ -24,7 +24,7 @@ import { getSalesappBranchStaff, type SalesStaffDirectoryEntry } from '../servic
 import { getCustomerCreditSummary } from '../services/creditService';
 import { recalculateCustomerDerivedData } from '../services/derivedDataService';
 import type { AppSettings, Customer, CustomerCreditSummary, Invoice, InvoiceFormData, Payment, PaymentMode, ShopId } from '../types';
-import { formatCustomerSelectLabel } from '../utils/customerLabels';
+import { formatCustomerSelectLabel, withCurrentCustomerNames } from '../utils/customerLabels';
 import { getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { formatPc } from '../utils/loyalty';
@@ -97,8 +97,10 @@ const formatReminderAmount = (amount: number) => {
 
 const Invoices = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [storedInvoices, setInvoices] = useState<Invoice[]>([]);
+  const invoices = useMemo(() => withCurrentCustomerNames(storedInvoices, customers), [storedInvoices, customers]);
+  const [storedPayments, setPayments] = useState<Payment[]>([]);
+  const payments = useMemo(() => withCurrentCustomerNames(storedPayments, customers), [storedPayments, customers]);
   const [salesStaff, setSalesStaff] = useState<SalesStaffDirectoryEntry[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState('INV-0001');
