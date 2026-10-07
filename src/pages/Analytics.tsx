@@ -49,7 +49,7 @@ const analyticsSections = [
 ] satisfies { id: AnalyticsSection; label: string; icon: typeof BarChart3 }[];
 
 const formatPercent = (value: number) => `${Math.round(Number.isFinite(value) ? value : 0)}%`;
-const chartColors = ['#D4AF37', '#56CCF2', '#EB5757', '#27AE60', '#7C3AED', '#9AA6B2'];
+const chartColors = ['#F6C85F', '#4CC9F0', '#FF6B7A', '#55D68A', '#A78BFA', '#AAB8C8'];
 
 const parseDateKey = (dateString: string) => {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -134,6 +134,23 @@ const getSignalColor = (tone: 'good' | 'watch' | 'risk') => {
   return '#B42318';
 };
 
+
+const chartTooltipStyle: CSSProperties = {
+  background: 'linear-gradient(145deg, rgba(19, 28, 78, 0.98), rgba(10, 16, 50, 0.98))',
+  border: '1px solid rgba(246, 200, 95, 0.48)',
+  borderRadius: 12,
+  boxShadow: '0 14px 32px rgba(0, 0, 0, 0.32)',
+  color: '#FFFFFF',
+  fontWeight: 800
+};
+const chartSurfaceStyle: CSSProperties = { filter: 'drop-shadow(0 12px 18px rgba(0, 0, 0, 0.20))' };
+const ChartGradients = () => <defs>
+  <linearGradient id="analytics-gold" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0%" stopColor="#FFF1A8" /><stop offset="48%" stopColor="#F6C85F" /><stop offset="100%" stopColor="#C99416" /></linearGradient>
+  <linearGradient id="analytics-blue" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0%" stopColor="#A5E7FF" /><stop offset="48%" stopColor="#4CC9F0" /><stop offset="100%" stopColor="#2479D4" /></linearGradient>
+  <linearGradient id="analytics-green" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0%" stopColor="#B5F6C9" /><stop offset="48%" stopColor="#55D68A" /><stop offset="100%" stopColor="#1B8E54" /></linearGradient>
+  <linearGradient id="analytics-red" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0%" stopColor="#FFB4BD" /><stop offset="48%" stopColor="#FF6B7A" /><stop offset="100%" stopColor="#C8314B" /></linearGradient>
+  <linearGradient id="analytics-purple" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0%" stopColor="#DAC9FF" /><stop offset="48%" stopColor="#A78BFA" /><stop offset="100%" stopColor="#6948C6" /></linearGradient>
+</defs>;
 const Analytics = () => {
   const defaultRange = useMemo(() => getCurrentMonthRange(), []);
   const [fromDate, setFromDate] = useState(defaultRange.fromDate);
@@ -217,7 +234,7 @@ const Analytics = () => {
   }, [activeFromDate, activeRangeKey, activeSection, activeToDate, analyticsScope, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
 
   useEffect(() => {
-    if (!['collection', 'capital'].includes(activeSection ?? '') || collectionHistoryKey === activeToDate) return;
+    if (!['collection', 'capital', 'breakeven'].includes(activeSection ?? '') || collectionHistoryKey === activeToDate) return;
     let active = true;
     setCollectionLoading(true);
     setError('');
@@ -249,6 +266,25 @@ const Analytics = () => {
   ), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
 
   const capitalImpact = useMemo(() => buildCreditCapitalImpact(collectionInvoices, collectionPayments, activeFromDate, activeToDate, settings, analyticsScope), [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
+  const capitalRiskSplit = useMemo(() => {
+    const overdue = Math.min(capitalImpact.overdue, capitalImpact.receivables);
+    return [
+      { name: 'Within credit period', value: Math.max(0, capitalImpact.receivables - overdue), color: '#27AE60' },
+      { name: 'Overdue', value: overdue, color: '#EB5757' }
+    ].filter((row) => row.value > 0);
+  }, [capitalImpact]);
+
+  const capitalCustomerRows = useMemo(() => capitalImpact.rows
+    .filter((row) => row.outstanding > 0)
+    .slice()
+    .sort((left, right) => right.capitalCost - left.capitalCost)
+    .slice(0, 8)
+    .map((row) => ({
+      customerName: row.customerName,
+      withinCredit: Math.max(0, row.outstanding - row.overdue),
+      overdue: row.overdue,
+      capitalCost: row.capitalCost
+    })), [capitalImpact.rows]);
 
   const collectionTrendRows = useMemo(() => getCollectionTrendMonths(activeToDate).map((month) => {
     const all = buildCollectionHealth(collectionInvoices, collectionPayments, month.fromDate, month.toDate, settings, 'overall');
@@ -322,6 +358,8 @@ const Analytics = () => {
       const invoiceCount = monthlySnapshots.reduce((sum, row) => sum + row.invoiceCount, 0);
       const margin = sales > 0 ? (profit / sales) * 100 : 0;
       const netProfit = profit - allocatedFixedCost;
+      const lateCreditCost = capitalImpact.capitalCost;
+      const actualProfit = netProfit - lateCreditCost;
       const breakEvenProgress = allocatedFixedCost > 0 ? Math.min(100, Math.max(0, (profit / allocatedFixedCost) * 100)) : profit > 0 ? 100 : 0;
       const breakEvenSales = margin > 0 && allocatedFixedCost > 0 ? allocatedFixedCost / (margin / 100) : 0;
       return {
@@ -336,6 +374,10 @@ const Analytics = () => {
         margin,
         fixedCost: allocatedFixedCost,
         netProfit,
+
+        lateCreditCost,
+
+        actualProfit,
         breakEvenProgress,
         breakEvenSales,
         breakEvenSalesGap: breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : 0,
@@ -358,6 +400,8 @@ const Analytics = () => {
     const avgInvoiceValue = filteredInvoices.length > 0 ? Math.round(sales / filteredInvoices.length) : 0;
     const margin = sales > 0 ? (profit / sales) * 100 : 0;
     const netProfit = profit - allocatedFixedCost;
+      const lateCreditCost = capitalImpact.capitalCost;
+      const actualProfit = netProfit - lateCreditCost;
     const breakEvenProgress = allocatedFixedCost > 0 ? Math.min(100, Math.max(0, (profit / allocatedFixedCost) * 100)) : profit > 0 ? 100 : 0;
     const breakEvenSales = margin > 0 && allocatedFixedCost > 0 ? allocatedFixedCost / (margin / 100) : 0;
     const breakEvenSalesGap = breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : 0;
@@ -376,6 +420,10 @@ const Analytics = () => {
       margin,
       fixedCost: allocatedFixedCost,
       netProfit,
+
+      lateCreditCost,
+
+      actualProfit,
       breakEvenProgress,
       breakEvenSales,
       breakEvenSalesGap,
@@ -384,7 +432,7 @@ const Analytics = () => {
       negativeProfitCount: negativeProfitInvoices.length,
       negativeProfitAmount: negativeProfitInvoices.reduce((sum, invoice) => sum + Math.abs(invoice.totalProfit), 0)
     };
-  }, [allocatedFixedCost, analyticsScope, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots]);
+  }, [allocatedFixedCost, analyticsScope, capitalImpact.capitalCost, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots]);
 
   const customerAnalysis = useMemo(() => {
     const rows = new Map<string, { customer: string; sales: number; profit: number; invoices: number }>();
@@ -462,7 +510,20 @@ const Analytics = () => {
         ? monthInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0)
         : monthSnapshot?.totalProfit ?? 0;
       const fixedCost = Math.max(0, settings.fixedMonthlyCosts);
-      const netProfit = grossProfit - fixedCost;
+      const bookProfit = grossProfit - fixedCost;
+      const monthFromDate = month === activeFromDate.slice(0, 7) ? activeFromDate : `${month}-01`;
+      const monthToDate = month === activeToDate.slice(0, 7)
+        ? activeToDate
+        : formatDateKey(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0));
+      const lateCreditCost = buildCreditCapitalImpact(
+        collectionInvoices,
+        collectionPayments,
+        monthFromDate,
+        monthToDate,
+        settings,
+        analyticsScope
+      ).capitalCost;
+      const actualProfit = bookProfit - lateCreditCost;
       const margin = sales > 0 ? (grossProfit / sales) * 100 : 0;
       const breakEvenSales = margin > 0 && fixedCost > 0 ? fixedCost / (margin / 100) : 0;
       return {
@@ -471,12 +532,18 @@ const Analytics = () => {
         sales,
         grossProfit,
         fixedCost,
-        netProfit,
+        bookProfit,
+
+        lateCreditCost,
+
+        actualProfit,
+
+        netProfit: actualProfit,
         breakEvenSalesGap: breakEvenSales > 0 ? Math.max(0, breakEvenSales - sales) : fixedCost > 0 ? fixedCost : 0,
-        status: fixedCost <= 0 ? 'Fixed cost not set' : netProfit >= 0 ? 'Profitable' : 'Below breakeven'
+        status: fixedCost <= 0 ? 'Fixed cost not set' : actualProfit >= 0 ? 'Profitable after credit cost' : 'Below breakeven after credit cost'
       };
     });
-  }, [detailedDataLoaded, filteredInvoices, monthlySnapshots, selectedMonthKeys, settings.fixedMonthlyCosts]);
+  }, [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, detailedDataLoaded, filteredInvoices, monthlySnapshots, selectedMonthKeys, settings]);
 
   const insightCards = useMemo(() => {
     const concentration = analysis.sales > 0 && customerAnalysis.length > 0 ? (customerAnalysis[0].sales / analysis.sales) * 100 : 0;
@@ -683,8 +750,8 @@ const Analytics = () => {
       {rows.length === 0 ? (
         <div style={{ height: isMobile ? 220 : 260, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No contribution data</div>
       ) : (
-        <ResponsiveContainer width="100%" height={isMobile ? 240 : 280}>
-          <PieChart>
+        <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 240 : 280}>
+          <PieChart><ChartGradients />
             <Pie data={rows} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={2} label={({ payload }) => formatPercent((payload as { percent?: number }).percent ?? 0)}>
               {rows.map((entry, index) => (
                 <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
@@ -714,8 +781,8 @@ const Analytics = () => {
         <div style={{ position: 'relative', height: isMobile ? 230 : 270, marginTop: 8 }}>
           {hasChartData ? (
             <>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+              <ResponsiveContainer style={chartSurfaceStyle} width="100%" height="100%">
+                <PieChart><ChartGradients />
                   <defs>
                     <linearGradient id={`${gradientPrefix}-ashoka`} x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0%" stopColor="#FDE68A" />
@@ -915,22 +982,22 @@ const Analytics = () => {
               <div style={gridStyle}>
                 <div style={cardStyle}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Due vs collected trend</div>
-                  <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><BarChart data={collectionTrendRows}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashokaDue" name="ASHOKA due" fill="#D4AF37" radius={[4, 4, 0, 0]} /><Bar dataKey="ashokaCollected" name="ASHOKA collected" fill="#1B7F3A" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaDue" name="SMPA due" fill="#56CCF2" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaCollected" name="SMPA collected" fill="#7C3AED" radius={[4, 4, 0, 0]} /></> : <><Bar dataKey="due" name="Due" fill="#D4AF37" radius={[5, 5, 0, 0]} /><Bar dataKey="collected" name="Collected" fill="#1B7F3A" radius={[5, 5, 0, 0]} /></>}</BarChart></ResponsiveContainer>
+                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart data={collectionTrendRows}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashokaDue" name="ASHOKA due" fill="url(#analytics-gold)" radius={[4, 4, 0, 0]} /><Bar dataKey="ashokaCollected" name="ASHOKA collected" fill="url(#analytics-green)" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaDue" name="SMPA due" fill="url(#analytics-blue)" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaCollected" name="SMPA collected" fill="url(#analytics-purple)" radius={[4, 4, 0, 0]} /></> : <><Bar dataKey="due" name="Due" fill="url(#analytics-gold)" radius={[5, 5, 0, 0]} /><Bar dataKey="collected" name="Collected" fill="url(#analytics-green)" radius={[5, 5, 0, 0]} /></>}</BarChart></ResponsiveContainer>
                 </div>
                 <div style={cardStyle}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Closing overdue trend</div>
-                  <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><LineChart data={collectionTrendRows}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Line type="monotone" dataKey="ashokaOverdue" name="ASHOKA overdue" stroke="#D4AF37" strokeWidth={3} dot /><Line type="monotone" dataKey="smpaOverdue" name="SMPA overdue" stroke="#56CCF2" strokeWidth={3} dot /></> : <Line type="monotone" dataKey="closingOverdue" name="Closing overdue" stroke="#EB5757" strokeWidth={3} dot />}</LineChart></ResponsiveContainer>
+                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><LineChart data={collectionTrendRows}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Line type="monotone" dataKey="ashokaOverdue" name="ASHOKA overdue" stroke="#D4AF37" strokeWidth={3} dot /><Line type="monotone" dataKey="smpaOverdue" name="SMPA overdue" stroke="#56CCF2" strokeWidth={3} dot /></> : <Line type="monotone" dataKey="closingOverdue" name="Closing overdue" stroke="#EB5757" strokeWidth={3} dot />}</LineChart></ResponsiveContainer>
                 </div>
               </div>
 
               <div style={gridStyle}>
                 <div style={cardStyle}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Overdue ageing</div>
-                  <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><BarChart data={(['1-7', '8-15', '16-30', '31-60', '60+'] as CollectionAgeBucket[]).map((bucket) => ({ bucket, ashoka: collectionHealth.ageingByShop.SHOP_A[bucket], smpa: collectionHealth.ageingByShop.SHOP_S[bucket], selected: analyticsScope === 'overall' ? 0 : collectionHealth.ageingByShop[analyticsScope][bucket] }))}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis dataKey="bucket" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashoka" name="ASHOKA" fill="#D4AF37" /><Bar dataKey="smpa" name="SMPA" fill="#56CCF2" /></> : <Bar dataKey="selected" name={getShopName(analyticsScope)} fill="#EB5757" />}</BarChart></ResponsiveContainer>
+                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart data={(['1-7', '8-15', '16-30', '31-60', '60+'] as CollectionAgeBucket[]).map((bucket) => ({ bucket, ashoka: collectionHealth.ageingByShop.SHOP_A[bucket], smpa: collectionHealth.ageingByShop.SHOP_S[bucket], selected: analyticsScope === 'overall' ? 0 : collectionHealth.ageingByShop[analyticsScope][bucket] }))}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="bucket" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashoka" name="ASHOKA" fill="url(#analytics-gold)" /><Bar dataKey="smpa" name="SMPA" fill="url(#analytics-blue)" /></> : <Bar dataKey="selected" name={getShopName(analyticsScope)} fill="url(#analytics-red)" />}</BarChart></ResponsiveContainer>
                 </div>
                 <div style={cardStyle}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Top overdue customers</div>
-                  {collectionHealth.topCustomers.length === 0 ? <div style={{ minHeight: 240, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No overdue at the selected period end.</div> : <ResponsiveContainer width="100%" height={isMobile ? 260 : 300}><BarChart layout="vertical" data={collectionHealth.topCustomers}><CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" /><XAxis type="number" tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis type="category" dataKey="customerName" width={isMobile ? 86 : 118} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip formatter={(value) => formatMoney(Number(value))} /><Bar dataKey="overdueAmount" name="Overdue" fill="#EB5757" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>}
+                  {collectionHealth.topCustomers.length === 0 ? <div style={{ minHeight: 240, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No overdue at the selected period end.</div> : <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart layout="vertical" data={collectionHealth.topCustomers}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis type="number" tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis type="category" dataKey="customerName" width={isMobile ? 86 : 118} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} /><Bar dataKey="overdueAmount" name="Overdue" fill="url(#analytics-red)" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>}
                 </div>
               </div>
 
@@ -951,7 +1018,26 @@ const Analytics = () => {
             <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>Credit & Collection Capital Impact</div>
             <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 14 }}>Estimated working-capital cost uses a {Math.round(CAPITAL_RATE * 100)}% annual management benchmark. Opportunity cost is not estimated because turnover and reinvestment data are not available.</div>
             <div style={gridStyle}>{[['Credit receivables',capitalImpact.receivables],['Overdue receivables',capitalImpact.overdue],['Estimated capital cost',capitalImpact.capitalCost],['Calculated profit',capitalImpact.profit],['Credit-adjusted contribution',capitalImpact.profit-capitalImpact.capitalCost]].map(([label,value])=><div key={String(label)} style={cardStyle}><div style={{color:'#D7DEEA',fontSize:12,fontWeight:800}}>{label}</div><div style={{fontSize:24,fontWeight:900,marginTop:6,color:String(label).includes('Overdue')||String(label).includes('cost')?'#FCA5A5':'#FFFFFF'}}>{formatMoney(Number(value))}</div></div>)}</div>
-            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:16}}><div style={{background:'var(--role-card-subtle)',borderRadius:10,padding:12}}><strong>Average days outstanding</strong><div style={{fontSize:22,fontWeight:900,marginTop:5}}>{Math.round(capitalImpact.averageDays)} days</div></div><div style={{background:'var(--role-card-subtle)',borderRadius:10,padding:12}}><strong>Overdue percentage</strong><div style={{fontSize:22,fontWeight:900,marginTop:5}}>{capitalImpact.receivables?formatPercent(capitalImpact.overdue/capitalImpact.receivables*100):'ó'}</div></div></div>
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:16}}><div style={{background:'var(--role-card-subtle)',borderRadius:10,padding:12}}><strong>Average days outstanding</strong><div style={{fontSize:22,fontWeight:900,marginTop:5}}>{Math.round(capitalImpact.averageDays)} days</div></div><div style={{background:'var(--role-card-subtle)',borderRadius:10,padding:12}}><strong>Overdue percentage</strong><div style={{fontSize:22,fontWeight:900,marginTop:5}}>{capitalImpact.receivables?formatPercent(capitalImpact.overdue/capitalImpact.receivables*100):'ÔøΩ'}</div></div></div>
+            <div style={gridStyle}>
+              <div style={cardStyle}>
+                <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 4 }}>Receivables risk split</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>Shows how much outstanding is still within credit terms versus already overdue.</div>
+                {capitalRiskSplit.length === 0 ? <div style={{ minHeight: isMobile ? 220 : 270, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No outstanding receivables at this period end.</div> : <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 220 : 270}><PieChart><ChartGradients /><Pie data={capitalRiskSplit} dataKey="value" nameKey="name" innerRadius="54%" outerRadius="78%" paddingAngle={3}>{capitalRiskSplit.map((row) => <Cell key={row.name} fill={row.color} />)}</Pie><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} /></PieChart></ResponsiveContainer>}
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 12, fontWeight: 800 }}>{capitalRiskSplit.map((row) => <span key={row.name} style={{ color: row.color }}>‚óè {row.name}: {formatMoney(row.value)}</span>)}</div>
+              </div>
+              <div style={cardStyle}>
+                <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 4 }}>Customers locking the most capital</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>Top customers by estimated capital cost for the selected period.</div>
+                {capitalCustomerRows.length === 0 ? <div style={{ minHeight: isMobile ? 220 : 270, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No credit receivables at this period end.</div> : <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 220 : 270}><BarChart layout="vertical" data={capitalCustomerRows} margin={{ left: 4, right: 12 }}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis type="number" tickFormatter={(value) => `${Math.round(Number(value))}`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis type="category" dataKey="customerName" width={isMobile ? 86 : 120} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} /><Bar dataKey="capitalCost" name="Capital cost" fill="url(#analytics-gold)" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>}
+              </div>
+            </div>
+
+            <div style={{ ...cardStyle, marginBottom: 16 }}>
+              <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 4 }}>Customer credit exposure</div>
+              <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>Each bar shows outstanding money split between within-credit and overdue amounts. Customers are ordered by capital cost.</div>
+              {capitalCustomerRows.length === 0 ? <div style={{ minHeight: isMobile ? 240 : 300, display: 'grid', placeItems: 'center', color: '#D7DEEA', fontWeight: 800 }}>No customer exposure to show.</div> : <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 310}><BarChart layout="vertical" data={capitalCustomerRows} margin={{ left: 4, right: 12 }}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis type="number" tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis type="category" dataKey="customerName" width={isMobile ? 86 : 120} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} /><Bar stackId="credit" dataKey="withinCredit" name="Within credit" fill="url(#analytics-green)" /><Bar stackId="credit" dataKey="overdue" name="Overdue" fill="url(#analytics-red)" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>}
+            </div>
             <div style={{overflowX:'auto'}}><table style={tableStyle}><thead><tr>{['Customer','Outstanding','Overdue','Days outstanding','Overdue days','Calculated profit','Capital cost','Credit impact %'].map(h=><th key={h} style={{...cellStyle,background:'var(--role-card-subtle)',textAlign:'left'}}>{h}</th>)}</tr></thead><tbody>{capitalImpact.rows.slice(0,20).map(r=>{const pct=r.profit>0?r.capitalCost/r.profit*100:undefined;return <tr key={r.customerId}><td style={cellStyle}><strong>{r.customerName}</strong></td><td style={cellStyle}>{formatMoney(r.outstanding)}</td><td style={cellStyle}>{formatMoney(r.overdue)}</td><td style={cellStyle}>{r.days}</td><td style={cellStyle}>{r.overdueDays}</td><td style={cellStyle}>{formatMoney(r.profit)}</td><td style={cellStyle}>{formatMoney(r.capitalCost)}</td><td style={cellStyle}>{pct===undefined?'N/A':formatPercent(pct)}</td></tr>})}{capitalImpact.rows.length===0?<tr><td style={cellStyle} colSpan={8}>No credit receivables for this period.</td></tr>:null}</tbody></table></div>
           </div> : null}
           {activeSection === 'breakeven' ? <div style={{ ...cardStyle, marginBottom: 18 }}>
@@ -959,11 +1045,11 @@ const Analytics = () => {
               <div>
                 <div style={{ color: '#D4AF37', fontWeight: 900 }}>Breakeven Analysis</div>
                 <div style={{ color: '#D7DEEA', marginTop: 4 }}>
-                  Fixed cost is allocated from the monthly cost saved in Admin Settings.
+                  Actual profit deducts the estimated cost of late credit payment from book profit.
                 </div>
               </div>
-              <div style={{ color: analysis.netProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>
-                {analysis.fixedCost > 0 ? (analysis.netProfit >= 0 ? 'Above breakeven' : 'Below breakeven') : 'Fixed cost not set'}
+              <div style={{ color: analysis.actualProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>
+                {analysis.fixedCost > 0 ? (analysis.actualProfit >= 0 ? 'Above breakeven after credit cost' : 'Below breakeven after credit cost') : 'Fixed cost not set'}
               </div>
             </div>
 
@@ -973,16 +1059,16 @@ const Analytics = () => {
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.profit)}</div>
               </div>
               <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Allocated Fixed Cost</div>
-                <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.fixedCost)}</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Book Profit After Fixed Cost</div>
+                <div style={{ fontWeight: 900, marginTop: 4, color: '#2563EB' }}>{formatMoney(analysis.netProfit)}</div>
               </div>
               <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Net After Fixed Cost</div>
-                <div style={{ fontWeight: 900, marginTop: 4, color: analysis.netProfit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(analysis.netProfit)}</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Late Credit Cost</div>
+                <div style={{ fontWeight: 900, marginTop: 4, color: '#EB5757' }}>{formatMoney(analysis.lateCreditCost)}</div>
               </div>
               <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Sales Needed</div>
-                <div style={{ fontWeight: 900, marginTop: 4 }}>{analysis.fixedCost > 0 ? formatMoney(analysis.breakEvenSalesGap) : '-'}</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Actual Profit After Credit Cost</div>
+                <div style={{ fontWeight: 900, marginTop: 4, color: analysis.actualProfit >= 0 ? '#1B7F3A' : '#B42318' }}>{formatMoney(analysis.actualProfit)}</div>
               </div>
             </div>
 
@@ -991,23 +1077,23 @@ const Analytics = () => {
                 style={{
                   width: `${analysis.breakEvenProgress}%`,
                   height: '100%',
-                  background: analysis.netProfit >= 0 ? '#1B7F3A' : '#D4AF37'
+                  background: analysis.actualProfit >= 0 ? '#1B7F3A' : '#D4AF37'
                 }}
               />
             </div>
 
-            <div style={{ color: '#D4AF37', fontWeight: 900, margin: '4px 0 10px' }}>Month-on-Month Breakeven</div>
-            <ResponsiveContainer width="100%" height={isMobile ? 240 : 300}>
-              <BarChart data={monthlyBreakevenRows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E8EDF4" />
+            <div style={{ color: '#D4AF37', fontWeight: 900, margin: '4px 0 10px' }}>Book Profit Split by Payment Timing</div>
+            <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 240 : 300}>
+              <BarChart data={monthlyBreakevenRows}><ChartGradients />
+                <CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} />
                 <XAxis dataKey="monthLabel" axisLine={false} tickLine={false} tick={{ fill: '#D7DEEA', fontSize: 11 }} />
                 <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} axisLine={false} tickLine={false} tick={{ fill: '#D7DEEA', fontSize: 11 }} />
-                <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                <Bar dataKey="netProfit" name="Net After Fixed Cost" radius={[8, 8, 0, 0]}>
-                  {monthlyBreakevenRows.map((row) => (
-                    <Cell key={row.month} fill={row.netProfit >= 0 ? '#1B7F3A' : '#B42318'} />
-                  ))}
+                <Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />
+                <Bar stackId="profit" dataKey="actualProfit" name="Actual profit from collected payment" radius={[8, 8, 0, 0]}>
+                  {monthlyBreakevenRows.map((row) => <Cell key={row.month} fill={row.actualProfit >= 0 ? '#27AE60' : '#B42318'} />)}
                 </Bar>
+                <Bar stackId="profit" dataKey="lateCreditCost" name="Profit lost to late credit payment" fill="url(#analytics-red)" radius={[8, 8, 0, 0]} />
+
               </BarChart>
             </ResponsiveContainer>
 
@@ -1015,7 +1101,7 @@ const Analytics = () => {
               <table style={tableStyle}>
                 <thead>
                   <tr>
-                    {['Month', 'Sales', 'Gross Profit', 'Fixed Cost', 'Net', 'Status'].map((header) => (
+                    {['Month', 'Sales', 'Gross Profit', 'Book Profit', 'Late Credit Cost', 'Actual Profit', 'Status'].map((header) => (
                       <th key={header} style={{ ...cellStyle, background: 'var(--role-card-subtle)', textAlign: 'left' }}>{header}</th>
                     ))}
                   </tr>
@@ -1026,8 +1112,9 @@ const Analytics = () => {
                       <td style={cellStyle}><strong>{row.monthLabel}</strong></td>
                       <td style={cellStyle}>{formatMoney(row.sales)}</td>
                       <td style={cellStyle}>{formatMoney(row.grossProfit)}</td>
-                      <td style={cellStyle}>{formatMoney(row.fixedCost)}</td>
-                      <td style={{ ...cellStyle, color: row.netProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{formatMoney(row.netProfit)}</td>
+                      <td style={{ ...cellStyle, color: '#2563EB', fontWeight: 900 }}>{formatMoney(row.bookProfit)}</td>
+                      <td style={{ ...cellStyle, color: '#EB5757', fontWeight: 900 }}>{formatMoney(row.lateCreditCost)}</td>
+                      <td style={{ ...cellStyle, color: row.actualProfit >= 0 ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{formatMoney(row.actualProfit)}</td>
                       <td style={{ ...cellStyle, fontWeight: 900 }}>{row.status}</td>
                     </tr>
                   ))}
@@ -1145,4 +1232,3 @@ const Analytics = () => {
 };
 
 export default Analytics;
-
