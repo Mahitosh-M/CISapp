@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { formatMoney } from '../utils/formatters';
 import './SalesCollectionDonut.css';
 
@@ -14,16 +14,14 @@ interface Props {
 const SalesCollectionDonut = ({ sales, collected, outstanding, discounts }: Props) => {
   const gradientId = useId().replace(/:/g, '');
   const [hovered, setHovered] = useState<SliceKey | null>(null);
-  const [selected, setSelected] = useState<SliceKey | null>(null);
   const rows = [
-    { key: 'collected' as const, name: 'Collected', value: collected, color: '#55E6AB', endColor: '#139D81', detail: 'Payments allocated to these sales, including applied advances.' },
-    { key: 'outstanding' as const, name: 'Outstanding', value: outstanding, color: '#FF8A9D', endColor: '#D43C68', detail: 'Sales still awaiting payment at the selected period end.' },
-    { key: 'discounts' as const, name: 'Discounts', value: discounts, color: '#F9D779', endColor: '#D99B23', detail: 'Approved discounts settle debt but are excluded from collections.' }
+    { key: 'collected' as const, name: 'Collected', value: collected, color: '#55E6AB', endColor: '#139D81' },
+    { key: 'outstanding' as const, name: 'Outstanding', value: outstanding, color: '#FF8A9D', endColor: '#D43C68' },
+    { key: 'discounts' as const, name: 'Discounts', value: discounts, color: '#F9D779', endColor: '#D99B23' }
   ];
-  const active = rows.find((row) => row.key === (hovered ?? selected) && row.value > 0);
+  const active = rows.find((row) => row.key === hovered && row.value > 0);
   const slices = rows.filter((row) => row.value > 0);
   const percent = (value: number) => sales > 0 ? `${(value / sales * 100).toFixed(1)}%` : '0.0%';
-  const toggle = (key: SliceKey) => setSelected((current) => current === key ? null : key);
 
   return <div className="sales-collection-donut">
     <div className="sales-collection-total"><span>ACTUAL SALES</span><strong>{formatMoney(sales)}</strong><span className="sales-collection-total-note">100% of the selected period</span></div>
@@ -34,25 +32,18 @@ const SalesCollectionDonut = ({ sales, collected, outstanding, discounts }: Prop
           <PieChart>
             <defs>{rows.map((row) => <linearGradient key={row.key} id={`${gradientId}-${row.key}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor={row.color} /><stop offset="100%" stopColor={row.endColor} /></linearGradient>)}</defs>
             <Pie data={slices} dataKey="value" nameKey="name" innerRadius="68%" outerRadius="90%" startAngle={90} endAngle={-270} paddingAngle={slices.length > 1 ? 4 : 0} cornerRadius={8} stroke="none" animationDuration={800}>
-              {slices.map((row) => <Cell key={row.key} fill={`url(#${gradientId}-${row.key})`} onMouseEnter={() => setHovered(row.key)} onClick={() => toggle(row.key)} style={{ cursor: 'pointer', opacity: active && active.key !== row.key ? 0.35 : 1, filter: active?.key === row.key ? `drop-shadow(0 0 9px ${row.color}88)` : undefined, transition: 'opacity 180ms ease, filter 180ms ease' }} />)}
+              {slices.map((row) => <Cell key={row.key} fill={`url(#${gradientId}-${row.key})`} onMouseEnter={() => setHovered(row.key)} onMouseLeave={() => setHovered(null)} style={{ cursor: 'default', opacity: active && active.key !== row.key ? 0.35 : 1, filter: active?.key === row.key ? `drop-shadow(0 0 9px ${row.color}88)` : undefined, transition: 'opacity 180ms ease, filter 180ms ease' }} />)}
             </Pie>
-            <Tooltip content={({ active: visible, payload }) => {
-              const row = payload?.[0]?.payload as typeof rows[number] | undefined;
-              return visible && row ? <div className="sales-collection-tooltip"><strong style={{ color: row.color }}>{row.name}</strong><span>{formatMoney(row.value)}</span><span>{percent(row.value)} of actual sales</span></div> : null;
-            }} />
+
           </PieChart>
         </ResponsiveContainer>
-        <div className="sales-collection-center" style={{ color: active?.color ?? '#55E6AB' }}>
+        <div className="sales-collection-center" aria-live="polite" style={{ color: active?.color ?? '#55E6AB' }}>
           <strong>{percent(active?.value ?? collected)}</strong>
           <span>{active?.name ?? 'Collected'}</span>
           <small>{formatMoney(active?.value ?? collected)}</small>
         </div>
       </div>
-      <div className="sales-collection-help">Hover to explore ? Tap a segment to pin its details</div>
-      <div className="sales-collection-legend">{rows.filter((row) => row.key !== 'discounts' || row.value > 0).map((row) => <button key={row.key} type="button" aria-pressed={selected === row.key} disabled={row.value <= 0} onClick={() => toggle(row.key)} onMouseEnter={() => setHovered(row.key)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(row.key)} onBlur={() => setHovered(null)} className={active?.key === row.key ? 'is-active' : ''} style={{ '--slice-color': row.color } as React.CSSProperties}>
-        <span className="sales-collection-dot" /><span className="sales-collection-legend-name">{row.name}<small>{percent(row.value)} of sales</small></span><strong>{formatMoney(row.value)}</strong>
-      </button>)}</div>
-      <div className="sales-collection-detail" aria-live="polite">{active?.detail ?? 'The full ring represents actual sales. Green shows collections; pink shows outstanding balances.'}</div>
+
     </>}
   </div>;
 };

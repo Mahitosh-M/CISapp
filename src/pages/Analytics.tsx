@@ -16,7 +16,7 @@ import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
 import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils';
-import { buildCollectionHealth, buildSalesCollectionSummary, getCollectionInsight, getMedian, type CollectionAgeBucket } from '../utils/collectionHealth';
+import { buildCollectionHealth, buildSalesCollectionSummary, type CollectionAgeBucket } from '../utils/collectionHealth';
 import { buildCreditCapitalImpact, CAPITAL_RATE } from '../utils/creditCapitalImpact';
 import { DEFAULT_SETTINGS } from '../utils/settings';
 import {
@@ -299,12 +299,15 @@ const Analytics = () => {
       ...month,
       due: analyticsScope === 'overall' ? all.period.totalDue : all.byShop[analyticsScope].totalDue,
       collected: analyticsScope === 'overall' ? all.period.dueCollectedCash : all.byShop[analyticsScope].dueCollectedCash,
+      notCollected: Math.max(0, (analyticsScope === 'overall' ? all.period.totalDue - all.period.dueCollectedCash : all.byShop[analyticsScope].totalDue - all.byShop[analyticsScope].dueCollectedCash)),
       closingOverdue: analyticsScope === 'overall' ? all.period.closingOverdue : all.byShop[analyticsScope].closingOverdue,
       ashokaDue: ashoka.totalDue,
       ashokaCollected: ashoka.dueCollectedCash,
+      ashokaNotCollected: Math.max(0, ashoka.totalDue - ashoka.dueCollectedCash),
       ashokaOverdue: ashoka.closingOverdue,
       smpaDue: smpa.totalDue,
       smpaCollected: smpa.dueCollectedCash,
+      smpaNotCollected: Math.max(0, smpa.totalDue - smpa.dueCollectedCash),
       smpaOverdue: smpa.closingOverdue
     };
   }), [activeToDate, analyticsScope, collectionInvoices, collectionPayments, settings]);
@@ -987,7 +990,36 @@ const Analytics = () => {
               <div style={gridStyle}>
                 <div style={cardStyle}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Due vs collected trend</div>
-                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart data={collectionTrendRows}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashokaDue" name="ASHOKA due" fill="url(#analytics-gold)" radius={[4, 4, 0, 0]} /><Bar dataKey="ashokaCollected" name="ASHOKA collected" fill="url(#analytics-green)" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaDue" name="SMPA due" fill="url(#analytics-blue)" radius={[4, 4, 0, 0]} /><Bar dataKey="smpaCollected" name="SMPA collected" fill="url(#analytics-purple)" radius={[4, 4, 0, 0]} /></> : <><Bar dataKey="due" name="Due" fill="url(#analytics-gold)" radius={[5, 5, 0, 0]} /><Bar dataKey="collected" name="Collected" fill="url(#analytics-green)" radius={[5, 5, 0, 0]} /></>}</BarChart></ResponsiveContainer>
+                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}>
+                    <BarChart data={collectionTrendRows} barGap={6}>
+                      <ChartGradients />
+                      <CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fill: '#D7DEEA', fontSize: 11 }} />
+                      <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} />
+                      <Tooltip content={({ active, payload, label }) => {
+                        const row = payload?.[0]?.payload as typeof collectionTrendRows[number] | undefined;
+                        if (!active || !row) return null;
+                        const shops = analyticsScope === 'overall'
+                          ? [{ name: 'ASHOKA', due: row.ashokaDue, collected: row.ashokaCollected, color: '#55D68A' }, { name: 'SMPA', due: row.smpaDue, collected: row.smpaCollected, color: '#A78BFA' }]
+                          : [{ name: getShopName(analyticsScope), due: row.due, collected: row.collected, color: '#55D68A' }];
+                        return <div style={{ ...chartTooltipStyle, padding: 12, fontSize: 12 }}><strong>{label}</strong>{shops.map((shop) => <div key={shop.name} style={{ marginTop: 8 }}><strong style={{ color: shop.color }}>{shop.name}</strong><div>Total due: {formatMoney(shop.due)}</div><div>Collected: {formatMoney(shop.collected)} ({shop.due > 0 ? `${(shop.collected / shop.due * 100).toFixed(1)}%` : 'N/A'})</div></div>)}</div>;
+                      }} />
+                      {analyticsScope === 'overall' ? <>
+                        <Bar stackId="ashoka" dataKey="ashokaCollected" name="ASHOKA collected" fill="url(#analytics-green)" />
+                        <Bar stackId="ashoka" dataKey="ashokaNotCollected" name="ASHOKA not collected" fill="url(#analytics-gold)" radius={[4, 4, 0, 0]} />
+                        <Bar stackId="smpa" dataKey="smpaCollected" name="SMPA collected" fill="url(#analytics-purple)" />
+                        <Bar stackId="smpa" dataKey="smpaNotCollected" name="SMPA not collected" fill="url(#analytics-blue)" radius={[4, 4, 0, 0]} />
+                      </> : <>
+                        <Bar stackId="selected" dataKey="collected" name="Collected" fill="url(#analytics-green)" />
+                        <Bar stackId="selected" dataKey="notCollected" name="Not collected" fill="url(#analytics-gold)" radius={[5, 5, 0, 0]} />
+                      </>}
+                    </BarChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 11, fontWeight: 800, marginTop: 8 }}>
+                    <span style={{ color: '#55D68A' }}>{analyticsScope === 'overall' ? 'ASHOKA collected' : 'Collected'}</span>
+                    <span style={{ color: '#F6C85F' }}>{analyticsScope === 'overall' ? 'ASHOKA not collected' : 'Not collected'}</span>
+                    {analyticsScope === 'overall' ? <><span style={{ color: '#A78BFA' }}>SMPA collected</span><span style={{ color: '#4CC9F0' }}>SMPA not collected</span></> : null}
+                  </div>
                 </div>
                 <div style={cardStyle}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Closing overdue trend</div>
@@ -995,28 +1027,19 @@ const Analytics = () => {
                 </div>
               </div>
 
-              <div style={gridStyle}>
-                <div style={cardStyle}>
+              <div style={{ ...gridStyle, gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', alignItems: 'stretch' }}>
+                <div style={{ ...cardStyle, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Overdue ageing</div>
-                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={isMobile ? 260 : 300}><BarChart data={(['1-7', '8-15', '16-30', '31-60', '60+'] as CollectionAgeBucket[]).map((bucket) => ({ bucket, ashoka: collectionHealth.ageingByShop.SHOP_A[bucket], smpa: collectionHealth.ageingByShop.SHOP_S[bucket], selected: analyticsScope === 'overall' ? 0 : collectionHealth.ageingByShop[analyticsScope][bucket] }))}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="bucket" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashoka" name="ASHOKA" fill="url(#analytics-gold)" /><Bar dataKey="smpa" name="SMPA" fill="url(#analytics-blue)" /></> : <Bar dataKey="selected" name={getShopName(analyticsScope)} fill="url(#analytics-red)" />}</BarChart></ResponsiveContainer>
+                  <ResponsiveContainer style={chartSurfaceStyle} width="100%" height={360}><BarChart data={(['1-7', '8-15', '16-30', '31-60', '60+'] as CollectionAgeBucket[]).map((bucket) => ({ bucket, ashoka: collectionHealth.ageingByShop.SHOP_A[bucket], smpa: collectionHealth.ageingByShop.SHOP_S[bucket], selected: analyticsScope === 'overall' ? 0 : collectionHealth.ageingByShop[analyticsScope][bucket] }))}><ChartGradients /><CartesianGrid strokeDasharray="4 6" stroke="rgba(215,222,234,0.20)" vertical={false} /><XAxis dataKey="bucket" tick={{ fill: '#D7DEEA', fontSize: 11 }} /><YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fill: '#D7DEEA', fontSize: 11 }} /><Tooltip contentStyle={chartTooltipStyle} formatter={(value) => formatMoney(Number(value))} />{analyticsScope === 'overall' ? <><Bar dataKey="ashoka" name="ASHOKA" fill="url(#analytics-gold)" /><Bar dataKey="smpa" name="SMPA" fill="url(#analytics-blue)" /></> : <Bar dataKey="selected" name={getShopName(analyticsScope)} fill="url(#analytics-red)" />}</BarChart></ResponsiveContainer>
                 </div>
-                <div style={cardStyle}>
-                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 6 }}>Actual sales vs collected</div>
-                  <div style={{ color: '#D7DEEA', fontSize: 12, lineHeight: 1.45, marginBottom: 12 }}>Sales invoiced in the selected period and payments allocated to those invoices by {formatDate(activeToDate)}. Includes applied advances; excludes collections for older invoices.</div>
-                  <SalesCollectionDonut key={`${activeFromDate}:${activeToDate}:${analyticsScope}`} sales={salesCollection.sales} collected={salesCollection.collected} outstanding={salesCollection.outstanding} discounts={salesCollection.discounts} />
+                <div style={{ ...cardStyle, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Actual sales vs collected</div>
+                  <div style={{ height: 360 }}>
+                    <SalesCollectionDonut key={`${activeFromDate}:${activeToDate}:${analyticsScope}`} sales={salesCollection.sales} collected={salesCollection.collected} outstanding={salesCollection.outstanding} discounts={salesCollection.discounts} />
+                  </div>
                 </div>
               </div>
 
-              <div style={{ ...cardStyle, marginBottom: 18 }}>
-                <div style={{ color: '#D4AF37', fontWeight: 900, marginBottom: 10 }}>Collection diagnostics</div>
-                <div style={{ display: 'grid', gap: 9 }}>{SHOP_OPTIONS.filter((shop) => analyticsScope === 'overall' || analyticsScope === shop.id).map((shop) => <div key={shop.id} style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12, color: '#FFFFFF' }}>{getCollectionInsight(shop.id, collectionHealth.byShop[shop.id])}</div>)}
-                  {collectionHealth.topCustomers.length >= 3 && collectionHealth.period.closingOverdue > 0 ? <div style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12 }}>Top 3 customers account for {formatPercent((collectionHealth.topCustomers.slice(0, 3).reduce((sum, row) => sum + row.overdueAmount, 0) / collectionHealth.period.closingOverdue) * 100)} of closing overdue.</div> : null}
-                  {getMedian(collectionHealth.period.paymentDelays) !== undefined ? (() => {
-                    const medianDelay = Math.round(getMedian(collectionHealth.period.paymentDelays) ?? 0);
-                    return <div style={{ background: 'var(--role-card-subtle)', borderRadius: 10, padding: 12 }}>Median settlement timing for invoices fully settled in this period: {medianDelay >= 0 ? `${medianDelay} days after` : `${Math.abs(medianDelay)} days before`} the due date.</div>;
-                  })() : null}
-                </div>
-              </div>
             </>}
           </> : null}
 

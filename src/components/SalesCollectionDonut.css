@@ -1,26 +1,14 @@
-.sales-collection-donut { padding: 16px; border: 1px solid rgba(135,160,230,.2); border-radius: 20px; background: radial-gradient(ellipse at 50% 30%, rgba(45,80,135,.28), transparent 65%), linear-gradient(145deg, rgba(16,26,66,.96), rgba(9,16,42,.97)); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 15px 35px rgba(0,0,0,.16); }
+.sales-collection-donut { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: 16px; border: 1px solid rgba(135,160,230,.2); border-radius: 20px; background: radial-gradient(ellipse at 50% 30%, rgba(45,80,135,.28), transparent 65%), linear-gradient(145deg, rgba(16,26,66,.96), rgba(9,16,42,.97)); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 15px 35px rgba(0,0,0,.16); }
 .sales-collection-total { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .sales-collection-total > span:first-child { font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #ACBAD7; }
 .sales-collection-total > strong { font-size: clamp(22px, 3vw, 28px); color: #FFF; font-variant-numeric: tabular-nums; }
 .sales-collection-total-note { font-size: 11px; color: #ACBAD7; }
-.sales-collection-chart { position: relative; height: 290px; max-width: 380px; margin: 0 auto; }
+.sales-collection-chart { position: relative; flex: 1; min-height: 0; width: 100%; max-width: 380px; margin: 0 auto; }
 .sales-collection-halo { position: absolute; inset: 25px 15%; border-radius: 50%; background: radial-gradient(circle, rgba(85,230,171,.09), transparent 68%); pointer-events: none; }
 .sales-collection-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; text-align: center; width: 50%; }
 .sales-collection-center strong { font-size: clamp(28px, 4vw, 38px); font-weight: 900; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
 .sales-collection-center > span { font-size: 12px; font-weight: 800; }
 .sales-collection-center small { color: #D7DEEA; font-size: 12px; }
-.sales-collection-help { color: #A5B3CF; font-size: 11px; text-align: center; margin: -4px 0 14px; }
-.sales-collection-legend { display: grid; gap: 8px; }
-.sales-collection-legend button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px; text-align: left; border: 1px solid rgba(135,160,230,.18); border-radius: 12px; background: rgba(255,255,255,.025); color: #E8EEFF; cursor: pointer; transition: background 180ms ease, border-color 180ms ease, transform 180ms ease; }
-.sales-collection-legend button:hover, .sales-collection-legend button.is-active { border-color: var(--slice-color); background: rgba(255,255,255,.07); transform: translateY(-1px); }
-.sales-collection-legend button:focus-visible { outline: 2px solid var(--slice-color); outline-offset: 3px; }
-.sales-collection-legend button:disabled { cursor: default; opacity: .65; }
-.sales-collection-dot { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--slice-color); box-shadow: 0 0 10px var(--slice-color); }
-.sales-collection-legend-name { flex: 1; font-size: 12px; font-weight: 800; }
-.sales-collection-legend-name small { display: block; margin-top: 3px; font-size: 10px; font-weight: 500; color: #ACBAD7; }
-.sales-collection-legend button > strong { color: var(--slice-color); font-size: 13px; font-variant-numeric: tabular-nums; }
-.sales-collection-detail { min-height: 36px; color: #BAC6DE; font-size: 11px; line-height: 1.5; margin-top: 12px; }
-.sales-collection-tooltip { display: grid; gap: 5px; padding: 12px 15px; border: 1px solid rgba(135,160,230,.4); border-radius: 12px; background: rgba(8,16,42,.97); color: #E8EEFF; font-size: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
-.sales-collection-empty { min-height: 260px; display: grid; place-items: center; text-align: center; color: #BAC6DE; font-weight: 700; }
-@media (max-width: 480px) { .sales-collection-donut { padding: 12px; } .sales-collection-chart { height: 260px; } .sales-collection-legend button > strong { font-size: 12px; } }
+.sales-collection-empty { flex: 1; min-height: 0; display: grid; place-items: center; text-align: center; color: #BAC6DE; font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { .sales-collection-donut *, .sales-collection-donut *::before { transition: none !important; animation: none !important; } }
+@media (max-width: 480px) { .sales-collection-donut { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: 12px; } }
