@@ -15,3 +15,10 @@
 .cis-delivery-dialog select{box-sizing:border-box;width:100%;min-width:0;background:#101c35;color:#fff;border:1px solid #ffffff35;border-radius:10px;padding:12px;font-size:16px;}
 .cis-route-schedule{display:grid;gap:8px;border:1px solid #d4af3750;background:#d4af3712;border-radius:12px;padding:14px;color:#f5dda0;line-height:1.6;}
 .cis-route-schedule small{color:#cbd5e1;}
+
+.invoice-delivery-link{display:inline-flex;align-items:center;gap:9px;margin:0 0 16px;min-height:44px;padding:10px 15px;border:1px solid #d4af3770;border-radius:11px;background:#d4af3714;color:#f3d575;text-decoration:none;font-weight:750;box-sizing:border-box;}
+.invoice-delivery-option{display:flex;align-items:center;gap:13px;padding:16px;margin-bottom:18px;border:1px solid #d4af3780;border-radius:13px;background:#d4af3712;color:#fff;cursor:pointer;}
+.invoice-delivery-option>svg{flex-shrink:0;color:#f3d575;}.invoice-delivery-option>span{flex:1;min-width:0;display:grid;gap:5px;}.invoice-delivery-option strong{font-size:15px;color:#f3d575;}.invoice-delivery-option small{font-size:12px;line-height:1.5;color:#d7deea;}.invoice-delivery-option input[type=checkbox]{width:24px;height:24px;flex-shrink:0;margin:0;accent-color:#d4af37;}.invoice-delivery-option.selected{background:#d4af3729;border-color:#f3d575;}.invoice-delivery-option:focus-within,.invoice-delivery-link:focus-visible{outline:2px solid #f3d575;outline-offset:3px;}
+@media(max-width:600px){.invoice-delivery-link{width:100%;justify-content:center;}.invoice-delivery-option{padding:13px;gap:10px;}}
+
+.cis-route-select,.cis-route-select option{font-weight:800;}.cis-route-name{font-size:16px;font-weight:800;color:#f3d575;}

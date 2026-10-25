@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Users } from 'lucide-react';
+import { BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Truck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -20,7 +20,7 @@ const navItems: NavItem[] = [
   { to: '/collections', label: 'Collections', icon: CircleDollarSign, mobileColor: '#FCA5A5', staffOnly: true },
   { to: '/invoices', label: 'Invoices', icon: FileText, mobileColor: '#86EFAC' },
   { to: '/payments', label: 'Payments', icon: CreditCard, mobileColor: '#FDE047' },
-  { to: '/dispatch', label: 'Dispatch', icon: FileText, mobileColor: '#86EFAC' },
+  { to: '/dispatch', label: 'Delivery', icon: Truck, mobileColor: '#86EFAC' },
   { to: '/intelligence', label: 'Intelligence', icon: BrainCircuit, mobileColor: '#C4B5FD', adminOnly: true },
   { to: '/analytics', label: 'Analytics', icon: BarChart3, mobileColor: '#93C5FD', adminOnly: true },
   { to: '/loyalty', label: 'Loyalty', icon: Gift, mobileColor: '#FDA4AF', adminOnly: true },

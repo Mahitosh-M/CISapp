@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+import { Truck, ArrowRight } from 'lucide-react';
 import DeliveryDialog, { type DeliveryTarget } from '../components/DeliveryDialog';
 import { getShopCode } from '../utils/shops';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -742,10 +744,15 @@ const Invoices = () => {
   return (
     <div>
       <SectionHeader title="Invoices" />
+      <Link to="/dispatch" className="invoice-delivery-link"><Truck size={20} aria-hidden="true" />Delivery requests<ArrowRight size={18} aria-hidden="true" /></Link>
 
       {deliveryTarget && <DeliveryDialog invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Invoice marked for delivery. Ready for Dispatch synchronisation."); void loadData(); }} />}
       <form style={cardStyle} onSubmit={handleSubmit}>
-        {!editingOpeningBalance && <label style={{ display: "block", marginBottom: 12 }}><input type="checkbox" checked={deliveryRequested} onChange={e => setDeliveryRequested(e.target.checked)} /> Delivery required — enter delivery details after invoice/payment save</label>}
+        {!editingOpeningBalance && <label className={`invoice-delivery-option${deliveryRequested ? ' selected' : ''}`}>
+          <Truck size={25} aria-hidden="true" />
+          <span><strong>Delivery required</strong><small>Choose route and delivery details after saving this invoice.</small></span>
+          <input type="checkbox" aria-label="Delivery required" checked={deliveryRequested} onChange={e => setDeliveryRequested(e.target.checked)} />
+        </label>}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>

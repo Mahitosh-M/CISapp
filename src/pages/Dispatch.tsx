@@ -154,7 +154,7 @@ export default function Dispatch() {
             <div><Wallet size={23} aria-hidden="true"/><strong>{snapshot.claims.filter(c=>c.status==='Pending').length}</strong><span>Collections to review</span></div>
             <div><CheckCircle2 size={23} aria-hidden="true"/><strong>{snapshot.requests.filter(r=>r.active&&r.tripId).length}</strong><span>Assigned deliveries</span></div>
           </div>
-          <section><h2>Weekly loading / dispatch routes</h2>{routes.filter(r=>r.active).map(r=><article className="cis-delivery-request" key={r.id}><Truck size={20}/><div><strong>{r.name}: {r.from} ? {r.to}</strong><span>{routeDays(r)}</span><small>{r.stops.map(s=>s.name).join(' ? ')}</small></div></article>)}{!routes.some(r=>r.active)&&<p>No routes configured by Dispatch Admin yet.</p>}<small>Weekly plan; actual loading is confirmed separately.</small></section>
+          <section><h2>Weekly loading / dispatch routes</h2>{routes.filter(r=>r.active).map(r=><article className="cis-delivery-request" key={r.id}><Truck size={20}/><div><strong>{r.name}: {r.from} to {r.to}</strong><span>{routeDays(r)}</span><small>{r.stops.map(s=>s.name).join(' / ')}</small></div></article>)}{!routes.some(r=>r.active)&&<p>No routes configured by Dispatch Admin yet.</p>}<small>Weekly plan; actual loading is confirmed separately.</small></section>
           <section>
             <h2>Invoice delivery requests</h2>
             {snapshot.requests.length === 0 && (
@@ -163,7 +163,7 @@ export default function Dispatch() {
             {snapshot.requests.map((r) => (
               <article className="cis-delivery-request" key={r.id}>
                 <Package size={20} aria-hidden="true"/>
-                <div><strong>{r.invoiceNumber}</strong><span>{r.customerName}</span>{r.routeName&&<span>{r.routeName}{r.routeStopName?` / ${r.routeStopName}`:''} ? {routes.find(x=>x.id===r.routeId)?routeDays(routes.find(x=>x.id===r.routeId)!):'Route schedule unavailable'}</span>}{r.scheduledDate&&<span>Scheduled: {r.scheduledDate}</span>}<small className={'cis-delivery-status '+(!r.active?'needs-review':'')}>{r.active?(r.tripId?'Assigned':'Ready for Dispatch'):'Needs review'}</small>{r.sourceIssue&&<p role="alert">{r.sourceIssue}</p>}</div>
+                <div><strong>{r.invoiceNumber}</strong><span>{r.customerName}</span>{r.routeName&&<span><strong>{r.routeName}</strong>{r.routeStopName?` / ${r.routeStopName}`:''} - {routes.find(x=>x.id===r.routeId)?routeDays(routes.find(x=>x.id===r.routeId)!):'Route schedule unavailable'}</span>}{r.scheduledDate&&<span>Scheduled: {r.scheduledDate}</span>}<small className={'cis-delivery-status '+(!r.active?'needs-review':'')}>{r.active?(r.tripId?'Assigned':'Ready for Dispatch'):'Needs review'}</small>{r.sourceIssue&&<p role="alert">{r.sourceIssue}</p>}</div>
               </article>
             ))}
           </section>
