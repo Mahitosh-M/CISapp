@@ -1,3 +1,4 @@
+import DeliveryDialog, { type DeliveryTarget } from '../components/DeliveryDialog';
 import { getShopCode } from '../utils/shops';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -96,6 +97,8 @@ const formatReminderAmount = (amount: number) => {
 };
 
 const Invoices = () => {
+  const [deliveryRequested, setDeliveryRequested] = useState(false);
+  const [deliveryTarget, setDeliveryTarget] = useState<DeliveryTarget | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [storedInvoices, setInvoices] = useState<Invoice[]>([]);
   const invoices = useMemo(() => withCurrentCustomerNames(storedInvoices, customers), [storedInvoices, customers]);
@@ -340,6 +343,7 @@ const Invoices = () => {
   };
 
   const resetForm = () => {
+    setDeliveryRequested(false);
     creditRequestRef.current += 1;
     setSelectedCreditSummary(undefined);
     setLoadingCreditLimit(false);
@@ -395,6 +399,7 @@ const Invoices = () => {
         : undefined;
       const saveResults: PaymentSaveResultLike[] = [];
       let successMessage = '';
+      let savedDeliveryTarget: DeliveryTarget | null = null;
 
       if (editingInvoiceId) {
         const cleanPaymentAmount = Math.max(0, Number(sameDayPaymentAmount) || 0);
@@ -444,6 +449,7 @@ const Invoices = () => {
           }
         }
 
+        savedDeliveryTarget = { shopId: currentInvoice?.shopId, id: editingInvoiceId, invoiceNumber: currentInvoice?.invoiceNumber || '', customerName: formData.customerName, deliveryDetails: currentInvoice?.deliveryDetails };
         successMessage = 'Invoice updated successfully.';
       } else {
         const createdInvoice = await createInvoice(formData, auditUser);
@@ -475,6 +481,7 @@ const Invoices = () => {
           }, auditUser));
         }
 
+        savedDeliveryTarget = { shopId: formData.shopId, id: createdInvoice.id, invoiceNumber: createdInvoice.invoiceNumber, customerName: formData.customerName };
         const advanceMessage = createdInvoice.advanceAppliedAmount > 0
           ? ` ${formatMoney(createdInvoice.advanceAppliedAmount)} customer advance was adjusted automatically.`
           : '';
@@ -497,6 +504,8 @@ const Invoices = () => {
 
       setMessage(`${successMessage}${pcConfirmation}`);
       setWarning([...saveSummary.warnings, derivedWarning].filter(Boolean).join(' '));
+      if (deliveryRequested && savedDeliveryTarget) setDeliveryTarget(savedDeliveryTarget);
+      setDeliveryRequested(false);
       resetForm();
       await loadData();
     } catch (err) {
@@ -507,6 +516,7 @@ const Invoices = () => {
   };
 
   const handleEdit = (invoice: Invoice) => {
+    setDeliveryRequested(false);
     const invoiceCreationPayment = getInvoiceCreationPayment(invoice.id);
     const openingBalance = isOpeningBalanceInvoice(invoice);
 
@@ -733,7 +743,9 @@ const Invoices = () => {
     <div>
       <SectionHeader title="Invoices" />
 
+      {deliveryTarget && <DeliveryDialog invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Invoice marked for delivery. Ready for Dispatch synchronisation."); void loadData(); }} />}
       <form style={cardStyle} onSubmit={handleSubmit}>
+        {!editingOpeningBalance && <label style={{ display: "block", marginBottom: 12 }}><input type="checkbox" checked={deliveryRequested} onChange={e => setDeliveryRequested(e.target.checked)} /> Delivery required — enter delivery details after invoice/payment save</label>}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <div style={{ color: '#D4AF37', fontWeight: 800 }}>
@@ -947,6 +959,7 @@ const Invoices = () => {
                     <td style={cellStyle}>{formatMoney(invoice.totalProfit)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.paidAmount)}</td>
                     <td style={cellStyle}>
+                      {!isOpeningBalanceInvoice(invoice) && (isAdmin || invoice.shopId === assignedStaffShopId) && <button type="button" style={{ ...buttonStyle, marginRight: 8, marginBottom: 8 }} onClick={() => setDeliveryTarget(invoice)}>{invoice.deliveryRequired ? "Edit delivery" : "Mark for delivery"}</button>}
                       {canEditInvoice(invoice) ? (
                         <button type="button" style={{ ...buttonStyle, background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', marginRight: 8, marginBottom: 8 }} onClick={() => handleEdit(invoice)}>
                           {isOpeningBalanceInvoice(invoice) ? 'Edit Balance' : 'Edit'}

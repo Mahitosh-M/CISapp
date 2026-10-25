@@ -12,6 +12,7 @@ const Customers = lazy(() => import('./pages/Customers'));
 const Collections = lazy(() => import('./pages/Collections'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const Payments = lazy(() => import('./pages/Payments'));
+const Dispatch = lazy(() => import('./pages/Dispatch'));
 const Intelligence = lazy(() => import('./pages/Intelligence'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Login = lazy(() => import('./pages/Login'));
@@ -83,6 +84,7 @@ const App = () => {
           <Route path="collections" element={<ProtectedRoute allowedRoles={['Staff']}><Collections /></ProtectedRoute>} />
           <Route path="invoices" element={<Invoices />} />
           <Route path="payments" element={<Payments />} />
+          <Route path="dispatch" element={<Dispatch />} />
           <Route path="intelligence" element={<ProtectedRoute allowedRoles={['Admin']}><Intelligence /></ProtectedRoute>} />
           <Route path="analytics" element={<ProtectedRoute allowedRoles={['Admin']}><Analytics /></ProtectedRoute>} />
           <Route path="loyalty" element={<ProtectedRoute allowedRoles={['Admin']}><Loyalty /></ProtectedRoute>} />

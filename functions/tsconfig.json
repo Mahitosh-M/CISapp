@@ -5,11 +5,15 @@
     "outDir": "lib",
     "rootDir": "..",
     "target": "ES2020",
-    "lib": ["ES2020"],
+    "lib": [
+      "ES2022"
+    ],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
