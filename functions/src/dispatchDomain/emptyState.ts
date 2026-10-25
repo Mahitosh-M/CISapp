@@ -1,0 +1,2 @@
+﻿import type { AppState } from './domain';
+export function emptyState(): AppState { return {id:'main',schemaVersion:2,seededAt:new Date().toISOString(),settings:{fuelTolerance:100},users:[],shops:[{id:'SHOP_A',name:'ASHOKA',town:'Maski',address:'',phone:'',active:true},{id:'SHOP_S',name:'SMPA',town:'Sindhanur',address:'',phone:'',active:true}],vehicles:[],customers:[],invoices:[],jobs:[],attempts:[],trips:[],collections:[],fuels:[],salesRequests:[],audit:[],outbox:[]}; }

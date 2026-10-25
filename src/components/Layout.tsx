@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { to: '/collections', label: 'Collections', icon: CircleDollarSign, mobileColor: '#FCA5A5', staffOnly: true },
   { to: '/invoices', label: 'Invoices', icon: FileText, mobileColor: '#86EFAC' },
   { to: '/payments', label: 'Payments', icon: CreditCard, mobileColor: '#FDE047' },
+  { to: '/dispatch', label: 'Dispatch', icon: FileText, mobileColor: '#86EFAC' },
   { to: '/intelligence', label: 'Intelligence', icon: BrainCircuit, mobileColor: '#C4B5FD', adminOnly: true },
   { to: '/analytics', label: 'Analytics', icon: BarChart3, mobileColor: '#93C5FD', adminOnly: true },
   { to: '/loyalty', label: 'Loyalty', icon: Gift, mobileColor: '#FDA4AF', adminOnly: true },

@@ -163,7 +163,12 @@ export interface CreditAuditLog {
   reason: string;
 }
 
+export interface InvoiceDeliveryDetails { routeId?: string; routeName?: string; routeFrom?: string; routeTo?: string; routeDays?: number[]; routeRevision?: number; routeStopId?: string | null; routeStopName?: string | null; required: boolean; scheduledDate: string; address: string; contact: string; packages: number; instructions: string; }
+
 export interface Invoice {
+  deliveryRequired?: boolean;
+  deliveryDetails?: InvoiceDeliveryDetails | null;
+  deliveryRevision?: number;
   id: string;
   invoiceNumber: string;
   customerId: string;

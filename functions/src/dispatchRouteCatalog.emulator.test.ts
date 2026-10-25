@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {initializeApp,getApps} from 'firebase-admin/app';
+import {getFirestore} from 'firebase-admin/firestore';
+test('Weekly route catalogue: admin writes, staff scope, revisions and trusted invoice snapshots',{skip:!process.env.FIRESTORE_EMULATOR_HOST},async()=>{
+ assert.equal(process.env.GCLOUD_PROJECT,'demo-cis-dispatch');if(!getApps().length)initializeApp({projectId:'demo-cis-dispatch'});
+ const {routeCatalog,saveWeeklyRoute}=await import('./dispatchRouteCatalog');const {dispatchServiceForTests:api}=await import('./dispatchBridge');
+ const db=getFirestore(),admin={uid:'weekly-admin',issuer:'delivery-28165',actorId:'weekly-admin',role:'ADMIN' as const,shopIds:['SHOP_A','SHOP_S'],name:'Test admin'},manager={...admin,role:'MANAGER' as const,shopIds:['SHOP_A']},driver={...manager,role:'DRIVER' as const};
+ const route={id:'weekly-test-route',name:'Route 1',from:'A',to:'B',shopIds:['SHOP_A'],days:[1,3],stops:[{id:'s1',name:'Middle stop'}],active:true,revision:0};
+ await db.doc('dispatchRouteTemplates/weekly-test-route').delete();await db.doc('dispatchRouteTemplates/weekly-other-shop').delete();
+ await assert.rejects(saveWeeklyRoute(manager,{value:route}),/Admin required/);await assert.rejects(routeCatalog(driver),/Staff access/);
+ await saveWeeklyRoute(admin,{value:route});await saveWeeklyRoute(admin,{value:{...route,id:'weekly-other-shop',shopIds:['SHOP_S']}});
+ assert.equal((await routeCatalog(manager)).routes.some(r=>r.id==='weekly-other-shop'),false);
+ const results=await Promise.allSettled([saveWeeklyRoute(admin,{value:{...route,revision:1,days:[2]}}),saveWeeklyRoute(admin,{value:{...route,revision:1,days:[4]}})]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const current=(await db.doc('dispatchRouteTemplates/weekly-test-route').get()).data()!;
+ await db.doc('customers/weekly-test-customer').set({name:'Fictional weekly customer'});
+ await db.doc('invoices/weekly-test-invoice').set({customerId:'weekly-test-customer',invoiceNumber:'W-1',shopId:'SHOP_A',totalSales:100});await db.doc('dispatchDeliveryRequests/weekly-test-invoice').delete();
+ const payload={invoiceId:'weekly-test-invoice',required:true,scheduledDate:'2026-10-27',address:'Verified road',contact:'0000000000',packages:1,instructions:'',routeId:route.id,routeStopId:'s1',routeName:'Forged',routeDays:[6]};
+ await api.markDelivery(manager,payload);const request=(await db.doc('dispatchDeliveryRequests/weekly-test-invoice').get()).data()!;
+ assert.equal(request.routeName,'Route 1');assert.deepEqual(request.routeDays,current.days);assert.equal(request.routeStopName,'Middle stop');assert.equal((await db.doc('invoices/weekly-test-invoice').get()).data()!.totalSales,100);
+ await assert.rejects(api.markDelivery(manager,{...payload,routeStopId:'missing'}),/stop no longer exists/);
+ await db.doc('dispatchDeliveryRequests/weekly-test-invoice').update({tripId:'assigned-trip'});await assert.rejects(api.markDelivery(manager,{...payload,routeId:''}),/cannot be removed/);
+ await saveWeeklyRoute(admin,{value:{...current,active:false}});await assert.rejects(api.markDelivery(manager,payload),/inactive/);
+});
