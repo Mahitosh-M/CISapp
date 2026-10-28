@@ -1,5 +1,6 @@
 import type { Invoice, Payment } from '../types';
 import { getInvoicePaymentEffect } from './paymentUtils';
+import type { InvoiceChargeEvent } from './invoiceCharges';
 
 export type CustomerLedgerEntry = {
   id: string;
@@ -11,6 +12,7 @@ export type CustomerLedgerEntry = {
   paymentReceived: number;
   runningBalance: number;
   invoice?: Invoice;
+  charge?: InvoiceChargeEvent;
   payment?: Payment;
   payments?: Payment[];
 };
@@ -137,13 +139,16 @@ export const buildCustomerLedger = (
   options: CustomerLedgerOptions = {}
 ): CustomerLedgerEntry[] => {
   const events = [
-    ...invoices.map((invoice) => ({
+    ...invoices.flatMap((invoice) => [{
       id: invoice.id,
       kind: 'invoice' as const,
       date: getRecordDate(invoice.date, invoice.createdAt),
       createdAt: invoice.createdAt,
-      invoice
-    })),
+      invoice,
+      charge: undefined as InvoiceChargeEvent | undefined
+    }, ...(invoice.lateChargeEvents ?? []).map(charge => ({
+      id:charge.id, kind:'invoice' as const, date:charge.date, createdAt:`${charge.date}T23:59:59.000Z`, invoice, charge
+    }))]),
     ...groupPaymentTransactions(payments).map((paymentGroup) => ({
       id: paymentGroup.id,
       kind: 'payment' as const,
@@ -158,7 +163,7 @@ export const buildCustomerLedger = (
     || (left.kind === right.kind ? left.id.localeCompare(right.id) : left.kind === 'invoice' ? -1 : 1)
   ));
   const netChange = events.reduce((total, event) => {
-    if (event.kind === 'invoice') return total + Math.max(0, numberOrZero(event.invoice.totalSales));
+    if (event.kind === 'invoice') return total + Math.max(0, numberOrZero(event.charge?.amount ?? event.invoice.totalSales));
     return total - event.payments.reduce((paymentTotal, payment) => (
       paymentTotal + getInvoicePaymentEffect(payment) + Math.max(0, numberOrZero(payment.amountUsedForOldBalance))
     ), 0);
@@ -169,7 +174,7 @@ export const buildCustomerLedger = (
 
   return events.map((event) => {
     if (event.kind === 'invoice') {
-      const invoiceAmount = Math.max(0, numberOrZero(event.invoice.totalSales));
+      const invoiceAmount = Math.max(0, numberOrZero(event.charge?.amount ?? event.invoice.totalSales));
       runningBalance += invoiceAmount;
 
       return {
@@ -181,7 +186,8 @@ export const buildCustomerLedger = (
         paymentAmount: 0,
         paymentReceived: 0,
         runningBalance,
-        invoice: event.invoice
+        invoice: event.invoice,
+        charge: event.charge
       };
     }
 

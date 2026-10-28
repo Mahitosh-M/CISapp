@@ -62,10 +62,12 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
   const countdownNumber = invoiceView.invoice.dueDate ? Math.abs(invoiceView.daysRemaining) : '-';
   const countdownLabel = isOverdue ? 'Days Overdue' : 'Days Left';
   const expectedPc = Math.max(0, invoiceView.expectedApc);
+  const chargeBreakdown = (invoiceView.invoice.lateChargesTotal ?? 0) > 0 ? <div style={{color:'#FFF7D6',padding:8,textAlign:'center'}}>Original invoice {formatMoney(invoiceView.invoice.totalSales)} · Overdue charges {formatMoney(invoiceView.invoice.lateChargesTotal ?? 0)} · Total includes charges</div> : null;
 
   if (isPaid) {
     return (
       <div style={cardStyle}>
+        {chargeBreakdown}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 126px', gap: 12, alignItems: 'center' }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
@@ -91,6 +93,7 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
 
   return (
     <div style={cardStyle}>
+      {chargeBreakdown}
       <div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'stretch', textAlign: 'center' }}>
           <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 12, padding: '9px 8px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>

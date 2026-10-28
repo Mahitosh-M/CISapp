@@ -172,11 +172,61 @@ service cloud.firestore {
       return field in data ? data[field] : 0;
     }
 
+    function wholeRupee(value) {
+      return value >= 0 ? int((int(value * 100 + 0.5000001) + 50) / 100) : -int((int(-value * 100 + 0.5000001) + 50) / 100);
+    }
+    function cashClose(a, b) { return a - b < 0.000001 && b - a < 0.000001; }
+    function cashUnroundedBalance(data) { return data.availableBalance - cashNumber(data, 'roundingDelta'); }
+    function validCashRounding(data) {
+      let delta = data.get('roundingDelta', 0);
+      let id = data.get('roundingAuditId', null);
+      let entry = id is string ? getAfter(cashAdjustmentPath(id)).data : {};
+      return delta is number && (delta == 0 ? id == null : (
+        delta >= -0.500001 && delta <= 0.500001
+        && data.availableBalance == wholeRupee(cashUnroundedBalance(data))
+        && id is string && id.size() > 0 && id.size() <= 160
+        && !exists(cashAdjustmentPath(id))
+        && entry.shopId == data.shopId
+        && entry.direction == (delta > 0 ? 'add' : 'deduct')
+        && cashClose(entry.amount, delta > 0 ? delta : -delta)
+      ));
+    }
+    function validRoundingAuditCreate(adjustmentId) {
+      let after = getAfter(cashSummaryPath(request.resource.data.shopId)).data;
+      return validCashActor(request.resource.data.shopId)
+        && validCashAdjustment(request.resource.data, adjustmentId)
+        && after.get('roundingAuditId',null) == adjustmentId
+        && cashClose(after.roundingDelta, request.resource.data.direction == 'add' ? request.resource.data.amount : -request.resource.data.amount)
+        && after.roundingDelta != 0 && after.roundingDelta >= -0.500001 && after.roundingDelta <= 0.500001
+        && after.availableBalance == wholeRupee(cashUnroundedBalance(after));
+    }
+    function validRoundingShopCashUpdate(shopId) {
+      return validCashActor(shopId) && isInitializedShopCash(resource.data)
+        && request.resource.data.lastCashOperationId == request.resource.data.roundingAuditId
+        && request.resource.data.roundingDelta != 0
+        && cashClose(cashUnroundedBalance(request.resource.data), resource.data.availableBalance)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'availableBalance','roundingDelta','roundingAuditId','lastCashOperationId','lastCashOperationType','updatedAt'
+        ]);
+    }
+    function wholeInvoiceAmounts(data) {
+      return cashNumber(data,'salesAmount') == int(cashNumber(data,'salesAmount'))
+        && cashNumber(data,'costAmount') == int(cashNumber(data,'costAmount'))
+        && cashNumber(data,'transportAmount') == int(cashNumber(data,'transportAmount'))
+        && cashNumber(data,'totalSales') == int(cashNumber(data,'totalSales'))
+        && cashNumber(data,'totalCost') == int(cashNumber(data,'totalCost'))
+        && cashNumber(data,'totalProfit') == int(cashNumber(data,'totalProfit'));
+    }
+    function wholePaymentAmounts(data) {
+      return cashNumber(data,'amount') == int(cashNumber(data,'amount'))
+        && cashNumber(data,'cashDiscount') == int(cashNumber(data,'cashDiscount'));
+    }
+
     function validShopCash(data, shopId) {
       return data.keys().hasAll(['shopId', 'availableBalance', 'totalCollections', 'updatedAt'])
         && data.keys().hasOnly([
           'shopId',
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalCollections',
           'totalExpenses',
           'totalTransferredIn',
@@ -191,6 +241,8 @@ service cloud.firestore {
         && data.shopId == shopId
         && validShopId(data.shopId)
         && data.availableBalance is number
+        && data.availableBalance == int(data.availableBalance)
+        && validCashRounding(data)
         && data.availableBalance >= -1000000000000
         && data.availableBalance <= 1000000000000
         && data.totalCollections is number
@@ -210,7 +262,7 @@ service cloud.firestore {
             && data.lastCashOperationId.size() <= 160
             && data.lastCashOperationType in [
               'payment', 'invoice_delete', 'expense', 'expense_edit', 'expense_delete', 'transfer', 'transfer_edit', 'transfer_delete',
-              'adjustment', 'initialization'
+              'adjustment', 'initialization', 'rounding'
             ])
         )
         && (
@@ -270,10 +322,8 @@ service cloud.firestore {
           && afterSummary.data.lastCashOperationId == paymentId
           && afterSummary.data.lastCashOperationType == 'payment'
           && (exists(path)
-            ? afterSummary.data.availableBalance == get(path).data.availableBalance + delta
-              && afterSummary.data.totalCollections == get(path).data.totalCollections + delta
-            : afterSummary.data.availableBalance == delta
-              && afterSummary.data.totalCollections == delta));
+            ? cashClose(cashUnroundedBalance(afterSummary.data), get(path).data.availableBalance + delta)&& afterSummary.data.totalCollections == get(path).data.totalCollections + delta
+            : cashClose(cashUnroundedBalance(afterSummary.data), delta)&& afterSummary.data.totalCollections == delta));
     }
 
     function validPaymentCashMutation(paymentId) {
@@ -287,7 +337,7 @@ service cloud.firestore {
       return canWritePaymentShopCash(shopId)
         && request.resource.data.keys().hasOnly([
           'shopId',
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalCollections',
           'lastCashOperationId',
           'lastCashOperationType',
@@ -295,8 +345,7 @@ service cloud.firestore {
         ])
         && request.resource.data.lastCashOperationType == 'payment'
         && delta > 0
-        && request.resource.data.availableBalance == delta
-        && request.resource.data.totalCollections == delta;
+        && cashClose(cashUnroundedBalance(request.resource.data), delta)&& request.resource.data.totalCollections == delta;
     }
 
     function validPaymentShopCashUpdate(shopId) {
@@ -306,15 +355,13 @@ service cloud.firestore {
         && request.resource.data.lastCashOperationType == 'payment'
         && delta != 0
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalCollections',
           'lastCashOperationId',
           'lastCashOperationType',
           'updatedAt'
         ])
-        && request.resource.data.availableBalance
-          == resource.data.availableBalance + delta
-        && request.resource.data.totalCollections
+        && cashClose(cashUnroundedBalance(request.resource.data), resource.data.availableBalance + delta)&& request.resource.data.totalCollections
           == resource.data.totalCollections + delta;
     }
 
@@ -326,7 +373,7 @@ service cloud.firestore {
           && existsAfter(summaryPath)
           && summaryAfter.data.lastCashOperationId == invoiceId
           && summaryAfter.data.lastCashOperationType == 'invoice_delete'
-          && summaryAfter.data.availableBalance - get(summaryPath).data.availableBalance <= -paymentAmount
+          && cashUnroundedBalance(summaryAfter.data) - get(summaryPath).data.availableBalance <= -paymentAmount
           && summaryAfter.data.totalCollections - get(summaryPath).data.totalCollections <= -paymentAmount);
     }
 
@@ -346,7 +393,7 @@ service cloud.firestore {
 
     function validInvoiceDeleteShopCashUpdate(shopId) {
       let invoiceId = request.resource.data.lastCashOperationId;
-      let delta = request.resource.data.availableBalance - resource.data.availableBalance;
+      let delta = cashUnroundedBalance(request.resource.data) - resource.data.availableBalance;
       return isAdmin()
         && request.resource.data.shopId == shopId
         && request.resource.data.lastCashOperationType == 'invoice_delete'
@@ -354,7 +401,7 @@ service cloud.firestore {
         && !existsAfter(invoicePath(invoiceId))
         && delta < 0
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalCollections',
           'lastCashOperationId',
           'lastCashOperationType',
@@ -397,6 +444,7 @@ service cloud.firestore {
         && expenseId.size() <= 160
         && validShopId(data.shopId)
         && data.amount is number
+        && data.amount == int(data.amount)
         && data.amount > 0
         && data.amount <= 100000000
         && (!('category' in data)
@@ -434,15 +482,13 @@ service cloud.firestore {
         && expenseAfter.data.shopId == shopId
         && isInitializedShopCash(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalExpenses',
           'lastCashOperationId',
           'lastCashOperationType',
           'updatedAt'
         ])
-        && request.resource.data.availableBalance
-          == resource.data.availableBalance - expenseAfter.data.amount
-        && cashNumber(request.resource.data, 'totalExpenses')
+        && cashClose(cashUnroundedBalance(request.resource.data), resource.data.availableBalance - expenseAfter.data.amount)&& cashNumber(request.resource.data, 'totalExpenses')
           == cashNumber(resource.data, 'totalExpenses') + expenseAfter.data.amount;
     }
 
@@ -463,7 +509,7 @@ service cloud.firestore {
         && expenseId.size() <= 160
         && data.keys().hasAll(['shopId', 'amount', 'description', 'createdAt', 'createdBy'])
         && data.keys().hasOnly([
-          'shopId', 'amount', 'category', 'description', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
+          'shopId', 'amount', 'category', 'description', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'source', 'dispatchFuelId', 'dispatchTripId', 'paymentSource', 'purchasedAt'
         ])
         && validShopId(data.shopId)
         && data.amount is number
@@ -488,7 +534,8 @@ service cloud.firestore {
     }
 
     function validEditedCashExpense(afterData, beforeData, expenseId) {
-      return validStoredCashExpense(afterData, expenseId)
+      return afterData.amount == int(afterData.amount)
+        && validStoredCashExpense(afterData, expenseId)
         && afterData.keys().hasAll(['category', 'updatedAt', 'updatedBy'])
         && afterData.shopId == beforeData.shopId
         && afterData.createdAt == beforeData.createdAt
@@ -578,10 +625,9 @@ service cloud.firestore {
         && summaryAfter.data.lastCashOperationType
           == (correction.action == 'edit' ? 'expense_edit' : 'expense_delete')
         && summaryAfter.data.diff(summaryBefore.data).affectedKeys().hasOnly([
-          'availableBalance', 'totalExpenses', 'lastCashOperationId', 'lastCashOperationType', 'updatedAt'
+          'availableBalance', 'roundingDelta', 'roundingAuditId', 'totalExpenses', 'lastCashOperationId', 'lastCashOperationType', 'updatedAt'
         ])
-        && summaryAfter.data.availableBalance - summaryBefore.data.availableBalance == -amountDelta
-        && cashNumber(summaryAfter.data, 'totalExpenses')
+        && cashClose(cashUnroundedBalance(summaryAfter.data) - summaryBefore.data.availableBalance, -amountDelta)&& cashNumber(summaryAfter.data, 'totalExpenses')
           - cashNumber(summaryBefore.data, 'totalExpenses') == amountDelta
         && cashNumber(summaryAfter.data, 'totalExpenses') >= 0;
     }
@@ -691,8 +737,7 @@ service cloud.firestore {
         && existsAfter(summaryPath)
         && summaryAfter.data.lastCashOperationId == transferId
         && summaryAfter.data.lastCashOperationType == 'transfer_edit'
-        && summaryAfter.data.availableBalance - get(summaryPath).data.availableBalance == balanceDelta
-        && cashNumber(summaryAfter.data, totalField)
+        && cashClose(cashUnroundedBalance(summaryAfter.data) - get(summaryPath).data.availableBalance, balanceDelta)&& cashNumber(summaryAfter.data, totalField)
           - cashNumber(get(summaryPath).data, totalField) == totalDelta;
     }
 
@@ -763,28 +808,24 @@ service cloud.firestore {
         && (
           (shopId == transferAfter.data.fromShopId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'availableBalance',
+              'availableBalance', 'roundingDelta', 'roundingAuditId',
               'totalTransferredOut',
               'lastCashOperationId',
               'lastCashOperationType',
               'updatedAt'
             ])
-            && request.resource.data.availableBalance >= 0
-            && request.resource.data.availableBalance
-              == resource.data.availableBalance - transferAfter.data.amount
-            && cashNumber(request.resource.data, 'totalTransferredOut')
+            && cashUnroundedBalance(request.resource.data) >= 0
+            && cashClose(cashUnroundedBalance(request.resource.data), resource.data.availableBalance - transferAfter.data.amount)&& cashNumber(request.resource.data, 'totalTransferredOut')
               == cashNumber(resource.data, 'totalTransferredOut') + transferAfter.data.amount)
           || (shopId == transferAfter.data.toShopId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'availableBalance',
+              'availableBalance', 'roundingDelta', 'roundingAuditId',
               'totalTransferredIn',
               'lastCashOperationId',
               'lastCashOperationType',
               'updatedAt'
             ])
-            && request.resource.data.availableBalance
-              == resource.data.availableBalance + transferAfter.data.amount
-            && cashNumber(request.resource.data, 'totalTransferredIn')
+            && cashClose(cashUnroundedBalance(request.resource.data), resource.data.availableBalance + transferAfter.data.amount)&& cashNumber(request.resource.data, 'totalTransferredIn')
               == cashNumber(resource.data, 'totalTransferredIn') + transferAfter.data.amount)
         );
     }
@@ -805,26 +846,24 @@ service cloud.firestore {
         && (
           (shopId == transferBefore.data.fromShopId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'availableBalance',
+              'availableBalance', 'roundingDelta', 'roundingAuditId',
               'totalTransferredOut',
               'lastCashOperationId',
               'lastCashOperationType',
               'updatedAt'
             ])
-            && request.resource.data.availableBalance - resource.data.availableBalance == -amountDelta
-            && cashNumber(request.resource.data, 'totalTransferredOut')
+            && cashClose(cashUnroundedBalance(request.resource.data) - resource.data.availableBalance, -amountDelta)&& cashNumber(request.resource.data, 'totalTransferredOut')
               - cashNumber(resource.data, 'totalTransferredOut') == amountDelta
-            && (amountDelta < 0 || request.resource.data.availableBalance >= 0))
+            && (amountDelta < 0 || cashUnroundedBalance(request.resource.data) >= 0))
           || (shopId == transferBefore.data.toShopId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'availableBalance',
+              'availableBalance', 'roundingDelta', 'roundingAuditId',
               'totalTransferredIn',
               'lastCashOperationId',
               'lastCashOperationType',
               'updatedAt'
             ])
-            && request.resource.data.availableBalance - resource.data.availableBalance == amountDelta
-            && cashNumber(request.resource.data, 'totalTransferredIn')
+            && cashClose(cashUnroundedBalance(request.resource.data) - resource.data.availableBalance, amountDelta)&& cashNumber(request.resource.data, 'totalTransferredIn')
               - cashNumber(resource.data, 'totalTransferredIn') == amountDelta)
         );
     }
@@ -837,8 +876,7 @@ service cloud.firestore {
         && isInitializedShopCash(get(summaryPath).data)
         && summaryAfter.data.lastCashOperationId == transferId
         && summaryAfter.data.lastCashOperationType == 'transfer_delete'
-        && summaryAfter.data.availableBalance - get(summaryPath).data.availableBalance == balanceDelta
-        && cashNumber(summaryAfter.data, totalField)
+        && cashClose(cashUnroundedBalance(summaryAfter.data) - get(summaryPath).data.availableBalance, balanceDelta)&& cashNumber(summaryAfter.data, totalField)
           - cashNumber(get(summaryPath).data, totalField) == totalDelta;
     }
 
@@ -909,28 +947,24 @@ service cloud.firestore {
         && (
           (shopId == transferBefore.data.fromShopId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'availableBalance',
+              'availableBalance', 'roundingDelta', 'roundingAuditId',
               'totalTransferredOut',
               'lastCashOperationId',
               'lastCashOperationType',
               'updatedAt'
             ])
-            && request.resource.data.availableBalance - resource.data.availableBalance
-              == transferBefore.data.amount
-            && cashNumber(request.resource.data, 'totalTransferredOut')
+            && cashClose(cashUnroundedBalance(request.resource.data) - resource.data.availableBalance, transferBefore.data.amount)&& cashNumber(request.resource.data, 'totalTransferredOut')
               - cashNumber(resource.data, 'totalTransferredOut') == -transferBefore.data.amount
             && cashNumber(request.resource.data, 'totalTransferredOut') >= 0)
           || (shopId == transferBefore.data.toShopId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'availableBalance',
+              'availableBalance', 'roundingDelta', 'roundingAuditId',
               'totalTransferredIn',
               'lastCashOperationId',
               'lastCashOperationType',
               'updatedAt'
             ])
-            && request.resource.data.availableBalance - resource.data.availableBalance
-              == -transferBefore.data.amount
-            && cashNumber(request.resource.data, 'totalTransferredIn')
+            && cashClose(cashUnroundedBalance(request.resource.data) - resource.data.availableBalance, -transferBefore.data.amount)&& cashNumber(request.resource.data, 'totalTransferredIn')
               - cashNumber(resource.data, 'totalTransferredIn') == -transferBefore.data.amount
             && cashNumber(request.resource.data, 'totalTransferredIn') >= 0)
         );
@@ -962,17 +996,17 @@ service cloud.firestore {
       let summaryPath = cashSummaryPath(request.resource.data.shopId);
       let summaryBefore = get(summaryPath);
       let summaryAfter = getAfter(summaryPath);
-      return isAdmin()
+      return validRoundingAuditCreate(adjustmentId) || (isAdmin()
+        && request.resource.data.amount == int(request.resource.data.amount)
         && validCashAdjustment(request.resource.data, adjustmentId)
         && exists(summaryPath)
         && existsAfter(summaryPath)
         && summaryAfter.data.lastCashOperationId == adjustmentId
         && summaryAfter.data.lastCashOperationType == 'adjustment'
-        && summaryAfter.data.availableBalance
-          == summaryBefore.data.availableBalance
+        && cashClose(cashUnroundedBalance(summaryAfter.data), summaryBefore.data.availableBalance
             + (request.resource.data.direction == 'add'
               ? request.resource.data.amount
-              : -request.resource.data.amount);
+              : -request.resource.data.amount)));
     }
 
     function validAdjustmentShopCashUpdate(shopId) {
@@ -985,16 +1019,15 @@ service cloud.firestore {
         && adjustmentAfter.data.shopId == shopId
         && isInitializedShopCash(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'lastCashOperationId',
           'lastCashOperationType',
           'updatedAt'
         ])
-        && request.resource.data.availableBalance
-          == resource.data.availableBalance
+        && cashClose(cashUnroundedBalance(request.resource.data), resource.data.availableBalance
             + (adjustmentAfter.data.direction == 'add'
               ? adjustmentAfter.data.amount
-              : -adjustmentAfter.data.amount);
+              : -adjustmentAfter.data.amount));
     }
 
     function validCashInitialization(data, shopId) {
@@ -1014,7 +1047,7 @@ service cloud.firestore {
     function validNewInitializationSummary(initialization, summary) {
       return summary.keys().hasOnly([
           'shopId',
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalCollections',
           'totalExpenses',
           'totalTransferredIn',
@@ -1026,8 +1059,7 @@ service cloud.firestore {
           'initializedBy',
           'updatedAt'
         ])
-        && summary.availableBalance == initialization.openingBalance
-        && summary.totalCollections == 0
+        && cashClose(cashUnroundedBalance(summary), initialization.openingBalance)&& summary.totalCollections == 0
         && summary.totalExpenses == 0
         && summary.totalTransferredIn == 0
         && summary.totalTransferredOut == 0;
@@ -1036,7 +1068,7 @@ service cloud.firestore {
     function validExistingInitializationSummary(initialization, beforeSummary, afterSummary) {
       return !isInitializedShopCash(beforeSummary)
         && afterSummary.diff(beforeSummary).affectedKeys().hasOnly([
-          'availableBalance',
+          'availableBalance', 'roundingDelta', 'roundingAuditId',
           'totalExpenses',
           'totalTransferredIn',
           'totalTransferredOut',
@@ -1047,9 +1079,7 @@ service cloud.firestore {
           'initializedBy',
           'updatedAt'
         ])
-        && afterSummary.availableBalance
-          == beforeSummary.availableBalance + initialization.openingBalance
-        && afterSummary.totalCollections == beforeSummary.totalCollections
+        && cashClose(cashUnroundedBalance(afterSummary), beforeSummary.availableBalance + initialization.openingBalance)&& afterSummary.totalCollections == beforeSummary.totalCollections
         && cashNumber(afterSummary, 'totalExpenses') == cashNumber(beforeSummary, 'totalExpenses')
         && cashNumber(afterSummary, 'totalTransferredIn') == cashNumber(beforeSummary, 'totalTransferredIn')
         && cashNumber(afterSummary, 'totalTransferredOut') == cashNumber(beforeSummary, 'totalTransferredOut');
@@ -1057,7 +1087,7 @@ service cloud.firestore {
 
     function validInitializationSummaryIdentity(shopId, initialization, summary) {
       return isInitializedShopCash(summary)
-        && summary.availableBalance >= 0
+        && cashUnroundedBalance(summary) >= 0
         && summary.openingBalance == initialization.openingBalance
         && summary.lastCashOperationId == shopId
         && summary.lastCashOperationType == 'initialization'
@@ -2066,7 +2096,16 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if isActive();
-      allow write: if isAdmin();
+      allow write: if isAdmin() && settingId != 'invoiceLateChargePolicy';
+    }
+
+    match /invoiceLateCharges/{chargeId} {
+      allow read: if isTeam() || ownsCustomerRecord(resource.data);
+      allow write: if false;
+    }
+    match /invoiceChargePolicyAudit/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /customers/{customerDocId} {
@@ -2078,12 +2117,17 @@ service cloud.firestore {
     match /invoices/{invoiceId} {
       allow read: if isTeam() || ownsCustomerRecord(resource.data);
       allow create: if isTeam()
+        && !request.resource.data.keys().hasAny(['lateChargePolicy','lateChargesTotal','lateChargeEvents','nextLateChargeDate','lateChargesUpdatedAt'])
+        && wholeInvoiceAmounts(request.resource.data)
         && validInvoicePcPolicyVersionOnCreate()
         && validBranchCreateForActor(request.resource.data);
       allow update: if isTeam()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lateChargePolicy','lateChargesTotal','lateChargeEvents','nextLateChargeDate','lateChargesUpdatedAt'])
+        && (!('lateChargePolicy' in resource.data) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['customerId','date','invoiceType','isOpeningBalance']))
+        && (wholeInvoiceAmounts(request.resource.data) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['salesAmount','costAmount','transportAmount','totalSales','totalCost','totalProfit']))
         && preservesInvoicePcPolicyVersion()
         && validInvoiceBranchUpdateForActor();
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() && (!('lateChargesTotal' in resource.data) || resource.data.lateChargesTotal == 0);
     }
 
     match /payments/{paymentId} {
@@ -2091,11 +2135,13 @@ service cloud.firestore {
       allow create: if isTeam()
         && validPaymentPcPolicyVersionOnCreate()
         && validBranchCreateForActor(request.resource.data)
+        && wholePaymentAmounts(request.resource.data)
         && validPaymentCashFields(request.resource.data)
         && validPaymentCashMutation(paymentId);
       allow update: if isTeam()
         && preservesPaymentPcPolicyVersion()
         && validPaymentBranchUpdateForActor()
+        && wholePaymentAmounts(request.resource.data)
         && validPaymentCashFields(request.resource.data)
         && validPaymentCashMutation(paymentId);
       allow delete: if isAdmin()
@@ -2144,6 +2190,8 @@ service cloud.firestore {
             && validTransferEditShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'transfer_delete'
             && validTransferDeleteShopCashUpdate(shopId))
+          || (request.resource.data.lastCashOperationType == 'rounding'
+            && validRoundingShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'adjustment'
             && validAdjustmentShopCashUpdate(shopId))
           || (request.resource.data.lastCashOperationType == 'initialization'

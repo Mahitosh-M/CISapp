@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
@@ -207,7 +208,7 @@ const Payments = () => {
     return customerInvoices
       .map((invoice) => {
         const paidAmount = getPaidAmountForInvoice(invoice.id, editingPaymentId);
-        const pendingAmount = getPendingAmount(invoice.totalSales, paidAmount);
+        const pendingAmount = getPendingAmount(invoiceReceivableAmount(invoice), paidAmount);
 
         return {
           ...invoice,
@@ -232,7 +233,7 @@ const Payments = () => {
 
   const selectedInvoice = invoices.find((invoice) => invoice.id === formData.invoiceId);
   const selectedInvoicePaid = selectedInvoice ? getPaidAmountForInvoice(selectedInvoice.id, editingPaymentId) : 0;
-  const selectedInvoiceOutstanding = selectedInvoice ? Math.max(0, selectedInvoice.totalSales - selectedInvoicePaid) : 0;
+  const selectedInvoiceOutstanding = selectedInvoice ? Math.max(0, invoiceReceivableAmount(selectedInvoice) - selectedInvoicePaid) : 0;
   const amountAppliedToInvoicePreview = formData.amount;
   const paymentEffect = amountAppliedToInvoicePreview + formData.cashDiscount;
   const selectedInvoiceOptions = selectedInvoiceIds

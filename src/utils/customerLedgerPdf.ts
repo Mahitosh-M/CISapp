@@ -112,7 +112,7 @@ export const createCustomerLedgerPdf = async ({
     const totalCashDiscount = paymentParts.reduce((total, part) => total + Math.max(0, part.cashDiscount || 0), 0);
     const totalAdvanceCreated = paymentParts.reduce((total, part) => total + Math.max(0, part.advanceCreatedAmount || 0), 0);
     const invoiceFullyPaid = Boolean(invoice && (paidByInvoiceId.get(invoice.id) ?? 0) >= invoice.totalSales);
-    const entryLabel = payment?.paymentKind === 'advance_application'
+    const entryLabel = row.charge ? 'Overdue charge' : payment?.paymentKind === 'advance_application'
       ? 'Advance'
       : row.kind === 'payment'
         ? 'Payment'

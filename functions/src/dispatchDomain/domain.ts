@@ -179,6 +179,8 @@ export interface Collection {
   digitalVerified: boolean;
 }
 export interface Fuel {
+  calculatedAmount?: number;
+  roundingAdjustment?: number;
   cashExpenseId?: string;
   cashPostedAt?: string;
   id: ID;
@@ -187,8 +189,9 @@ export interface Fuel {
   driverId: ID;
   shopId: ID;
   at: string;
-  litres: number;
-  rate: number;
+  litres: number | null;
+  rate: number | null;
+  entryMode?: "bill_amount" | "quantity_rate";
   amount: number;
   pump: string;
   odometer: number | null;
@@ -258,6 +261,7 @@ export interface AppState {
       {
         cloudId: string;
         status: string;
+        reviewedAt?: string;
         postedAmount: number;
         receiptIds: string[];
         unallocated: number;
@@ -299,6 +303,7 @@ export const money = (paise: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(paise / 100);
 export function paise(value: string | number): number {
@@ -310,6 +315,11 @@ export function paise(value: string | number): number {
   if (!Number.isSafeInteger(n)) throw new Error("Amount is too large");
   return n;
 }
+export function wholePaise(value: string | number): number {
+  const amount = paise(value);
+  if (amount % 100 !== 0) throw new Error('Enter a whole rupee amount');
+  return amount;
+}
 export const timestamp = (iso: string) =>
   new Intl.DateTimeFormat("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -319,10 +329,10 @@ export const timestamp = (iso: string) =>
 export const activeJob = (j: DeliveryJob) =>
   !["Delivered", "Cancelled"].includes(j.status);
 
-// Integer paise rate and hundredths of litres; round only the final bill.
+// Exact calculation inputs; round only the final bill to a whole rupee.
 export function fuelBill(litres: string | number, ratePaise: number): number {
   const product = paise(litres) * ratePaise;
   if (!Number.isSafeInteger(ratePaise) || ratePaise <= 0 || !Number.isSafeInteger(product))
     throw new Error("Invalid fuel quantity or rate");
-  return Math.round(product / 100);
+  return Math.round(product / 10000) * 100;
 }

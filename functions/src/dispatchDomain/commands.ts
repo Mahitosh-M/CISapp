@@ -30,6 +30,10 @@ import {
   advanceRemaining,
   approvedReadings,
 } from "./rules";
+function wholeAmount(value: number, label: string, min = 0) {
+  integer(value, label, min);
+  assert(value % 100 === 0, label + ' must be a whole rupee amount');
+}
 export type Command =
   | {
       type: "saveMaster";
@@ -251,8 +255,8 @@ export function applyCommand(
         "Reference already exists",
       );
       assert(v.number.trim(), "Invoice reference required");
-      integer(v.amount, "Reference value", 1);
-      integer(v.outstanding, "Outstanding");
+      wholeAmount(v.amount, "Reference value", 1);
+      wholeAmount(v.outstanding, "Outstanding");
       assert(
         v.outstanding <= v.amount,
         "Outstanding cannot exceed reference amount",
@@ -416,7 +420,7 @@ export function applyCommand(
         v.name.trim() && v.stops.length > 0,
         "Route name and at least one stop required",
       );
-      integer(v.openingAdvance, "Cash advance");
+      wholeAmount(v.openingAdvance, "Cash advance");
       const jobIds = new Set<string>();
       for (const stop of v.stops) {
         assert(find(s.customers, stop.customerId).active, "Customer inactive");
@@ -728,7 +732,7 @@ export function applyCommand(
         ["Cash", "UPI", "Bank transfer", "Credit"].includes(v.mode),
         "Invalid mode",
       );
-      integer(v.amount, "Amount");
+      wholeAmount(v.amount, "Amount");
       assert(v.invoiceIds.length > 0, "Select invoice references");
       for (const id of v.invoiceIds) {
         const inv = find(s.invoices, id);
@@ -796,13 +800,13 @@ export function applyCommand(
             inv.customerId === v.customerId && inv.shopId === v.shopId,
             "Allocation outside authorised customer / shop",
           );
-          integer(a.amount, "Allocation", 1);
+          wholeAmount(a.amount, "Allocation", 1);
           assert(
             a.amount <= inv.outstanding,
             "Balance changed / allocation exceeds latest outstanding",
           );
           total += a.amount;
-          integer(total, "Allocation total");
+          wholeAmount(total, "Allocation total");
         }
         assert(total <= v.amount, "Allocations exceed amount received");
         for (const a of allocations)
@@ -856,13 +860,20 @@ export function applyCommand(
           existing.driverId === actor.id && existing.tripId === v.tripId,
           "Claim ownership mismatch",
         );
-      positive(v.litres, "Litres");
-      integer(v.rate, "Rate", 1);
-      integer(v.amount, "Bill", 1);
-      assert(
-        v.amount === fuelBill(v.litres, v.rate),
-        "Litres times rate does not match bill",
-      );
+      wholeAmount(v.amount, "Bill", 100);
+      if (v.litres === null && v.rate === null) {
+        v.entryMode = "bill_amount";
+        v.calculatedAmount = v.amount;
+        v.roundingAdjustment = 0;
+        v.fullTank = false;
+      } else {
+        assert(v.litres !== null && v.rate !== null, "Use amount-only entry or provide both calculation inputs");
+        positive(v.litres, "Litres");integer(v.rate, "Rate", 1);
+        assert(v.amount === fuelBill(v.litres, v.rate), "Litres times rate does not match bill");
+        v.entryMode = "quantity_rate";
+        v.calculatedAmount = Math.round((Math.round(v.litres * 100) * v.rate) / 100);
+        v.roundingAdjustment = v.amount - v.calculatedAmount;
+      }
       assert(hasEvidence(v.receiptId), "Receipt photograph required");
       assert(!Number.isNaN(Date.parse(v.at)), "Purchase timestamp required");
       if (v.odometer !== null) {
@@ -1051,7 +1062,7 @@ export function applyCommand(
         !s.collections.some((x) => x.tripId === t.id && x.status === "Pending"),
         "Review collections before physical handover",
       );
-      integer(c.amount, "Cash physically received");
+      wholeAmount(c.amount, "Cash physically received");
       const expected = cashSummary(s, t).expected;
       // Confirming the numeric discrepancy records review even without a note.
       t.cashReviewedExpected = expected;

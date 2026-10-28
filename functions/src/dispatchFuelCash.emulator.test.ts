@@ -8,7 +8,7 @@ import type {Fuel} from './dispatchDomain/domain';
 const enabled=!!process.env.FIRESTORE_EMULATOR_HOST;
 test('Fuel CashApp posting: atomic, exactly once, funding-aware and no customer receipts',{skip:!enabled},async()=>{
  const db=getFirestore(initializeApp({projectId:'demo-dispatch-fuel'},'fuel-cash-tests'));
- for(const name of ['shopCash','cashExpenses','dispatchFuelPostings','dispatchAudit','payments'])
+ for(const name of ['shopCash','cashExpenses','dispatchFuelPostings','dispatchAudit','payments','cashAdjustments'])
   for(const d of (await db.collection(name).get()).docs)await d.ref.delete();
  const s=emptyState();
  const actor={uid:'test-manager',actorId:'test-manager',issuer:'cisapp-236ab',role:'MANAGER' as const,shopIds:['SHOP_A'],name:'Fictional manager'};
@@ -20,11 +20,11 @@ test('Fuel CashApp posting: atomic, exactly once, funding-aware and no customer 
  const posted=await Promise.all([post(base),post(base),post(base)]);
  assert.equal(new Set(posted.map(f=>f.cashExpenseId)).size,1);
  assert.equal((await db.collection('cashExpenses').get()).size,1);
- assert.equal((await db.doc('shopCash/SHOP_A').get()).data()?.availableBalance,9016.1);
- assert.equal((await db.doc('shopCash/SHOP_A').get()).data()?.totalExpenses,983.9);
+ assert.equal((await db.doc('shopCash/SHOP_A').get()).data()?.availableBalance,9016);
+ assert.equal((await db.doc('shopCash/SHOP_A').get()).data()?.totalExpenses,984);
  const record=(await db.collection('cashExpenses').get()).docs[0].data();
  assert.equal(record.category,'fuel');assert.match(record.description,/Diesel/);
- assert.equal(record.amount,983.9);assert.equal(record.dispatchFuelId,base.id);
+ assert.equal(record.amount,984);const marker=(await db.collection('dispatchFuelPostings').get()).docs[0].data();assert.equal(marker.postedAmountPaise,98400);assert.equal(marker.roundingAdjustmentPaise,10);assert.equal(record.dispatchFuelId,base.id);
  const personal={...base,id:'personal',source:'Personal' as const,reimbursement:'Pending' as const};
  await post(personal);assert.equal((await db.collection('cashExpenses').get()).size,1,'Approval alone does not pay personal reimbursement');
  await post({...personal,reimbursement:'Settled'});await post({...personal,reimbursement:'Settled'});
@@ -34,5 +34,5 @@ test('Fuel CashApp posting: atomic, exactly once, funding-aware and no customer 
  // An external correction/deletion must never cause automatic recreation/double deduction.
  await db.doc('cashExpenses/'+posted[0].cashExpenseId).delete();
  await assert.rejects(()=>post(base),/accounting review/);
- assert.equal(Math.round((await db.doc('shopCash/SHOP_A').get()).data()?.totalExpenses*100),196780);
+ assert.equal(Math.round((await db.doc('shopCash/SHOP_A').get()).data()?.totalExpenses*100),196800);
 });

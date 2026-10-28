@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import { useEffect, useMemo, useState } from 'react';
 import { CircleDollarSign, Download } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
@@ -132,7 +133,7 @@ const Collections = () => {
         const notYetDueAmount = invoices
           .filter((invoice) => invoice.customerId === customer.id)
           .filter((invoice) => getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer.tier, settings) >= today)
-          .reduce((sum, invoice) => sum + getPendingAmount(invoice.totalSales, paymentsByInvoiceId.get(invoice.id) ?? 0), 0);
+          .reduce((sum, invoice) => sum + getPendingAmount(invoiceReceivableAmount(invoice), paymentsByInvoiceId.get(invoice.id) ?? 0), 0);
         return {
           customer,
           outstandingAmount: Math.max(0, (customer.totalOutstandingAmount ?? 0) - notYetDueAmount),

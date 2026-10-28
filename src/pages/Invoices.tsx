@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import { Link } from 'react-router-dom';
 import { Truck, ArrowRight } from 'lucide-react';
 import DeliveryDialog, { type DeliveryTarget } from '../components/DeliveryDialog';
@@ -239,7 +240,7 @@ const Invoices = () => {
     const rows = invoices
       .map((invoice) => {
         const paidAmount = getPaidAmount(invoice.id);
-        const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
+        const outstanding = getPendingAmount(invoiceReceivableAmount(invoice), paidAmount);
         const customer = customers.find((item) => item.id === invoice.customerId);
         const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, customer?.tier ?? 'Tier 4', settings);
         const latestInvoiceId = customer?.latestOutstandingInvoiceId || latestLoadedInvoiceIdByCustomer.get(invoice.customerId);
@@ -588,7 +589,7 @@ const Invoices = () => {
 
   const handlePrint = (invoice: Invoice) => {
     const paidAmount = getPaidAmount(invoice.id);
-    const outstanding = getPendingAmount(invoice.totalSales, paidAmount);
+    const outstanding = getPendingAmount(invoiceReceivableAmount(invoice), paidAmount);
     const printWindow = window.open('', '_blank', 'width=900,height=700');
 
     if (!printWindow) return;

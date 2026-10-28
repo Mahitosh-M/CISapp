@@ -1,3 +1,4 @@
+import {invoiceReceivableAt} from './invoiceCharges';
 import { isValidBonusInvoice } from './bonusPc';
 import type { AppSettings, Invoice, Payment, ShopId } from '../types';
 import { getBusinessInvoices } from './openingBalance';
@@ -95,10 +96,10 @@ const paymentsForInvoice = (invoice: Invoice, payments: Payment[], endDate: stri
 };
 
 const amountBefore = (invoice: Invoice, parts: SettledPart[], date: string) =>
-  getPendingAmount(invoice.totalSales, parts.filter((part) => part.date < date).reduce((sum, part) => sum + part.effect, 0));
+  getPendingAmount(invoiceReceivableAt(invoice,date,false), parts.filter((part) => part.date < date).reduce((sum, part) => sum + part.effect, 0));
 
-const amountAtEnd = (invoice: Invoice, parts: SettledPart[]) =>
-  getPendingAmount(invoice.totalSales, parts.reduce((sum, part) => sum + part.effect, 0));
+const amountAtEnd = (invoice: Invoice, parts: SettledPart[], date: string) =>
+  getPendingAmount(invoiceReceivableAt(invoice,date), parts.reduce((sum, part) => sum + part.effect, 0));
 
 const ageBucket = (days: number): CollectionAgeBucket => {
   if (days <= 7) return '1-7';
@@ -141,7 +142,7 @@ export const buildCollectionHealth = (
       const parts = paymentsForInvoice(invoice, payments, toDate);
       const opening = dueDate < fromDate ? amountBefore(invoice, parts, fromDate) : 0;
       const dueAtDueDate = dueDate >= fromDate && dueDate <= toDate ? amountBefore(invoice, parts, dueDate) : 0;
-      const closing = dueDate < toDate ? amountAtEnd(invoice, parts) : 0;
+      const closing = dueDate < toDate ? amountAtEnd(invoice, parts, toDate) : 0;
       const target = branchAware ? byShop[invoice.shopId] : overall;
       const isOpening = opening > 0;
       const dueObligation = isOpening ? opening : dueAtDueDate;
@@ -178,7 +179,7 @@ export const buildCollectionHealth = (
       }
 
       const finalPart = parts.reduce<SettledPart | undefined>((latest, part) => (latest && latest.date >= part.date ? latest : part), undefined);
-      if (finalPart && amountAtEnd(invoice, parts) === 0 && finalPart.date >= fromDate && finalPart.date <= toDate) {
+      if (finalPart && amountAtEnd(invoice, parts, toDate) === 0 && finalPart.date >= fromDate && finalPart.date <= toDate) {
         target.paymentDelays.push(signedDaysBetween(dueDate, finalPart.date));
       }
     });

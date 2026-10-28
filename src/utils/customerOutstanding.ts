@@ -16,6 +16,7 @@ interface InvoiceLedgerInput {
   totalSales: number;
   date: string;
   createdAt: string;
+  lateChargeEvents?: Array<{id:string;date:string;createdAt:string;amount:number}>;
 }
 
 interface PaymentLedgerInput {
@@ -66,6 +67,9 @@ export const buildInvoiceBalanceCheckpoints = (
   payments: PaymentLedgerInput[]
 ) => {
   const events = [
+    ...invoices.flatMap(invoice => (invoice.lateChargeEvents ?? []).map(charge => ({
+      id: charge.id, kind: 'charge' as const, timestamp: `${charge.date}T23:59:59.000Z`, delta: charge.amount
+    }))),
     ...invoices.map((invoice) => ({
       id: invoice.id,
       kind: 'invoice' as const,

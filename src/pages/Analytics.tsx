@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import SalesCollectionDonut from '../components/SalesCollectionDonut';
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -402,7 +403,7 @@ const Analytics = () => {
     const invoicePaymentEffect = filteredPayments
       .filter((payment) => invoiceIds.has(payment.invoiceId))
       .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-    const outstanding = getPendingAmount(sales, invoicePaymentEffect);
+    const outstanding = getPendingAmount(filteredInvoices.reduce((sum, invoice)=>sum+invoiceReceivableAmount(invoice),0), invoicePaymentEffect);
     const activeCustomerIds = new Set(filteredInvoices.map((invoice) => invoice.customerId));
     const negativeProfitInvoices = filteredInvoices.filter((invoice) => invoice.totalProfit < 0);
     const avgInvoiceValue = filteredInvoices.length > 0 ? Math.round(sales / filteredInvoices.length) : 0;

@@ -159,14 +159,14 @@ const buildInvoiceRows = (input: CreditCalculationInput, today: string) => {
         const allocated = Math.min(remainingCollectible, paymentAmount(payment));
         remainingCollectible -= allocated;
         runningEffect += paymentEffect(payment);
-        if (!completedDate && runningEffect >= total - SETTLEMENT_TOLERANCE) completedDate = date;
+        if (!completedDate && runningEffect >= total + Math.max(0,numberOrZero(data.lateChargesTotal)) - SETTLEMENT_TOLERANCE) completedDate = date;
         if (date <= dueDate) onTimeAmount += allocated;
         const lateDays = date > dueDate ? daysBetween(dueDate, date) : 0;
         paymentExposure += allocated;
         lateAmountDays += allocated * lateDays;
       });
 
-      const outstanding = roundMoney(Math.max(0, total - runningEffect));
+      const outstanding = roundMoney(Math.max(0, total + Math.max(0,numberOrZero(data.lateChargesTotal)) - runningEffect));
       if (outstanding > SETTLEMENT_TOLERANCE && dueDate && today > dueDate) {
         paymentExposure += outstanding;
         lateAmountDays += outstanding * daysBetween(dueDate, today);

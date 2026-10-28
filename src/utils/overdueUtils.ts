@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from './invoiceCharges';
 import type { AppSettings, Customer, DueCustomerRow, Invoice, OverdueInvoiceRisk, Payment } from '../types';
 import { getTodayDateString } from './dateUtils';
 import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
@@ -42,7 +43,7 @@ export const buildOverdueInvoiceRisks = (
       const customer = customerById.get(invoice.customerId);
       const tier = customer?.tier ?? 'Tier 4';
       const paidAmount = paidAmountByInvoiceId.get(invoice.id) ?? 0;
-      const overdueAmount = getPendingAmount(invoice.totalSales, paidAmount);
+      const overdueAmount = getPendingAmount(invoiceReceivableAmount(invoice), paidAmount);
       const effectiveDueDate = getEffectiveInvoiceDueDate(invoice.date, invoice.dueDate, tier, settings);
       const overdueDays = effectiveDueDate < today && overdueAmount > 0 ? daysBetween(effectiveDueDate, today) : 0;
       const severity: OverdueInvoiceRisk['severity'] = overdueAmount <= 0 ? 'green' : overdueDays > 7 ? 'red' : overdueDays > 0 ? 'yellow' : 'green';
@@ -131,7 +132,7 @@ export const buildCustomerOutstandingRows = (
     const totalPayments = customerPayments.reduce((sum, payment) => sum + payment.amount + payment.cashDiscount, 0);
     const businessInvoicePaymentEffect = businessPayments.reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
     const previousOutstanding = getPreviousOutstandingFallback(customer, customerInvoices);
-    const newOutstanding = getPendingAmount(totalSales, businessInvoicePaymentEffect);
+    const newOutstanding = getPendingAmount(businessInvoices.reduce((sum,invoice)=>sum+invoiceReceivableAmount(invoice),0), businessInvoicePaymentEffect);
     const customerRisks = overdueRisks.filter((row) => row.customerId === customer.id);
     const overdueAmount = customerRisks.reduce((sum, row) => sum + row.overdueAmount, 0);
     const overdueDays = customerRisks.reduce((highest, row) => Math.max(highest, row.overdueDays), 0);

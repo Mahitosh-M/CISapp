@@ -1025,7 +1025,7 @@ const Customers = () => {
                           <td style={{ ...cellStyle, verticalAlign: 'middle' }}>
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: row.kind === 'payment' ? '#86EFAC' : '#FCA5A5', fontWeight: 900 }}>
                               {row.kind === 'payment' ? <CircleDollarSign size={16} /> : <FileText size={16} />}
-                              {payment?.paymentKind === 'advance_application' ? 'Advance' : row.kind === 'payment' ? 'Payment' : invoice && isOpeningBalanceInvoice(invoice) ? 'Opening' : 'Invoice'}
+                              {row.charge ? 'Overdue charge' : payment?.paymentKind === 'advance_application' ? 'Advance' : row.kind === 'payment' ? 'Payment' : invoice && isOpeningBalanceInvoice(invoice) ? 'Opening' : 'Invoice'}
                             </span>
                           </td>
                           <td style={{ ...cellStyle, verticalAlign: 'middle' }}>
@@ -1033,7 +1033,7 @@ const Customers = () => {
                               <>
                                 <div style={{ fontWeight: 900 }}>{getInvoiceDisplayNumber(invoice)}</div>
                                 <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 4 }}>
-                                  Due {formatShortDate(invoice.dueDate)} | Cost {formatMoney(invoice.totalCost)}
+                                  {row.charge ? `${row.charge.rateBasisPoints/100}% on ${formatMoney(row.charge.baseAmount)} unpaid` : `Due ${formatShortDate(invoice.dueDate)} | Cost ${formatMoney(invoice.totalCost)}`}
                                 </div>
                                 {invoice.notes ? <div style={{ color: '#D7DEEA', fontSize: 10, marginTop: 3 }}>{invoice.notes}</div> : null}
                               </>

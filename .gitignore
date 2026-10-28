@@ -30,6 +30,7 @@ firestore-debug.log
 ui-debug.log
 firestore-credit-analysis.local.md
 firestore-credit-rules-audit.local.json
+*.local
 
 # Local configuration and private credentials
 .env

@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from './invoiceCharges';
 import type { AppSettings, Customer, CustomerTier, Invoice, Payment, UserProfile } from '../types';
 import { getCurrentMonthRange, getTodayDateString } from './dateUtils';
 import { getPreviousOutstandingFallback } from './openingBalance';
@@ -68,7 +69,7 @@ export const calculateInvoiceOutstanding = (invoice: Invoice, payments: Payment[
   const paidAmount = payments
     .filter((payment) => payment.invoiceId === invoice.id)
     .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-  const invoiceAmount = invoice.totalSales || invoice.salesAmount;
+  const invoiceAmount = invoiceReceivableAmount(invoice);
 
   // Customer portal never exposes cost/profit; it only needs purchase, paid, and pending values.
   return {
@@ -84,7 +85,7 @@ export const getInvoiceApcDeadline = (invoice: Invoice, tier?: CustomerTier, set
 };
 
 export const getInvoiceFullPaymentEvent = (invoice: Invoice, payments: Payment[]) => {
-  const invoiceAmount = invoice.totalSales || invoice.salesAmount;
+  const invoiceAmount = invoiceReceivableAmount(invoice);
   let runningPaid = 0;
   const invoicePayments = payments
     .filter((payment) => payment.invoiceId === invoice.id)

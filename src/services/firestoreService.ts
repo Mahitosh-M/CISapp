@@ -1,3 +1,6 @@
+import {invoiceReceivableAmount} from '../utils/invoiceCharges';
+import { requireWholeRupees } from '../utils/wholeRupees';
+import { cashBalanceFields } from './cashRounding';
 import { mapCustomerDoc, mapInvoiceDoc, mapPaymentDoc } from '../utils/financialDocuments';
 import { assertUserInput } from "../inputSecurity";
 import {
@@ -429,6 +432,8 @@ const getNewRecordShopId = (
 };
 
 const prepareNewInvoicePayload = (invoice: InvoiceFormData, auditUser?: AuditUser): InvoiceFormData => {
+  for (const key of ['salesAmount','costAmount','transportAmount','totalSales','totalCost'] as const) requireWholeRupees(invoice[key], key);
+  if (!Number.isSafeInteger(invoice.totalProfit)) throw new Error('Invoice profit must be a whole rupee amount');
   const legacyFields = omitInvoiceBranchFields(invoice);
   const shopId = getNewRecordShopId(invoice.shopId, auditUser, 'invoice');
 
@@ -513,25 +518,20 @@ type ShopCashCrmOperation = {
   type: 'payment' | 'invoice_delete';
 };
 
-const applyShopCashAdjustments = (
-  transaction: Transaction,
-  adjustments: ShopCashAdjustment[],
-  timestamp: string,
-  operation: ShopCashCrmOperation
+const prepareShopCashAdjustments = async (
+  transaction: Transaction, adjustments: ShopCashAdjustment[], timestamp: string, operation: ShopCashCrmOperation
 ) => {
-  combineShopCashAdjustments(adjustments).forEach(({ shopId, amount }) => {
-    transaction.set(doc(db, SHOP_CASH, shopId), {
-      shopId,
-      availableBalance: increment(amount),
-      totalCollections: increment(amount),
-      lastCashOperationId: operation.id,
-      lastCashOperationType: operation.type,
-      updatedAt: timestamp
-    }, { merge: true });
-  });
+  const plans = await Promise.all(combineShopCashAdjustments(adjustments).map(async ({shopId, amount}) => {
+    const ref=doc(db,SHOP_CASH,shopId), snapshot=await transaction.get(ref);
+    return {shopId,amount,ref,balance:numberOrZero(snapshot.data()?.availableBalance)};
+  }));
+  return () => plans.forEach(({shopId,amount,ref,balance})=>transaction.set(ref,{
+    shopId,...cashBalanceFields(transaction,shopId,balance,amount,operation.id),totalCollections:increment(amount),lastCashOperationId:operation.id,lastCashOperationType:operation.type,updatedAt:timestamp,
+  },{merge:true}));
 };
 
 const buildOpeningBalanceInvoicePayload = (customerId: string, customer: CustomerFormData, amount: number, createdAt: string) => {
+  requireWholeRupees(amount, 'Opening invoice balance');
   const customerCreationDate = createdAt.slice(0, 10);
 
   return {
@@ -585,7 +585,7 @@ export async function syncCustomerFinancialSummary(customerId: string) {
   }, new Map<string, number>());
   const summary = invoices.reduce(
     (totals, invoice) => {
-      const outstanding = getPendingAmount(invoice.totalSales, invoicePaymentEffectByInvoiceId.get(invoice.id) ?? 0);
+      const outstanding = getPendingAmount(invoiceReceivableAmount(invoice), invoicePaymentEffectByInvoiceId.get(invoice.id) ?? 0);
 
       if (isOpeningBalanceInvoice(invoice)) {
         totals.openingBalanceOutstandingAmount += outstanding;
@@ -1454,6 +1454,8 @@ export const getNextInvoiceNumber = async (settings?: AppSettings, invoiceDate?:
 
 export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditUser) => {
   assertUserInput(invoice);
+  for (const key of ['salesAmount','costAmount','transportAmount','totalSales','totalCost'] as const) requireWholeRupees(invoice[key], key);
+  if (!Number.isSafeInteger(invoice.totalProfit)) throw new Error('Invoice profit must be a whole rupee amount');
   invoice = prepareNewInvoicePayload(invoice, auditUser);
   const activeSettings = await getAppSettings();
   const counter = getInvoiceCounterDetails(activeSettings, invoice.date);
@@ -1582,6 +1584,8 @@ export const updateInvoiceRecord = async (
   options?: { deferPcAward?: boolean }
 ) => {
   assertUserInput(invoice);
+  for (const key of ['salesAmount','costAmount','transportAmount','totalSales','totalCost'] as const) requireWholeRupees(invoice[key], key);
+  if (!Number.isSafeInteger(invoice.totalProfit)) throw new Error('Invoice profit must be a whole rupee amount');
   const [existingInvoiceSnapshot, requestedCustomer, activeSettings] = await Promise.all([
     getDoc(doc(db, INVOICES, invoiceId)),
     getCustomerById(invoice.customerId),
@@ -1589,6 +1593,7 @@ export const updateInvoiceRecord = async (
   ]);
   const existingInvoice = existingInvoiceSnapshot.exists() ? mapInvoiceDoc(existingInvoiceSnapshot.id, existingInvoiceSnapshot.data()) : undefined;
   if (!existingInvoice) throw new Error('Invoice record no longer exists. Refresh the list and try again.');
+  if (existingInvoice.lateChargePolicy && (existingInvoice.customerId !== invoice.customerId || existingInvoice.date !== invoice.date)) throw new Error('An invoice with an overdue-charge policy cannot be moved to another customer or date.');
   const editingOpeningBalance = isOpeningBalanceInvoice(existingInvoice);
   invoice = editingOpeningBalance
     ? prepareOpeningBalanceInvoiceEdit(existingInvoice, invoice)
@@ -1678,6 +1683,7 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
     }
 
     deletedInvoice = mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data());
+    if ((deletedInvoice.lateChargesTotal ?? 0) > 0) throw new Error('This invoice has audited overdue charges and cannot be deleted. Review the assessed charges first.');
     affectedCustomerId = deletedInvoice.customerId;
 
     const paymentSnapshots = await Promise.all(linkedPaymentRefs.map((paymentRef) => transaction.get(paymentRef)));
@@ -1715,6 +1721,8 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
     );
     const timestamp = nowIso();
 
+    const commitCash = await prepareShopCashAdjustments(transaction, paymentsToDelete.flatMap((payment) => buildShopCashAdjustments(payment)), timestamp, { id: invoiceId, type: 'invoice_delete' });
+
     customerSnapshotsById.forEach((customerSnapshot, customerId) => {
       const amountToRestore = oldBalanceRestoreByCustomerId.get(customerId) ?? 0;
       const advanceChange = advanceChangeByCustomerId.get(customerId) ?? 0;
@@ -1735,12 +1743,7 @@ export const deleteInvoiceRecord = async (invoiceId: string, auditUser?: AuditUs
       }
     });
 
-    applyShopCashAdjustments(
-      transaction,
-      paymentsToDelete.flatMap((payment) => buildShopCashAdjustments(payment)),
-      timestamp,
-      { id: invoiceId, type: 'invoice_delete' }
-    );
+    commitCash();
 
     paymentSnapshots.forEach((paymentSnapshot) => {
       if (paymentSnapshot.exists()) {
@@ -1969,6 +1972,7 @@ const sanitizePaymentPayload = (payment: PaymentFormData): PaymentFormData =>
   });
 
 const buildAllocatedPaymentPayload = (payment: PaymentFormData, previousOutstandingAmount: number) => {
+  requireWholeRupees(payment.amount, 'Payment');requireWholeRupees(payment.cashDiscount, 'Cash discount');
   const cleanPayment = sanitizePaymentPayload(payment);
   const oldBalanceBeforePayment = Math.max(0, numberOrZero(previousOutstandingAmount));
   const amountUsedForOldBalance = 0;
@@ -2193,6 +2197,7 @@ const runTransactionPostProcessing = async ({
 
 export const createPayment = async (payment: PaymentFormData, auditUser?: AuditUser): Promise<PaymentSaveResult> => {
   assertUserInput(payment);
+  requireWholeRupees(payment.amount, 'Payment');requireWholeRupees(payment.cashDiscount, 'Cash discount');
   payment = prepareNewPaymentPayload(payment, auditUser);
   const paymentRef = doc(collection(db, PAYMENTS));
   const timestamp = nowIso();
@@ -2219,6 +2224,8 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
       } : {})
     };
 
+    const commitCash = await prepareShopCashAdjustments(transaction, buildShopCashAdjustments(undefined, allocatedPayment), timestamp, { id: paymentRef.id, type: 'payment' });
+
     if (customerSnapshot.exists()) {
       const targetInvoice = invoiceSnapshot?.exists()
         ? mapInvoiceDoc(invoiceSnapshot.id, invoiceSnapshot.data())
@@ -2242,12 +2249,7 @@ export const createPayment = async (payment: PaymentFormData, auditUser?: AuditU
       createdAt: timestamp,
       updatedAt: timestamp
     });
-    applyShopCashAdjustments(
-      transaction,
-      buildShopCashAdjustments(undefined, allocatedPayment),
-      timestamp,
-      { id: paymentRef.id, type: 'payment' }
-    );
+    commitCash();
   });
 
   if (Object.keys(customerOutstandingUpdate).length > 0) {
@@ -2280,6 +2282,7 @@ export const updatePaymentRecord = async (
   auditUser?: AuditUser
 ): Promise<PaymentSaveResult> => {
   assertUserInput(payment);
+  requireWholeRupees(payment.amount, 'Payment');requireWholeRupees(payment.cashDiscount, 'Cash discount');
   const paymentRef = doc(db, PAYMENTS, paymentId);
   const timestamp = nowIso();
   let allocatedPayment = buildAllocatedPaymentPayload(payment, 0).payload;
@@ -2344,6 +2347,8 @@ export const updatePaymentRecord = async (
       } : {})
     };
 
+    const commitCash = await prepareShopCashAdjustments(transaction, buildShopCashAdjustments(existingPayment, allocatedPayment), timestamp, { id: paymentId, type: 'payment' });
+
     if (oldCustomerId === payment.customerId) {
       const currentAdvance = newCustomerSnapshot?.exists()
         ? Math.max(0, numberOrZero(newCustomerSnapshot.data().advanceBalance))
@@ -2391,12 +2396,7 @@ export const updatePaymentRecord = async (
       ...allocatedPayment,
       updatedAt: timestamp
     });
-    applyShopCashAdjustments(
-      transaction,
-      buildShopCashAdjustments(existingPayment, allocatedPayment),
-      timestamp,
-      { id: paymentId, type: 'payment' }
-    );
+    commitCash();
   });
 
   const postProcessing = await runTransactionPostProcessing({
@@ -2443,6 +2443,8 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
     const advanceCreatedAmount = deletedPayment.advanceCreatedAmount ?? 0;
     const advanceAppliedAmount = deletedPayment.advanceAppliedAmount ?? 0;
 
+    const commitCash = await prepareShopCashAdjustments(transaction, buildShopCashAdjustments(deletedPayment), timestamp, { id: paymentId, type: 'payment' });
+
     if (oldBalanceAllocation > 0 || advanceCreatedAmount > 0 || advanceAppliedAmount > 0) {
       const customerRef = doc(db, CUSTOMERS, deletedPayment.customerId);
       const customerSnapshot = await transaction.get(customerRef);
@@ -2464,12 +2466,7 @@ export const deletePaymentRecord = async (paymentId: string, auditUser?: AuditUs
       }
     }
 
-    applyShopCashAdjustments(
-      transaction,
-      buildShopCashAdjustments(deletedPayment),
-      timestamp,
-      { id: paymentId, type: 'payment' }
-    );
+    commitCash();
     transaction.delete(paymentRef);
   });
 

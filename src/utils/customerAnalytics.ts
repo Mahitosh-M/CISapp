@@ -1,3 +1,4 @@
+import {invoiceReceivableAt} from './invoiceCharges';
 import type {
   AppSettings,
   Customer,
@@ -656,7 +657,7 @@ const getRecommendedAction = (riskLevel: RiskLevel, tier: CustomerTier, outstand
 const getOverdueStatus = (customerInvoices: Invoice[], payments: Payment[], asOfDate: Date, tier: CustomerTier, settings?: AppSettings) => {
   const hasOverdueInvoice = customerInvoices.some((invoice) => {
     const paidAmount = getPaidAmountForInvoice(invoice.id, payments, asOfDate);
-    return getPendingAmount(invoice.totalSales, paidAmount) > 0
+    return getPendingAmount(invoiceReceivableAt(invoice,new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(asOfDate)), paidAmount) > 0
       && parseDate(getInvoiceSavedDueDate(invoice, invoice.tierAtInvoice ?? tier, settings)) < startOfDay(asOfDate);
   });
 

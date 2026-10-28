@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount,invoiceReceivableAt} from './invoiceCharges';
 import type { AppSettings, BonusPcType, Customer, Invoice, Payment } from '../types';
 import { getTodayDateString } from './dateUtils';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
@@ -40,7 +41,7 @@ const paymentsForInvoiceThrough = (invoiceId: string, payments: Payment[], throu
 export const isInvoiceFullyPaidThrough = (invoice: Invoice, payments: Payment[], throughDate?: string) => {
   const effect = paymentsForInvoiceThrough(invoice.id, payments, throughDate)
     .reduce((sum, payment) => sum + getInvoicePaymentEffect(payment), 0);
-  return getPendingAmount(invoice.totalSales, effect) <= 1;
+  return getPendingAmount(throughDate ? invoiceReceivableAt(invoice,throughDate) : invoiceReceivableAmount(invoice), effect) <= 1;
 };
 
 const getMonthRange = (month: string) => {

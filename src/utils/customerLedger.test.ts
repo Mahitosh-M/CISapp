@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Invoice, Payment } from '../types';
 import { buildCustomerLedger } from './customerLedger';
+import {assessInvoiceCharges} from './invoiceCharges';
+
+it('shows overdue charges as separate dated debits and keeps original sales unchanged',()=>{
+ const original=invoice('i',100,'2026-01-01','2026-01-01T06:00:00Z');
+ const assessed=assessInvoiceCharges({...original,lateChargePolicy:{version:1,firstChargeDate:'2026-01-31',nextIndex:0}},[],'2026-01-31','2026-01-31T18:00:00Z');
+ const rows=buildCustomerLedger([{...original,lateChargesTotal:2,lateChargeEvents:assessed.events}],[]);
+ expect(rows.map(row=>row.invoiceAmount)).toEqual([100,2]);
+ expect(rows[1].charge?.rateBasisPoints).toBe(200);
+ expect(rows[1].runningBalance).toBe(102);
+ expect(original.totalSales).toBe(100);
+});
 
 const invoice = (id: string, totalSales: number, date: string, createdAt: string): Invoice => ({
   id,

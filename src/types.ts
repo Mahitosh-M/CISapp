@@ -166,6 +166,10 @@ export interface CreditAuditLog {
 export interface InvoiceDeliveryDetails { routeId?: string; routeName?: string; routeFrom?: string; routeTo?: string; routeDays?: number[]; routeRevision?: number; routeStopId?: string | null; routeStopName?: string | null; required: boolean; scheduledDate: string; address: string; contact: string; packages: number; instructions: string; }
 
 export interface Invoice {
+  lateChargePolicy?: import('./utils/invoiceCharges').InvoiceChargePolicy;
+  lateChargeEvents?: import('./utils/invoiceCharges').InvoiceChargeEvent[];
+  lateChargesTotal?: number;
+  nextLateChargeDate?: string | null;
   deliveryRequired?: boolean;
   deliveryDetails?: InvoiceDeliveryDetails | null;
   deliveryRevision?: number;

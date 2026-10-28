@@ -181,9 +181,10 @@ export function fuelEfficiency(s: AppState, vehicleId: string) {
     }
   if (first < 0 || last < 0) return null;
   const km = fills[last].odometer! - fills[first].odometer!;
+  if (s.fuels.some(f => f.vehicleId === vehicleId && f.status === "Approved" && f.at > fills[first].at && f.at <= fills[last].at && f.litres === null)) return null;
   const litres = fills
     .slice(first + 1, last + 1)
-    .reduce((n, f) => n + f.litres, 0);
+    .reduce((n, f) => n + (f.litres ?? 0), 0);
   return km > 0 && litres > 0 ? km / litres : null;
 }
 export function audit(

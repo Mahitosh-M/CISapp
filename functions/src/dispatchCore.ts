@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from '../../src/utils/invoiceCharges';
 ﻿import { createHash } from "node:crypto";
 import type { Invoice, Payment } from "../../src/types";
 import {
@@ -26,10 +27,10 @@ export function identifier(value: unknown): string {
 export function paise(value: unknown, allowZero = true): number {
   requireValue(
     typeof value === "number" &&
-      Number.isSafeInteger(value) &&
+      Number.isSafeInteger(value) && value % 100 === 0 &&
       value >= (allowZero ? 0 : 1) &&
       value <= 100_000_000_000,
-    "Invalid integer paise amount",
+    "Enter whole rupee transaction amounts (paise must be multiples of 100)",
   );
   return value;
 }
@@ -96,7 +97,7 @@ export function invoiceBalances(invoices: Invoice[], payments: Payment[]) {
     ...i,
     pendingPaise: Math.max(
       0,
-      money(i.totalSales) -
+      money(invoiceReceivableAmount(i)) -
         payments
           .filter((p) => p.invoiceId === i.id)
           .reduce((sum, p) => sum + money(getInvoicePaymentEffect(p)), 0),
@@ -156,6 +157,7 @@ export function planReceipt(
       i && row.amount + row.discount <= i.pendingPaise,
       "Outstanding changed; refresh and review allocation",
     );
+    requireValue(row.amount % 100 === 0 && row.discount % 100 === 0, "This allocation has a legacy fractional balance; Admin review is required");
     allocated += row.amount;
     discounted += row.discount;
   }

@@ -1,3 +1,4 @@
+import {serverCashBalanceFields} from './cashRounding';
 import {routeCatalog,saveWeeklyRoute} from './dispatchRouteCatalog';
 import {allowed,resolveAccount,administration,saveRole,saveAccount,removeAccount,saveMaster} from "./dispatchAdmin";
 import {workspace,scopedState,operation,putEvidence,getEvidence} from "./dispatchOperations";
@@ -716,6 +717,7 @@ async function approveCollection(identity: Identity, p: Data) {
       tx.get(customerMonthRef),
       tx.get(businessMonthRef),
     ]);
+    const cashSnapshot = await tx.get(db().doc(`shopCash/${c.shopId}`));
     const receiptIds: string[] = [],
       candidates: Payment[] = [];
     let invoiceDelta = 0,
@@ -847,7 +849,7 @@ async function approveCollection(identity: Identity, p: Data) {
       db().doc(`shopCash/${c.shopId}`),
       {
         shopId: c.shopId,
-        availableBalance: FieldValue.increment(plan.allocated / 100),
+        ...serverCashBalanceFields(tx,db(),c.shopId,Number(cashSnapshot.data()?.availableBalance??0),plan.allocated/100,receiptIds[receiptIds.length-1],identity.uid),
         totalCollections: FieldValue.increment(plan.allocated / 100),
         updatedAt: timestamp,
         lastCashOperationId: receiptIds[receiptIds.length - 1],

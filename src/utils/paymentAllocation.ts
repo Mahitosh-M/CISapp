@@ -1,3 +1,4 @@
+import {invoiceReceivableAmount} from './invoiceCharges';
 export interface PendingInvoiceInput {
   id: string;
   pendingAmount: number;
@@ -12,6 +13,7 @@ export interface PaymentEffectInput {
 }
 
 export interface InvoiceBalanceInput {
+  lateChargesTotal?: number;
   id: string;
   totalSales: number;
 }
@@ -94,6 +96,6 @@ export const getUnpaidInvoicesAfterPayment = <T extends InvoiceBalanceInput>(
   }
 
   return invoices.filter((invoice) => (
-    Math.max(0, Number(invoice.totalSales) || 0) - (paidByInvoiceId.get(invoice.id) ?? 0) > 0
+    Math.max(0, invoiceReceivableAmount(invoice)) - (paidByInvoiceId.get(invoice.id) ?? 0) > 0
   ));
 };

@@ -42,7 +42,7 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
         rules: readFileSync(new URL('../../firestore.rules', import.meta.url), 'utf8')
       }
     });
-  });
+  }, 60000);
 
   beforeEach(async () => {
     await testEnvironment.clearFirestore();
@@ -96,6 +96,21 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
       });
     });
   };
+
+  it('reserves overdue policies and assessments for trusted backend operations', async () => {
+    await seed('Admin');
+    const database = testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(setDoc(doc(database,'settings','invoiceLateChargePolicy'),{enabled:true,scope:'existing_from_invoice'}));
+    await assertFails(updateDoc(doc(database,'invoices','invoice-1'),{lateChargesTotal:200}));
+    await assertFails(setDoc(doc(database,'invoiceLateCharges','forged'),{invoiceId:'invoice-1',customerId:'customer-1',amount:200}));
+    await testEnvironment.withSecurityRulesDisabled(async context=>{
+      await setDoc(doc(context.firestore(),'invoices','charged'),{customerId:'customer-1',lateChargesTotal:2,lateChargePolicy:{version:1,firstChargeDate:'2026-01-31',nextIndex:1}});
+      await setDoc(doc(context.firestore(),'invoiceLateCharges','real'),{invoiceId:'charged',customerId:'customer-1',amount:2});
+    });
+    await assertSucceeds(getDoc(doc(database,'invoiceLateCharges','real')));
+    await assertFails(updateDoc(doc(database,'invoiceLateCharges','real'),{amount:3}));
+    await assertFails(deleteDoc(doc(database,'invoices','charged')));
+  });
 
   it('allows Admin to assign an existing Staff profile to a shop', async () => {
     await seed('Admin');
@@ -660,14 +675,14 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     await assertSucceeds(addBranchReceiptBatch(database, 'SHOP_A').commit());
   });
 
-  it.each(['Admin', 'Staff'] as const)('allows %s payment entry against a fractional cash balance', async (role) => {
+  it.each(['Admin', 'Staff'] as const)('rejects unaudited %s payment entry that leaves a fractional cash balance', async (role) => {
     await seed(role, true, 'SHOP_S');
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'shopCash', 'SHOP_S'), initializedShopCash('SHOP_S', 32376.02, 120497));
     });
     const database = testEnvironment.authenticatedContext('team-user').firestore();
-    await assertSucceeds(addBranchReceiptBatch(database, 'SHOP_S', 500).commit());
-    expect((await getDoc(doc(database, 'shopCash', 'SHOP_S'))).data()?.availableBalance).toBe(32376.02 + 500);
+    await assertFails(addBranchReceiptBatch(database, 'SHOP_S', 500).commit());
+    expect((await getDoc(doc(database, 'shopCash', 'SHOP_S'))).data()?.availableBalance).toBe(32376.02);
   });
 
   it('denies assigned Staff branch payment and cash writes for the other shop', async () => {
@@ -1421,4 +1436,39 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
       limit(10)
     )));
   });
+  it('normalizes a legacy 20-paise balance atomically, with scoped immutable audit', async () => {
+    await seed('Staff', true, 'SHOP_A');
+    await testEnvironment.withSecurityRulesDisabled(async context => {
+      await setDoc(doc(context.firestore(),'shopCash','SHOP_A'), initializedShopCash('SHOP_A',.2));
+    });
+    const database=testEnvironment.authenticatedContext('team-user').firestore();
+    const batch=writeBatch(database);
+    batch.set(doc(database,'cashAdjustments','round-20p'), {shopId:'SHOP_A',amount:.2,direction:'deduct',reason:'Whole-rupee rounding: 0.2 -> 0',createdAt:serverTimestamp(),createdBy:'team-user'});
+    batch.update(doc(database,'shopCash','SHOP_A'), {availableBalance:0,roundingDelta:-.2,roundingAuditId:'round-20p',lastCashOperationId:'round-20p',lastCashOperationType:'rounding',updatedAt:timestamp});
+    await assertSucceeds(batch.commit());
+    expect((await getDoc(doc(database,'shopCash','SHOP_A'))).data()?.availableBalance).toBe(0);
+    await assertFails(updateDoc(doc(database,'cashAdjustments','round-20p'), {amount:1}));
+    await assertFails(deleteDoc(doc(database,'cashAdjustments','round-20p')));
+    await assertFails(updateDoc(doc(database,'shopCash','SHOP_A'), {availableBalance:1,roundingDelta:1}));
+  });
+  it('rejects fractional new invoices, payments and expenses', async () => {
+    await seed('Admin',true,'SHOP_A');await seedInitializedShops();
+    const database=testEnvironment.authenticatedContext('team-user').firestore();
+    await assertFails(addBranchReceiptBatch(database,'SHOP_A',100.2).commit());
+    await assertFails(addExpenseBatch(database,'SHOP_A',100.2).commit());
+    await assertFails(setDoc(doc(database,'invoices','fractional-invoice'), {customerId:'customer-1',totalSales:100.2}));
+  });
+
+  it.each(['Admin','Staff'] as const)('commits %s receipt and legacy cash rounding together without changing the receipt amount', async role => {
+    await seed(role,true,'SHOP_S');
+    await testEnvironment.withSecurityRulesDisabled(async context=>setDoc(doc(context.firestore(),'shopCash','SHOP_S'),initializedShopCash('SHOP_S',32376.02,120497)));
+    const database=testEnvironment.authenticatedContext('team-user').firestore();
+    const batch=addBranchReceiptBatch(database,'SHOP_S',500);
+    batch.set(doc(database,'cashAdjustments','receipt-round'),{shopId:'SHOP_S',amount:.02,direction:'deduct',reason:'Whole-rupee rounding: 32876.02 -> 32876',createdAt:serverTimestamp(),createdBy:'team-user'});
+    batch.update(doc(database,'shopCash','SHOP_S'),{availableBalance:32876,roundingDelta:-.02,roundingAuditId:'receipt-round'});
+    await assertSucceeds(batch.commit());
+    expect((await getDoc(doc(database,'payments','branch-payment'))).data()?.amount).toBe(500);
+    expect((await getDoc(doc(database,'shopCash','SHOP_S'))).data()?.availableBalance).toBe(32876);
+  });
+
 });

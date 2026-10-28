@@ -84,6 +84,10 @@ export const mapInvoiceDoc = (
     invoiceNumber: String(data.invoiceNumber || ""),
     customerId: String(data.customerId || ""),
     customerName: String(data.customerName || ""),
+    lateChargePolicy: data.lateChargePolicy as Invoice["lateChargePolicy"],
+    lateChargeEvents: (data.lateChargeEvents ?? []) as Invoice["lateChargeEvents"],
+    lateChargesTotal: numberOrZero(data.lateChargesTotal),
+    nextLateChargeDate: data.nextLateChargeDate ? String(data.nextLateChargeDate) : null,
     deliveryRequired: data.deliveryRequired === true,
     deliveryDetails: data.deliveryDetails
       ? (data.deliveryDetails as Invoice["deliveryDetails"])

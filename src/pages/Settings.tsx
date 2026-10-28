@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { RefreshCw } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
+import InvoiceChargeSettings from '../components/InvoiceChargeSettings';
 import {
   getAppSettings,
   updateAppSettings,
@@ -616,6 +617,7 @@ const Settings = () => {
           {saving ? 'Saving...' : 'Save Settings'}
         </button>
       </form>
+      {userProfile?.role === 'Admin' && <InvoiceChargeSettings/>}
 
     </div>
   );
