@@ -52,8 +52,8 @@ const Login = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--app-page-background)', padding: 20 }}>
-      <form onSubmit={handleSubmit} style={{ background: 'linear-gradient(135deg, #4A155F 0%, #2A1049 45%, #091D42 100%)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#FFFFFF', boxShadow: '0 24px 54px rgba(0,0,0,0.42)' }}>
+    <div style={{ minHeight: '100vh', boxSizing: 'border-box', display: 'grid', placeItems: 'center', background: 'var(--app-page-background)', padding: 20 }}>
+      <form onSubmit={handleSubmit} style={{ boxSizing: 'border-box', minWidth: 0, background: 'linear-gradient(135deg, #4A155F 0%, #2A1049 45%, #091D42 100%)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 18, padding: 28, width: '100%', maxWidth: 420, color: '#FFFFFF', boxShadow: '0 24px 54px rgba(0,0,0,0.42)' }}>
         <label style={{ display: 'block', fontWeight: 800, marginBottom: 14 }}>
           Email
           <input className="login-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} style={inputStyle} />
