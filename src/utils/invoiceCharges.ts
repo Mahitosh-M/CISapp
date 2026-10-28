@@ -1,6 +1,6 @@
 import { getInvoicePaymentEffect } from './paymentUtils';
 
-export interface InvoiceChargePolicy { version: 1; firstChargeDate: string; nextIndex: number; }
+export interface InvoiceChargePolicy { version: 1; firstChargeDate: string; nextIndex: number; paymentCutoff?: 'before_date' | 'through_date'; openingBalanceIncluded?: boolean; }
 export interface InvoiceChargeEvent { id: string; date: string; index: number; rateBasisPoints: number; baseAmount: number; amount: number; roundingPaise: number; createdAt: string; }
 export interface ChargeInvoice { id: string; totalSales: number; lateChargesTotal?: number; lateChargePolicy?: InvoiceChargePolicy; lateChargeEvents?: InvoiceChargeEvent[]; }
 export const invoiceReceivableAmount = (invoice: Pick<ChargeInvoice,'totalSales'|'lateChargesTotal'>) => invoice.totalSales + (invoice.lateChargesTotal ?? 0);
@@ -26,7 +26,9 @@ export function assessInvoiceCharges(invoice: ChargeInvoice, payments: Array<{in
     if(date>asOf)return{events,nextIndex:index,nextDate:date,added};
     const id=`${invoice.id}:${index}`;
     if(previous.some(event=>event.id===id)){index++;continue;}
-    const paid=payments.filter(p=>p.invoiceId===invoice.id&&p.date<=date).reduce((sum,p)=>sum+getInvoicePaymentEffect(p as Parameters<typeof getInvoicePaymentEffect>[0]),0);
+    // New schedules assess at the start of the business date. Existing posted schedules
+    // retain their original through-date convention unless explicitly enrolled otherwise.
+    const paid=payments.filter(p=>p.invoiceId===invoice.id&&(policy.paymentCutoff==='before_date'?p.date<date:p.date<=date)).reduce((sum,p)=>sum+getInvoicePaymentEffect(p as Parameters<typeof getInvoicePaymentEffect>[0]),0);
     const assessed=previous.filter(e=>e.date<=date).reduce((sum,e)=>sum+e.amount,0)+added;
     const basePaise=Math.max(0,Math.round((invoice.totalSales+assessed-paid)*100));
     if(basePaise===0)return{events,nextIndex:index,nextDate:null,added};

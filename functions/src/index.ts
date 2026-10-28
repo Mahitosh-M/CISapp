@@ -75,4 +75,4 @@ export const deleteManagedUser = onCall({ region: REGION }, async (request) => {
 export { dispatchBridge, refreshDispatchInvoice, refreshDispatchCustomer } from './dispatchBridge';
 
 export {cleanupClosedDispatch} from './dispatchRetention';
-export {configureInvoiceLateCharges,registerNewInvoiceLateCharges,assessDueInvoiceLateCharges,reopenInvoiceLateCharges} from './invoiceLateCharges';
+export {configureInvoiceLateCharges,registerNewInvoiceLateCharges,enrollEditedInvoiceLateCharges,assessDueInvoiceLateCharges,reopenInvoiceLateCharges} from './invoiceLateCharges';

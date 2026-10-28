@@ -28,4 +28,17 @@ describe('invoice late charges',()=>{
   expect(result.events[0].amount).toBe(0);
   expect(assessInvoiceCharges({...invoice,totalSales:25},[],'2026-01-31','now').added).toBe(1);
  });
+ it('uses November payments for December 1 then compounds the unpaid balance on December 16',()=>{
+  const opening={id:'opening',totalSales:1000,lateChargePolicy:{version:1 as const,firstChargeDate:'2026-12-01',nextIndex:0,paymentCutoff:'before_date' as const,openingBalanceIncluded:true}};
+  const payments=[{invoiceId:'opening',date:'2026-11-30',amount:500},{invoiceId:'opening',date:'2026-12-10',amount:200}];
+  expect(assessInvoiceCharges(opening,payments,'2026-11-30','now').events).toEqual([]);
+  const result=assessInvoiceCharges(opening,payments,'2026-12-16','now');
+  expect(result.events.map(e=>[e.date,e.baseAmount,e.amount])).toEqual([['2026-12-01',500,10],['2026-12-16',310,3]]);
+ });
+ it('cleared November debt has no charges, while December 1 payment follows the opening assessment',()=>{
+  const i={...invoice,lateChargePolicy:{...invoice.lateChargePolicy,firstChargeDate:'2026-12-01',paymentCutoff:'before_date' as const}};
+  expect(assessInvoiceCharges(i,[{invoiceId:'i',date:'2026-11-30',amount:100}],'2026-12-16','now').events).toEqual([]);
+  const result=assessInvoiceCharges(i,[{invoiceId:'i',date:'2026-12-01',amount:102}],'2026-12-16','now');
+  expect(result.events.map(e=>e.amount)).toEqual([2]);expect(result.nextDate).toBe(null);
+ });
 });

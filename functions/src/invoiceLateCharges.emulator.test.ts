@@ -42,3 +42,33 @@ test('late charges are atomic, compound only unpaid debt, and never duplicate ca
  assert.equal(await registerInvoiceChargePolicy(db,'start-only',{...policy,scope:'existing_from_start',effectiveDate:'2026-03-01'}),true);
  assert.equal((await db.doc('invoices/start-only').get()).data()?.nextLateChargeDate,'2026-03-01');
 });
+
+test('December policy includes opening debt, protects younger invoices and keeps outstanding buckets separate',{skip:!enabled},async()=>{
+ const db=getFirestore(initializeApp({projectId:'demo-december-charges'},'december-charge-tests'));
+ for(const name of ['invoices','payments','customers','invoiceLateCharges','shopCash'])for(const d of (await db.collection(name).get()).docs)await d.ref.delete();
+ const policy={enabled:true,scope:'existing_from_start' as const,effectiveDate:'2026-12-01',includeOpeningBalances:true,revision:1};
+ await db.doc('customers/c').set({invoiceOutstandingAmount:2500,openingBalanceOutstandingAmount:500,totalOutstandingAmount:3000});
+ const base={customerId:'c',shopId:'SHOP_A',invoiceNumber:'INV',date:'2026-10-01',createdAt:'2026-10-01T06:00:00Z',totalSales:1000,totalProfit:100};
+ for(const id of ['old','opening','november','december','cleared']){
+  await db.doc('invoices/'+id).set({...base,...(id==='opening'?{invoiceNumber:'0000-OPENING-c',isOpeningBalance:true,invoiceType:'opening_balance',date:'2026-11-20',totalProfit:0}:{}),...(id==='november'?{date:'2026-11-20'}:{}),...(id==='december'?{date:'2026-12-01'}:{})});
+ }
+ for(const id of ['old','opening'])await db.doc('payments/p-'+id).set({invoiceId:id,customerId:'c',date:'2026-11-30',amount:500});
+ await db.doc('payments/cleared').set({invoiceId:'cleared',customerId:'c',date:'2026-11-30',amount:1000});
+ assert.equal(await registerInvoiceChargePolicy(db,'cleared',policy),false);
+ for(const id of ['old','opening','november','december'])assert.equal(await registerInvoiceChargePolicy(db,id,policy),true);
+ assert.equal((await db.doc('invoices/november').get()).data()?.nextLateChargeDate,'2026-12-20');
+ assert.equal((await db.doc('invoices/december').get()).data()?.nextLateChargeDate,'2026-12-31');
+ for(const id of ['old','opening','november','december'])await postInvoiceLateCharges(db,id,'2026-11-30');
+ assert.equal((await db.collection('invoiceLateCharges').get()).size,0,'No charges during the grace period');
+ await Promise.all([postInvoiceLateCharges(db,'old','2026-12-01'),postInvoiceLateCharges(db,'opening','2026-12-01'),postInvoiceLateCharges(db,'opening','2026-12-01')]);
+ assert.equal((await db.collection('invoiceLateCharges').get()).size,2,'Exactly one opening and one invoice assessment');
+ const customer=(await db.doc('customers/c').get()).data()!;
+ assert.equal(customer.invoiceOutstandingAmount,2510);assert.equal(customer.openingBalanceOutstandingAmount,510);assert.equal(customer.totalOutstandingAmount,3020);
+ assert.equal((await db.doc('invoices/opening').get()).data()?.totalSales,1000,'Opening principal is not rewritten');
+ await db.doc('payments/opening-partial').set({invoiceId:'opening',customerId:'c',date:'2026-12-10',amount:200});
+ await db.doc('customers/c').update({openingBalanceOutstandingAmount:310,totalOutstandingAmount:2820});
+ await postInvoiceLateCharges(db,'opening','2026-12-16');
+ assert.equal((await db.doc('invoices/opening').get()).data()?.lateChargesTotal,13,'Next 1% uses remaining 310');
+ assert.equal((await db.doc('customers/c').get()).data()?.openingBalanceOutstandingAmount,313);
+ assert.equal((await db.collection('shopCash').get()).size,0,'Assessment does not create cash');
+});
