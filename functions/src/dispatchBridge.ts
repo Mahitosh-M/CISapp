@@ -1185,7 +1185,7 @@ export const refreshDispatchCustomer = onDocumentCreated(
             tier: score.tier,
             paymentTerms:
               customer.customerType === "medical"
-                ? "15 day credit"
+                ? getPaymentTermsLabel(score.tier,settings,"medical")
                 : getPaymentTermsLabel(score.tier, settings),
             updatedAt: now(),
           });

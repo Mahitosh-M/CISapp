@@ -1,3 +1,4 @@
+import {CUSTOMER_TIERS} from './tiers';
 import {invoiceReceivableAt} from './invoiceCharges';
 import type {
   AppSettings,
@@ -23,6 +24,7 @@ import {
   getPaymentBufferForTier,
   getPaymentTermsLabel,
   getTierTargetSettings,
+  getCustomerPolicy,
   normalizeScoreWeights
 } from './settings';
 import { formatDate } from './formatters';
@@ -388,9 +390,9 @@ const getOverdueExposure = (
   asOfDate: Date,
   recentMonthlySales: number,
   tier: CustomerTier,
-  settings?: AppSettings
+  settings?: AppSettings, customerType?:string
 ): OverdueExposure => {
-  const policy = settings?.overduePolicy;
+  const policy = getCustomerPolicy(settings,customerType).overduePolicy;
   let amount = 0;
   let oldestDays = 0;
   let invoiceCount = 0;
@@ -437,7 +439,8 @@ const applyTierGates = (
   overdueSeverity: OverdueExposure['severity'],
   outstandingRatio: number,
   onboardingStage: OnboardingStage,
-  isOnboarding: boolean
+  isOnboarding: boolean,
+  minimums: Record<CustomerTier,number> = PARTNER_PURCHASE_MINIMUMS
 ) => {
   let finalTier = scoreTier;
   const reasons: string[] = [];
@@ -466,17 +469,17 @@ const applyTierGates = (
     reasons.push('Payment risk caps automatic upgrade at Silver.');
   }
 
-  if (finalTier === 'Tier 1' && (customerMonthlySales < PARTNER_PURCHASE_MINIMUMS['Tier 1'] || paymentDisciplineScore < 90)) {
+  if (finalTier === 'Tier 1' && (customerMonthlySales < minimums['Tier 1'] || paymentDisciplineScore < 90)) {
     finalTier = 'Tier 2';
     reasons.push('Score qualifies for Platinum, but sales/payment gate allows Gold.');
   }
 
-  if (finalTier === 'Tier 2' && customerMonthlySales < PARTNER_PURCHASE_MINIMUMS['Tier 2']) {
+  if (finalTier === 'Tier 2' && customerMonthlySales < minimums['Tier 2']) {
     finalTier = 'Tier 3';
     reasons.push('Score qualifies for Gold, but sales gate allows Silver.');
   }
 
-  if (finalTier === 'Tier 3' && customerMonthlySales < PARTNER_PURCHASE_MINIMUMS['Tier 3']) {
+  if (finalTier === 'Tier 3' && customerMonthlySales < minimums['Tier 3']) {
     finalTier = 'Tier 4';
     reasons.push('Score qualifies for Silver, but sales gate allows Active.');
   }
@@ -507,7 +510,7 @@ export const getPartnerUpgradeReasons = (
   const window = getCurrentRollingWindow(referenceDate);
   const recentInvoices = allBusinessInvoices.filter((invoice) => isDateInsideWindow(invoice.date, window));
   const exposure = getOverdueExposure(recentInvoices, payments, window.end,
-    current.customerMonthlySales, customer.tier, settings);
+    current.customerMonthlySales, customer.tier, settings,customer.customerType);
   const previousOutstanding = getPreviousOutstandingFallback(customer, allBusinessInvoices);
   const outstandingBase = Math.max(current.totalSales + previousOutstanding, current.outstanding, 1);
   const reasons: string[] = [];
@@ -820,20 +823,20 @@ const buildScoresForWindow = (
 
   const unrankedScores = scoreInputs.map((entry) => {
     const weights = normalizeScoreWeights(settings);
-    const targetSettings = getTierTargetSettings(entry.customer.tier, settings);
+    const targetSettings = getTierTargetSettings(entry.customer.tier, settings,entry.customer.customerType);
     const activeMonthCount = getActiveMonthCount(entry.allCustomerInvoices);
     const onboardingStage = getOnboardingStage(entry.customer, entry.allCustomerInvoices, activeMonthCount, window.end);
     const isOnboarding = onboardingStage !== 'Stage D';
     const activeBreakdownWeights = weights;
     const confidenceFactor = getConfidenceFactor(entry.allCustomerInvoices.length, activeMonthCount);
-    const monthlySalesTarget = getSuggestedMonthlySalesTarget(
+    const monthlySalesTarget = entry.customer.customerType==='medical'?targetSettings.monthlySalesTarget:getSuggestedMonthlySalesTarget(
       entry,
       targetSettings.monthlySalesTarget,
       segmentRankOverrides?.get(entry.customer.id) ?? segmentRankByCustomerId.get(entry.customer.id) ?? scoreInputs.length,
       onboardingStage,
       window.end
     );
-    const monthlyOrderTarget = getExpectedOrderTarget(monthlySalesTarget);
+    const monthlyOrderTarget = entry.customer.customerType==='medical'?targetSettings.monthlyOrderTarget:getExpectedOrderTarget(monthlySalesTarget);
     const fallbackSalesScore = entry.totalSales > 0 ? clamp(Math.round((entry.totalSales / highestSales) * 100), 10, 100) : 0;
     const fallbackFrequencyScore = rateFrequencyScore(entry.invoiceCount, entry.averageOrderValue, highestAverageOrderValue, window);
     const salesScore = calculateSalesPerformanceScore(entry.customerMonthlySales, monthlySalesTarget, fallbackSalesScore);
@@ -878,7 +881,7 @@ const buildScoresForWindow = (
       window.end,
       entry.customerMonthlySales,
       entry.customer.tier,
-      settings
+      settings,entry.customer.customerType
     );
     const gatedTier = applyTierGates(
       scoreTier,
@@ -887,15 +890,16 @@ const buildScoresForWindow = (
       overdueExposure.severity,
       outstandingRatio,
       onboardingStage,
-      isOnboarding
+      isOnboarding,
+      entry.customer.customerType==='medical'?Object.fromEntries(CUSTOMER_TIERS.map(t=>[t,getTierTargetSettings(t,settings,'medical').monthlySalesTarget])) as Record<CustomerTier,number>:PARTNER_PURCHASE_MINIMUMS
     );
 
     const tier = gatedTier.tier;
     const tierCapReason = gatedTier.tierCapReason;
     const creditPolicy = {
-      creditDays: getCreditDaysForTierFromSettings(tier, settings),
-      bufferDays: getPaymentBufferForTier(tier, settings),
-      label: getPaymentTermsLabel(tier, settings)
+      creditDays: getCreditDaysForTierFromSettings(tier, settings,entry.customer.customerType),
+      bufferDays: getPaymentBufferForTier(tier, settings,entry.customer.customerType),
+      label: getPaymentTermsLabel(tier, settings,entry.customer.customerType)
     };
     const riskLevel = getRiskLevel(tier, paymentDisciplineScore, entry.outstanding, outstandingBase);
 
@@ -939,7 +943,7 @@ const buildScoresForWindow = (
       profitScore,
       loyaltyScore,
       intelligenceScore,
-      giftBudget: roundMoney(Math.max(0, entry.totalProfit) * (getGiftPercentageForTier(tier, settings) / 100)),
+      giftBudget: roundMoney(Math.max(0, entry.totalProfit) * (getGiftPercentageForTier(tier, settings,entry.customer.customerType) / 100)),
       rank: 0,
       movement: 'Stable' as CustomerMovement,
       movementReason: '',

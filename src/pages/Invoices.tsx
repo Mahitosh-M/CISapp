@@ -315,7 +315,7 @@ const Invoices = () => {
         ...current,
         customerId: value,
         customerName: selectedCustomer?.name ?? '',
-        dueDate: selectedCustomer ? calculateDueDate(current.date, selectedCustomer.tier, settings) : current.date
+        dueDate: selectedCustomer ? calculateDueDate(current.date, selectedCustomer.tier, settings,selectedCustomer.customerType) : current.date
       }));
       return;
     }
@@ -328,7 +328,7 @@ const Invoices = () => {
         dueDate: editingOpeningBalance
           ? value
           : selectedCustomer
-            ? calculateDueDate(value, selectedCustomer.tier, settings)
+            ? calculateDueDate(value, selectedCustomer.tier, settings,selectedCustomer.customerType)
             : value
       }));
       return;

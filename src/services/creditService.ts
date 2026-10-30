@@ -1,3 +1,4 @@
+import {getCustomerPolicy} from '../utils/settings';
 import {
   collection,
   doc,
@@ -332,7 +333,7 @@ export const manageCustomerCredit = async (input: ManageCreditInput) => {
       throw new Error('Use an override to approve above the calculated recommendation.');
     }
     if (input.action === 'manual_starter') {
-      const starterCap = Math.min(10_000, Number(loaded.settings.creditPolicy.starterLimitCap ?? 10_000));
+      const starterCap = Math.min(10_000, Number(getCustomerPolicy(loaded.settings,loaded.calculationInput.customer.customerType).creditPolicy.starterLimitCap ?? 10_000));
       if (amount > starterCap + 0.01) throw new Error('The starter limit cannot exceed the configured starter cap.');
       calculated.profile.manualStarterLimit = amount;
     }

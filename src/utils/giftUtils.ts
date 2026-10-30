@@ -38,7 +38,7 @@ export const doPeriodsOverlap = (startA: string, endA: string, startB: string, e
 
 export const calculateCustomerGiftBudget = (profitConsidered: number, customer: Customer, settings: AppSettings) => {
   // PC points are based on profit percentage from Admin Settings, not sales.
-  return Math.round(Math.max(0, profitConsidered) * (getGiftPercentageForTier(customer.tier, settings) / 100));
+  return Math.round(Math.max(0, profitConsidered) * (getGiftPercentageForTier(customer.tier, settings,customer.customerType) / 100));
 };
 
 const numberOrZero = (value: unknown) => {
@@ -173,7 +173,7 @@ export const buildGiftEligibilityRows = (
     const customerInvoices = invoices.filter((invoice) => invoice.customerId === customer.id);
     const customerPayments = payments.filter((payment) => payment.customerId === customer.id);
     const apcTotals = calculateCustomerAvailableApc(customer, customerInvoices, customerPayments, giftHistory, settings, approvedOverduePcRequests, approvedBonusPcRequests);
-    const giftPercentage = getGiftPercentageForTier(customer.tier, settings);
+    const giftPercentage = getGiftPercentageForTier(customer.tier, settings,customer.customerType);
     const pendingApproval = giftHistory.find((gift) => gift.customerId === customer.id && gift.status === 'Approved');
 
     return {

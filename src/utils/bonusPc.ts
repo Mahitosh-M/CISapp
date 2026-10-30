@@ -2,7 +2,7 @@ import {invoiceReceivableAmount,invoiceReceivableAt} from './invoiceCharges';
 import type { AppSettings, BonusPcType, Customer, Invoice, Payment } from '../types';
 import { getTodayDateString } from './dateUtils';
 import { getInvoicePaymentEffect, getPendingAmount } from './paymentUtils';
-import { getInvoiceSavedDueDate, getTierTargetSettings } from './settings';
+import { getInvoiceSavedDueDate, getTierTargetSettings,getMedicalSettings } from './settings';
 
 export const FIXED_BONUS_PC: Record<BonusPcType, number> = {
   monthly_target: 5,
@@ -89,7 +89,7 @@ export const buildAutomaticBonusCandidates = (
   const monthRange = getMonthRange(month);
   const monthlyInvoices = validInvoices.filter((invoice) => invoice.date >= monthRange.start && invoice.date <= monthRange.end);
   const monthlySales = monthlyInvoices.reduce((sum, invoice) => sum + Math.max(0, Number(invoice.totalSales) || 0), 0);
-  const target = getTierTargetSettings(customer.tier, settings).monthlySalesTarget;
+  const target = getTierTargetSettings(customer.tier, settings,customer.customerType).monthlySalesTarget;
 
   if (target > 0 && monthlySales >= target) {
     const qualifyingPaid = monthlyInvoices.every((invoice) => isInvoiceFullyPaidThrough(invoice, payments, today));
@@ -130,3 +130,8 @@ export const buildAutomaticBonusCandidates = (
 export const getReferralBonusId = (referrerId: string, referredCustomerId: string) => (
   `referral:${referrerId}:${referredCustomerId}`
 );
+
+export function getBonusPcAmount(customerType:string|undefined,type:BonusPcType,settings:AppSettings){
+ const fields={monthly_target:'monthlyTargetBonus',clean_payment_month:'cleanPaymentMonthBonus',new_customer:'newCustomerBonus',referral:'referralBonus'} as const;
+ return customerType==='medical'?getMedicalSettings(settings).loyaltySettings[fields[type]]:FIXED_BONUS_PC[type];
+}
