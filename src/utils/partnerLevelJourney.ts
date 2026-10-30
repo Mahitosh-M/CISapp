@@ -3,7 +3,7 @@ import { getPartnerUpgradeReasons, PARTNER_PURCHASE_MINIMUMS, PARTNER_REVIEW_DAY
 import { addDaysToDateString, getTodayDateString } from './dateUtils';
 import { calculateDueStatus } from './customerPortal';
 import { getBusinessInvoices, getPreviousOutstandingFallback } from './openingBalance';
-import { getCreditDaysForTierFromSettings, getGiftPercentageForTier } from './settings';
+import { getCreditDaysForTierFromSettings, getGiftPercentageForTier,getTierTargetSettings } from './settings';
 import { getTierDisplayName } from './tiers';
 
 const TIERS: CustomerTier[] = ['Tier 4', 'Tier 3', 'Tier 2', 'Tier 1'];
@@ -84,16 +84,16 @@ export function buildPartnerLevelJourney(
     .sort()[0] || customer.createdAt?.slice(0, 10) || '';
   // Compare the same eligible invoice, normalized to 10 PC at Active's rate.
   // Only example coin amounts reach the view; no invoice margin is exposed.
-  const activeCoinRate = getGiftPercentageForTier('Tier 4', settings);
+  const activeCoinRate = getGiftPercentageForTier('Tier 4', settings,customer.customerType);
   const coinExamples = TIERS.map((tier) => ({
     tier, name: getTierDisplayName(tier),
-    coins: activeCoinRate > 0 ? money(10 * getGiftPercentageForTier(tier, settings) / activeCoinRate) : 0
+    coins: activeCoinRate > 0 ? money(10 * getGiftPercentageForTier(tier, settings,customer.customerType) / activeCoinRate) : 0
   }));
   const levels = TIERS.map((tier, index): PartnerLevelTile => {
     const startingLevel = index === 0;
     // A net reversal this month first offsets older purchases. Never let it
     // produce a negative target or pretend that a reversed purchase is progress.
-    const monthlyTarget = startingLevel ? 0 : positive(PARTNER_PURCHASE_MINIMUMS[tier] * (PARTNER_REVIEW_DAYS / 30) - earlierPurchases - Math.min(0, thisMonthPurchases));
+    const monthlyTarget = startingLevel ? 0 : positive((customer.customerType==='medical'?getTierTargetSettings(tier,settings,'medical').monthlySalesTarget:PARTNER_PURCHASE_MINIMUMS[tier]) * (PARTNER_REVIEW_DAYS / 30) - earlierPurchases - Math.min(0, thisMonthPurchases));
     const remaining = startingLevel ? 0 : positive(monthlyTarget - Math.max(0, thisMonthPurchases));
     const state = index === currentIndex ? 'current' : index < currentIndex ? 'included' : index === currentIndex + 1 ? 'next' : 'higher';
     let historyMessage: string | undefined;
@@ -120,10 +120,10 @@ export function buildPartnerLevelJourney(
       paymentMessage: tier === 'Tier 1' && internal.paymentDisciplineScore < 90
         ? 'Platinum needs a strong record of paying on time. Pay each upcoming bill by its due date.'
         : undefined,
-      creditDays: Math.max(0, getCreditDaysForTierFromSettings(tier, settings)),
-      earnsCoins: getGiftPercentageForTier(tier, settings) > 0,
+      creditDays: Math.max(0, getCreditDaysForTierFromSettings(tier, settings,customer.customerType)),
+      earnsCoins: getGiftPercentageForTier(tier, settings,customer.customerType) > 0,
       coinComparison: activeCoinRate > 0 ? coinExamples.slice(0, index + 1) : [],
-      higherCoinRate: index > 0 && getGiftPercentageForTier(tier, settings) > getGiftPercentageForTier('Tier 4', settings)
+      higherCoinRate: index > 0 && getGiftPercentageForTier(tier, settings,customer.customerType) > getGiftPercentageForTier('Tier 4', settings,customer.customerType)
     };
   });
   return {

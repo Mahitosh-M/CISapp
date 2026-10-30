@@ -277,6 +277,7 @@ export interface UserProfile {
 }
 
 export interface AppSettings {
+  medicalSettings?: MedicalSettings;
   id?: string;
   key: 'erpSettings';
   giftPercentages: Record<CustomerTier, number>;
@@ -321,6 +322,8 @@ export interface AppSettings {
   customerDown: boolean;
   updatedAt?: string;
 }
+
+export type MedicalSettings = Pick<AppSettings, 'giftPercentages' | 'creditDays' | 'paymentBuffers' | 'creditPolicy' | 'overduePolicy' | 'targetSettings' | 'loyaltySettings'>;
 
 export interface Offer {
   id: string;
@@ -699,6 +702,8 @@ export interface OverduePcRequest {
 }
 
 export interface BonusPcRequest {
+  policyCategory?: 'medical';
+  policySettingsId?: string;
   id: string;
   customerId: string;
   customerName: string;

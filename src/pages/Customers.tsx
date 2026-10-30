@@ -24,7 +24,7 @@ import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
-import { DEFAULT_SETTINGS } from '../utils/settings';
+import { DEFAULT_SETTINGS,getPaymentTermsLabel } from '../utils/settings';
 import { getShopName } from '../utils/shops';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
@@ -372,7 +372,7 @@ const Customers = () => {
       setFormData((current) => ({
         ...current,
         tier,
-        paymentTerms: current.customerType === 'medical' ? '15 day credit' : getPaymentTermsForTier(tier)
+        paymentTerms: getPaymentTermsLabel(tier,settings,current.customerType)
       }));
       return;
     }
@@ -448,7 +448,7 @@ const Customers = () => {
       area: customer.area,
       branchId: customer.branchId || 'SINDHANUR',
       tier: customer.tier,
-      paymentTerms: customer.paymentTerms,
+      paymentTerms: customer.customerType==='medical'?getPaymentTermsLabel(customer.tier,settings,'medical'):customer.paymentTerms,
       notes: customer.notes,
       previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
       status: customer.status || 'Active'
@@ -497,7 +497,7 @@ const Customers = () => {
     setFormData({
       ...emptyCustomerForm,
       customerType,
-      paymentTerms: customerType === 'medical' ? '15 day credit' : emptyCustomerForm.paymentTerms
+      paymentTerms: getPaymentTermsLabel(emptyCustomerForm.tier,settings,customerType)
     });
     setEditingCustomerId('');
     setError('');

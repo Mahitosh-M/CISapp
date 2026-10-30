@@ -1602,6 +1602,34 @@ service cloud.firestore {
             : -1;
     }
 
+    function configuredMedicalBonus(data) {
+      let settings = get(/databases/$(database)/documents/settings/$(data.policySettingsId)).data;
+      let bonuses = settings.get('medicalSettings', {}).get('loyaltySettings', {});
+      let field = data.bonusType == 'monthly_target' ? 'monthlyTargetBonus'
+        : data.bonusType == 'clean_payment_month' ? 'cleanPaymentMonthBonus'
+        : data.bonusType == 'new_customer' ? 'newCustomerBonus' : 'referralBonus';
+      return settings.key == 'erpSettings' ? bonuses.get(field, fixedBonusPc(data.bonusType)) : -1;
+    }
+
+    function validBonusAmount(data) {
+      return !('policyCategory' in data)
+        ? data.suggestedCoins == fixedBonusPc(data.bonusType)
+          && data.approvedCoins in [0, fixedBonusPc(data.bonusType)]
+          && (request.method != 'update' || !('policyCategory' in resource.data))
+        : data.policyCategory == 'medical'
+          && data.policySettingsId is string && data.policySettingsId.size() <= 128
+          && data.suggestedCoins is int && data.suggestedCoins >= 0 && data.suggestedCoins <= 100000
+          && data.approvedCoins in [0, data.suggestedCoins]
+          && (request.method == 'create'
+            ? get(/databases/$(database)/documents/customers/$(data.customerId)).data.get('customerType', 'customer') == 'medical'
+              && data.suggestedCoins == configuredMedicalBonus(data)
+            : resource.data.get('policyCategory', '') == 'medical'
+              && data.policySettingsId == resource.data.policySettingsId
+              && data.customerId == resource.data.customerId && data.bonusType == resource.data.bonusType
+              && data.referenceId == resource.data.referenceId && data.suggestedCoins == resource.data.suggestedCoins
+              && (resource.data.status == 'Pending' || (data.status == resource.data.status && data.approvedCoins == resource.data.approvedCoins)));
+    }
+
     function validBonusPcRequest(data) {
       return data.keys().hasOnly([
           'customerId',
@@ -1611,6 +1639,8 @@ service cloud.firestore {
           'triggerType',
           'referenceId',
           'suggestedCoins',
+          'policyCategory',
+          'policySettingsId',
           'approvedCoins',
           'status',
           'generatedAt',
@@ -1630,9 +1660,8 @@ service cloud.firestore {
         && data.referenceId is string
         && data.referenceId.size() <= 160
         && data.suggestedCoins is number
-        && data.suggestedCoins == fixedBonusPc(data.bonusType)
+        && validBonusAmount(data)
         && data.approvedCoins is number
-        && data.approvedCoins in [0, fixedBonusPc(data.bonusType)]
         && data.status in ['Pending', 'Approved', 'Rejected']
         && data.generatedAt is string
         && validOptionalString(data, 'reviewedAt', 40)

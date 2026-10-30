@@ -1,3 +1,5 @@
+import {getCustomerPolicy} from './settings';
+import type {AppSettings} from '../types';
 export type CreditDocumentData = Record<string, any>;
 
 export type CalculatedCreditStatus = 'starter' | 'active' | 'hold' | 'disabled';
@@ -212,9 +214,9 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const tier = ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4'].includes(String(input.customer.tier))
     ? String(input.customer.tier)
     : 'Tier 4';
-  const creditDays = input.customer.customerType === 'medical'
-    ? 15
-    : Math.max(0, Math.round(numberOrZero(input.settings.creditDays?.[tier])));
+  const policy=getCustomerPolicy(input.settings as AppSettings,input.customer.customerType);
+  const creditDays=Math.max(0,Math.round(numberOrZero(policy.creditDays[tier as keyof typeof policy.creditDays])));
+  const starterCap=input.customer.customerType==='medical'?Math.min(PROVISIONAL_LIMIT_CAP,Math.max(0,numberOrZero(policy.creditPolicy.starterLimitCap))):PROVISIONAL_LIMIT_CAP;
   const ninetyDaysAgo = addDays(today, -89);
   const invoiceRows = buildInvoiceRows(input, today);
   const historyRows = invoiceRows.filter((row) => !row.openingBalance && row.creditInvoice && row.invoiceDate <= today);
@@ -256,7 +258,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const historyFactor = recentCompletedCreditRows.length > 0 ? lifetimeHistoryFactor : Math.min(1, lifetimeHistoryFactor);
   const establishedLimit = roundMoney(baseCreditLimit * paymentFactor * historyFactor);
 
-  const manualStarterLimit = Math.min(PROVISIONAL_LIMIT_CAP, Math.max(0, numberOrZero(input.existingProfile?.manualStarterLimit)));
+  const manualStarterLimit = Math.min(starterCap, Math.max(0, numberOrZero(input.existingProfile?.manualStarterLimit)));
   let limitSource = 'No history';
   let calculatedCreditLimit = 0;
 
@@ -277,6 +279,7 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
     limitSource = 'Cash-history starter';
   }
 
+  if(input.customer.customerType==='medical'&&completedCreditRows.length<3)calculatedCreditLimit=Math.min(calculatedCreditLimit,starterCap);
   const completedTransactions = invoiceRows.filter((row) => !row.openingBalance && row.completed && row.completedDate);
   const completedDates = completedTransactions.map((row) => row.completedDate).sort();
   const lastCompletedDate = completedDates[completedDates.length - 1] || '';
@@ -308,9 +311,9 @@ export const calculateCustomerCredit = (input: CreditCalculationInput): CreditCa
   const overdueSalesRatio = recentMonthlyCompletedCreditSales > 0
     ? overdueAmount / recentMonthlyCompletedCreditSales
     : overdueAmount > 0 ? 1 : 0;
-  const seriousRatio = Math.max(0, numberOrZero(input.settings.overduePolicy?.seriousSalesRatioPercent ?? 15)) / 100;
-  const seriousInvoiceCount = Math.max(1, Math.round(numberOrZero(input.settings.overduePolicy?.seriousInvoiceCount ?? 2)));
-  const seriousDays = Math.max(1, Math.round(numberOrZero(input.settings.overduePolicy?.seriousDays ?? 30)));
+  const seriousRatio = Math.max(0, numberOrZero(policy.overduePolicy?.seriousSalesRatioPercent ?? 15)) / 100;
+  const seriousInvoiceCount = Math.max(1, Math.round(numberOrZero(policy.overduePolicy?.seriousInvoiceCount ?? 2)));
+  const seriousDays = Math.max(1, Math.round(numberOrZero(policy.overduePolicy?.seriousDays ?? 30)));
   const seriousOverdue = overdueAmount > 0
     && (overdueSalesRatio > seriousRatio || overdueRows.length >= seriousInvoiceCount || oldestOverdueDays > seriousDays);
   const manualHold = input.existingProfile?.manualHold === true;
