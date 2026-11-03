@@ -3,6 +3,7 @@ import {Truck, Package, Wallet, RefreshCw, CheckCircle2} from "lucide-react";
 import "../delivery.css";
 ﻿import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import {useSharedCustomerData} from '../hooks/useSharedCustomerData';
 import { dispatchRequest } from "../services/dispatchService";
 const formatMoney = (value: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -47,6 +48,7 @@ interface Snapshot {
   requests: Array<{
     id: string;
     invoiceNumber: string;
+    sourceCustomerId?: string;
     customerName: string;
     active: boolean;
     tripId: string | null;
@@ -56,6 +58,7 @@ interface Snapshot {
 }
 export default function Dispatch() {
   const { role } = useAuth();
+  const {mode,getCustomers}=useSharedCustomerData();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
@@ -73,7 +76,11 @@ export default function Dispatch() {
     setError("");
     try {
       const [next,catalog]=await Promise.all([dispatchRequest<Snapshot>("pull"),dispatchRequest<{routes:WeeklyRoute[]}>("routeCatalog")]);
-      setSnapshot(next);setRoutes(catalog.routes);
+      if(mode){
+        const ids=new Set((await getCustomers()).map(customer=>customer.id));
+        setSnapshot({...next,customers:next.customers.filter(customer=>ids.has(customer.id)),claims:next.claims.filter(claim=>ids.has(claim.customerId)),requests:next.requests.filter(request=>Boolean(request.sourceCustomerId&&ids.has(request.sourceCustomerId)))});
+      }else setSnapshot(next);
+      setRoutes(catalog.routes);
     } catch (e) {
       setError((e as Error).message);
     } finally {

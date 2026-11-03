@@ -4,7 +4,7 @@ import { useCustomerPortalContext } from '../../components/CustomerMobileLayout'
 import { sortInvoicesByUrgency } from '../../utils/customerPortal';
 
 const CustomerInvoices = () => {
-  const { invoiceViews } = useCustomerPortalContext();
+  const { invoiceViews, customer, userProfile } = useCustomerPortalContext();
   const outstandingInvoices = useMemo(
     () => sortInvoicesByUrgency(invoiceViews.filter((invoiceView) => invoiceView.outstandingAmount > 0)),
     [invoiceViews]
@@ -17,11 +17,11 @@ const CustomerInvoices = () => {
       </div>
 
       {outstandingInvoices.length === 0 ? (
-        <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#166534', fontWeight: 900 }}>
+        <div data-portal-box="card" style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#166534', fontWeight: 900 }}>
           No outstanding invoices.
         </div>
       ) : (
-        outstandingInvoices.map((invoiceView) => <CustomerInvoiceCard key={invoiceView.invoice.id} invoiceView={invoiceView} />)
+        outstandingInvoices.map((invoiceView) => <CustomerInvoiceCard key={invoiceView.invoice.id} invoiceView={invoiceView} showBalanceWheel={customer?.customerType==='medical'||userProfile?.role==='customer'} />)
       )}
     </div>
   );

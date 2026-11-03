@@ -92,7 +92,7 @@ const CustomerPartnerPoints = () => {
               const isButtonDisabled = !hasEnoughApc || isRequested || isGifted || requestingRewardId === reward.id;
 
               return (
-                <div key={reward.id} style={customerPromoCardStyle}>
+                <div data-portal-box="card" key={reward.id} style={customerPromoCardStyle}>
                   {reward.imageUrl ? (
                     <ExternalImage
                       src={reward.imageUrl}

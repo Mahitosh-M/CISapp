@@ -1,0 +1,29 @@
+import {describe,it,expect} from 'vitest';
+import {buildMedicalReward,calculateMedicalReward} from './medicalReward';
+import {DEFAULT_SETTINGS,getMedicalSettings,mergeWithDefaultSettings,validateAppSettings} from './settings';
+import {calculateInvoiceApcInfo} from './customerPortal';
+import type {Invoice,Payment} from '../types';
+const settings=()=>({...DEFAULT_SETTINGS,id:'appSettings',medicalSettings:{...getMedicalSettings(),giftPercentages:{'Tier 1':5,'Tier 2':4,'Tier 3':3,'Tier 4':2}}});
+const inv=(manual=0):Invoice=>({id:'i',invoiceNumber:'I',customerId:'c',customerName:'Medical',date:'2026-11-01',dueDate:'2026-11-16',savedDueDate:'2026-11-16',finalPcCutoffDate:'2026-11-16',tierAtInvoice:'Tier 4',pcPercentageAtInvoice:2,bufferDaysAtInvoice:0,salesAmount:10000,costAmount:8000,transportAmount:0,totalSales:10000,totalCost:8000,totalProfit:2000,notes:'',createdAt:'2026-11-01',pcPolicyVersionAtInvoice:1,medicalReward:buildMedicalReward('medical','Tier 4',2000,settings(),manual)});
+const pay=(date='2026-11-16',amount=10000):Payment=>({id:'p',invoiceId:'i',invoiceNumber:'I',customerId:'c',customerName:'Medical',date,amount,amountAppliedToInvoice:amount,advanceCreatedAmount:0,advanceAppliedAmount:0,amountUsedForOldBalance:0,oldBalanceBeforePayment:0,oldBalanceAfterPayment:0,cashDiscount:0,mode:'Cash',notes:'',createdAt:date});
+describe('Medical combined invoice reward',()=>{
+ it.each([[160,160],[100,100],[20,40],[0,40]])('proposal %s produces one reward of %s',(manual,expected)=>{
+  const invoice=inv(manual);expect(invoice.medicalReward?.finalCombinedRewardCoins).toBe(expected);expect(calculateInvoiceApcInfo(invoice,[pay()],'Tier 4',settings()).earnedApc).toBe(expected);
+ });
+ it('rejects an above-cap proposal with a concrete maximum',()=>expect(()=>inv(200)).toThrow('160 coins'));
+ it.each([5,4,3,2])('uses configured level percentage %s',level=>{const result=calculateMedicalReward(2000,level,8);expect(result.maximumAllowedCoins).toBe(160);expect(result.levelRewardCoins).toBe(20*level);});
+ it.each(['customer','header','Medical','',undefined])('rejects promotional data for non-Medical type %s',type=>expect(()=>buildMedicalReward(type,'Tier 4',2000,settings(),1)).toThrow('non-MEDICAL'));
+ it('leaves normal customer reward policy unchanged',()=>{expect(buildMedicalReward('customer','Tier 4',2000,settings())).toBeUndefined();const invoice=inv();delete invoice.medicalReward;expect(calculateInvoiceApcInfo(invoice,[pay()],'Tier 4',settings()).earnedApc).toBe(40);});
+ it.each([0,-100])('rejects positive proposals for non-positive profit %s',profit=>{expect(calculateMedicalReward(profit,2,8,0).finalCombinedRewardCoins).toBe(0);expect(calculateMedicalReward(profit,2,8,1).valid).toBe(false);});
+ it.each([-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1])('rejects invalid manual coins %s',manual=>expect(()=>inv(manual)).toThrow('whole number'));
+ it('has no product/quantity input and floors decimal caps precisely',()=>expect(calculateMedicalReward(2133,2,7.5,159)).toMatchObject({maximumAllowedCoins:159,finalCombinedRewardCoins:159,valid:true}));
+ it('recalculates when invoice amounts change',()=>{expect(calculateMedicalReward(2000,2,8).maximumAllowedCoins).toBe(160);expect(calculateMedicalReward(1000,2,8).maximumAllowedCoins).toBe(80);});
+ it('uses current settings for new invoices and preserves saved percentages',()=>{const original=inv(100).medicalReward!;const changed=settings();changed.medicalSettings.maximumCombinedRewardPercentage=9;expect(buildMedicalReward('medical','Tier 4',2000,changed,100)?.maximumAllowedCoins).toBe(180);expect(buildMedicalReward('medical','Tier 4',2000,changed,100,original)?.maximumAllowedCoins).toBe(160);});
+ it('preserves legacy decimal settings on load but rejects them on a new save',()=>{expect(getMedicalSettings().maximumCombinedRewardPercentage).toBe(8);const value=settings();value.medicalSettings.maximumCombinedRewardPercentage=7.5;expect(mergeWithDefaultSettings(mergeWithDefaultSettings(value)).medicalSettings?.maximumCombinedRewardPercentage).toBe(7.5);expect(validateAppSettings(value).isValid).toBe(false);expect(()=>buildMedicalReward('medical','Tier 4',2000,value,100)).toThrow('whole number');});
+ it.each([-1,7.5,101,NaN,Infinity])('rejects invalid Admin maximum %s',maximum=>{const value=settings();value.medicalSettings.maximumCombinedRewardPercentage=maximum;expect(validateAppSettings(value).isValid).toBe(false);});
+ it('explains a maximum below any configured Medical level',()=>{const value=settings();value.medicalSettings.maximumCombinedRewardPercentage=4;expect(validateAppSettings(value).errors.join(' ')).toContain('level rate of 5%');});
+ it('preserves early-payment qualification and outstanding behavior',()=>{expect(calculateInvoiceApcInfo(inv(160),[pay('2026-11-17')],'Tier 4',settings()).earnedApc).toBe(0);expect(calculateInvoiceApcInfo(inv(160),[pay('2026-11-16',9000)],'Tier 4',settings()).earnedApc).toBe(0);expect(inv(160).totalSales).toBe(10000);});
+ it('keeps the original normal calculation when the proposal is lower, including buffer weighting',()=>{const normal=inv(1);normal.totalProfit=2017;normal.medicalReward=buildMedicalReward('medical','Tier 4',2017,settings(),1);normal.bufferDaysAtInvoice=3;const legacy={...normal,medicalReward:undefined};expect(calculateInvoiceApcInfo(normal,[pay('2026-11-17')],'Tier 4',settings()).earnedApc).toBe(calculateInvoiceApcInfo(legacy,[pay('2026-11-17')],'Tier 4',settings()).earnedApc);});
+ it('keeps the saved reward basis even if posted financial details are edited',()=>{const invoice=inv(160);invoice.totalProfit=1;expect(calculateInvoiceApcInfo(invoice,[pay()],'Tier 4',settings()).earnedApc).toBe(160);});
+ it('rejects the rare rounding conflict rather than exceed the cap or reduce the entitlement',()=>expect(calculateMedicalReward(10,5,5).valid).toBe(false));
+});

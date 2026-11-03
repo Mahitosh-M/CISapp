@@ -1,5 +1,5 @@
-import { Outlet, useOutletContext } from 'react-router-dom';
-import { Coins, FileText, Gift, Home, Sparkles, Tags, Wallet } from 'lucide-react';
+import { Outlet, useLocation, useOutletContext } from 'react-router-dom';
+import { Coins, FileText, Gift, BookOpen, Sparkles, Tags, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import InstallAppPrompt from './InstallAppPrompt';
@@ -10,9 +10,10 @@ import { markBonusPcRequestSeen } from '../services/firestoreService';
 import { formatApc } from '../utils/loyalty';
 import { getTierColors, getTierDisplayName } from '../utils/tiers';
 import { canUsePortalOrder } from '../utils/orderVisibility';
+import './CustomerDashboardViewport.css';
+import './CustomerPortalBorders.css';
 
 const navItems = [
-  { to: '/customer', label: 'Home', icon: Home, color: '#FDE68A', end: true },
   { to: '/customer/dashboard', label: 'Dashboard', icon: Wallet, color: '#7DD3FC' },
   { to: '/customer/invoices', label: 'Invoices', icon: FileText, color: '#86EFAC' },
   { to: '/customer/partner-points', label: 'Rewards', icon: Gift, color: '#F9A8D4' },
@@ -26,6 +27,7 @@ const ORDER_APP_URL = 'https://orderapp-35200.web.app';
 
 const CustomerMobileLayout = () => {
   const portalData = useCustomerPortalData();
+  const isDashboard = useLocation().pathname.replace(/\/$/, '') === '/customer/dashboard';
   const { logout, role } = useAuth();
   const [viewedBonusVersion, setViewedBonusVersion] = useState(0);
   const [pcBalancePopup, setPcBalancePopup] = useState<{ change: number; balance: number } | null>(null);
@@ -36,7 +38,7 @@ const CustomerMobileLayout = () => {
   const pcBalanceStorageKey = getPcBalanceStorageKey(portalData.userProfile?.uid, portalData.customer?.id);
   const showOrderHome = canUsePortalOrder(role, portalData.settings);
   const showHeaderOrder = showOrderHome && portalData.settings.headerOrder;
-  const visibleNavItems = showOrderHome ? navItems : navItems.filter((item) => item.to !== '/customer');
+  const visibleNavItems = (portalData.customer?.customerType==='medical'||role==='customer') ? [navItems[0],{to:'/customer/ledger',label:'Ledger',icon:BookOpen,color:'#FDE68A'},...navItems.slice(1)] : navItems;
 
   const latestUnreadBonus = useMemo(() => {
     return [...portalData.bonusPcRequests]
@@ -101,7 +103,7 @@ const CustomerMobileLayout = () => {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--app-page-background)', color: '#11185A', maxWidth: 460, margin: '0 auto', position: 'relative', boxShadow: '0 0 48px rgba(0,0,0,0.38)' }}>
+    <div className={isDashboard ? 'customer-portal customer-portal-dashboard' : 'customer-portal'} style={{ minHeight: '100vh', background: 'var(--app-page-background)', color: '#11185A', maxWidth: 460, margin: '0 auto', position: 'relative', boxShadow: '0 0 48px rgba(0,0,0,0.38)' }}>
       <header style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', padding: '18px 18px 24px', borderBottomLeftRadius: 26, borderBottomRightRadius: 26 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr auto', alignItems: 'center', gap: 10 }}>
           {showHeaderOrder ? (

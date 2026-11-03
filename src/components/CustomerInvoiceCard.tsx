@@ -2,17 +2,21 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import type { CustomerInvoiceView } from '../utils/customerPortal';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { formatApc } from '../utils/loyalty';
+import MedicalInvoiceBalanceWheel from './MedicalInvoiceBalanceWheel';
 
 interface CustomerInvoiceCardProps {
   invoiceView: CustomerInvoiceView;
+  showBalanceWheel?: boolean;
 }
 
 const cardStyle = {
-  background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
+  background: '#4169E1',
+  border: '6px solid #B8860B',
   borderRadius: 18,
+  color: '#FFFFFF',
   padding: 14,
   boxShadow: '0 12px 28px rgba(11,31,58,0.22)',
-  marginBottom: 12
+  marginBottom: 18
 };
 
 const coinOuterStyle = {
@@ -38,7 +42,9 @@ const coinInnerStyle = {
   textAlign: 'center' as const
 };
 
-const GoldCoin = ({ value, label }: { value: number; label: string }) => (
+const GoldCoin = ({ value, label, compact = false }: { value: number; label: string; compact?: boolean }) => compact ? (
+  <div className="medical-invoice-circle medical-invoice-pc-coin"><div className="medical-invoice-circle-center"><strong>{formatApc(value)}</strong><small>{label}</small></div></div>
+) : (
   <div style={coinOuterStyle}>
     <div style={coinInnerStyle}>
       <div>
@@ -49,10 +55,10 @@ const GoldCoin = ({ value, label }: { value: number; label: string }) => (
   </div>
 );
 
-const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
+const CustomerInvoiceCard = ({ invoiceView, showBalanceWheel = false }: CustomerInvoiceCardProps) => {
   const isPaid = invoiceView.outstandingAmount <= 0;
   const isOverdue = !isPaid && invoiceView.daysRemaining < 0;
-  const dueDateColor = '#FFF200';
+  const dueDateColor = '#92400E';
   // The red portion grows with each elapsed credit day and remains full red once overdue.
   const countdownProgress = Math.min(100, Math.max(0, invoiceView.dueProgressPercentage));
   const countdownData = [
@@ -62,20 +68,20 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
   const countdownNumber = invoiceView.invoice.dueDate ? Math.abs(invoiceView.daysRemaining) : '-';
   const countdownLabel = isOverdue ? 'Days Overdue' : 'Days Left';
   const expectedPc = Math.max(0, invoiceView.expectedApc);
-  const chargeBreakdown = (invoiceView.invoice.lateChargesTotal ?? 0) > 0 ? <div style={{color:'#FFF7D6',padding:8,textAlign:'center'}}>Original invoice {formatMoney(invoiceView.invoice.totalSales)} · Overdue charges {formatMoney(invoiceView.invoice.lateChargesTotal ?? 0)} · Total includes charges</div> : null;
+  const chargeBreakdown = (invoiceView.invoice.lateChargesTotal ?? 0) > 0 ? <div style={{color:'#FFFFFF',padding:8,textAlign:'center'}}>Original invoice {formatMoney(invoiceView.invoice.totalSales)} · Overdue charges {formatMoney(invoiceView.invoice.lateChargesTotal ?? 0)} · Total includes charges</div> : null;
 
   if (isPaid) {
     return (
-      <div style={cardStyle}>
+      <div data-portal-box="invoice" style={cardStyle}>
         {chargeBreakdown}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 126px', gap: 12, alignItems: 'center' }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
               <span style={{ background: '#166534', color: '#FFFFFF', borderRadius: 999, padding: '4px 8px', fontSize: 11, fontWeight: 900 }}>Paid</span>
             </div>
-            <div style={{ color: '#BFC8D9', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Date</div>
+            <div style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Date</div>
             <div style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 900, marginTop: 3 }}>{formatDate(invoiceView.invoice.date)}</div>
-            <div style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #FDE68A 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: 10, marginTop: 12, boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
+            <div data-portal-box="detail" style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #FDE68A 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: 10, marginTop: 12, boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
               <div style={{ color: '#11185A', fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Amount</div>
               <div style={{ color: '#11185A', fontSize: 20, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.invoiceAmount)}</div>
             </div>
@@ -92,25 +98,25 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
   }
 
   return (
-    <div style={cardStyle}>
+    <div data-portal-box="invoice" style={cardStyle}>
       {chargeBreakdown}
       <div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'stretch', textAlign: 'center' }}>
-          <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 12, padding: '9px 8px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>
-            <div style={{ color: '#FFFFFF', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Date</div>
-            <div style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 900, marginTop: 5, lineHeight: 1.15 }}>{formatDate(invoiceView.invoice.date)}</div>
+          <div data-portal-box="detail" style={{ background: '#FFFFFF', border: '1px solid #BED0E3', borderRadius: 12, padding: '9px 8px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>
+            <div style={{ color: '#14243A', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Date</div>
+            <div style={{ color: '#14243A', fontSize: 16, fontWeight: 900, marginTop: 5, lineHeight: 1.15 }}>{formatDate(invoiceView.invoice.date)}</div>
           </div>
-          <div style={{ background: 'linear-gradient(135deg, rgba(255,242,0,0.18), rgba(255,255,255,0.04))', border: '1px solid rgba(255,242,0,0.45)', borderRadius: 12, padding: '9px 8px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 14px rgba(255,242,0,0.12)' }}>
-            <div style={{ color: '#FFFFFF', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Due Date</div>
+          <div data-portal-box="detail" style={{ background: '#E5EFFA', border: '1px solid #93B7D5', borderRadius: 12, padding: '9px 8px', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 14px rgba(255,242,0,0.12)' }}>
+            <div style={{ color: '#14243A', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Due Date</div>
             <div style={{ color: dueDateColor, fontSize: 16, fontWeight: 900, marginTop: 5, lineHeight: 1.15 }}>{invoiceView.invoice.dueDate ? formatDate(invoiceView.invoice.dueDate) : 'Not set'}</div>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 112px', gap: 12, alignItems: 'center', marginTop: 10, padding: 10, borderRadius: 12, background: 'rgba(255,247,214,0.08)', border: '1px solid rgba(253,230,138,0.35)' }}>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <GoldCoin value={expectedPc} label={invoiceView.apcStatus === 'Expired' ? 'PC EXPIRED' : 'EXPECTED PC'} />
+        <div data-portal-box="detail" style={{ display: 'grid', gridTemplateColumns: showBalanceWheel ? 'repeat(3, minmax(0, 1fr))' : '1fr 112px', gap: showBalanceWheel ? 6 : 12, alignItems: 'center', marginTop: 10, padding: showBalanceWheel ? 6 : 10, borderRadius: 12, background: 'linear-gradient(135deg, #103A5C 0%, #071A33 100%)', border: '1px solid #D4AF37' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', minWidth: 0 }}>
+            <GoldCoin compact={showBalanceWheel} value={expectedPc} label={invoiceView.apcStatus === 'Expired' ? 'PC EXPIRED' : 'EXPECTED PC'} />
           </div>
-          <div style={{ width: 112, height: 112, position: 'relative', margin: '0 auto' }}>
+          {showBalanceWheel ? <div className="medical-invoice-circle medical-invoice-days-wheel" role="img" aria-label={countdownNumber+' '+countdownLabel} style={{background:'conic-gradient(#FF003D 0% '+countdownProgress+'%, #00E676 '+countdownProgress+'% 100%)'}}><div className="medical-invoice-circle-center"><strong>{countdownNumber}</strong><small>{countdownLabel}</small></div></div> : <div style={{ width: 112, height: 112, position: 'relative', margin: '0 auto' }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={countdownData} dataKey="value" innerRadius={35} outerRadius={52} startAngle={90} endAngle={-270} stroke="none">
@@ -124,23 +130,24 @@ const CustomerInvoiceCard = ({ invoiceView }: CustomerInvoiceCardProps) => {
                 <div style={{ fontSize: 10, color: '#FFFFFF', fontWeight: 900, marginTop: 4, lineHeight: 1.05 }}>{countdownLabel}</div>
               </div>
             </div>
-          </div>
+          </div>}
+          {showBalanceWheel && <MedicalInvoiceBalanceWheel invoiceAmount={invoiceView.invoiceAmount} pendingAmount={invoiceView.outstandingAmount} paidAmount={invoiceView.paidAmount}/>}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 10, textAlign: 'center' }}>
-          <div style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #FDE68A 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: '9px 6px', color: '#11185A', boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
+        {!showBalanceWheel && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 10, textAlign: 'center' }}>
+          <div data-portal-box="detail" style={{ background: 'linear-gradient(135deg, #FFF7D6 0%, #FDE68A 100%)', border: '1px solid #D4AF37', borderRadius: 10, padding: '9px 6px', color: '#11185A', boxShadow: '0 5px 14px rgba(212,175,55,0.18)' }}>
             <div style={{ color: '#11185A', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Invoice Amount</div>
             <div style={{ color: '#11185A', fontSize: 15, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.invoiceAmount)}</div>
           </div>
-          <div style={{ background: '#ECFDF3', border: '1px solid #BBE7C8', borderRadius: 10, padding: '9px 6px' }}>
+          <div data-portal-box="detail" style={{ background: '#ECFDF3', border: '1px solid #BBE7C8', borderRadius: 10, padding: '9px 6px' }}>
             <div style={{ color: '#166534', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Paid</div>
             <div style={{ color: '#166534', fontSize: 15, fontWeight: 900, marginTop: 3 }}>{formatMoney(invoiceView.paidAmount)}</div>
           </div>
-          <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '9px 6px' }}>
+          <div data-portal-box="detail" style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '9px 6px' }}>
             <div style={{ color: '#7F1D1D', fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>Outstanding</div>
             <div style={{ color: '#7F1D1D', fontSize: 15, fontWeight: 900, marginTop: 3 }}>{formatMoney(Math.max(0, invoiceView.outstandingAmount))}</div>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );

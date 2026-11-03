@@ -3,7 +3,7 @@ import {FieldPath,getFirestore,type Firestore} from 'firebase-admin/firestore';
 import {onCall,HttpsError} from 'firebase-functions/v2/https';
 import {onDocumentCreated,onDocumentUpdated,onDocumentWritten} from 'firebase-functions/v2/firestore';
 import {onSchedule} from 'firebase-functions/v2/scheduler';
-import {assessInvoiceCharges,chargeDate,invoiceReceivableAmount,type ChargeInvoice} from '../../src/utils/invoiceCharges';
+import {assessInvoiceCharges,chargeDate,invoiceReceivableAmount,isCustomerInvoiceChargeEligible,type ChargeInvoice} from '../../src/utils/invoiceCharges';
 import {applyCustomerOutstandingDelta} from '../../src/utils/customerOutstanding';
 import {getInvoicePaymentEffect} from '../../src/utils/paymentUtils';
 import {isOpeningBalanceInvoice} from '../../src/utils/openingBalance';
@@ -42,6 +42,8 @@ export const configureInvoiceLateCharges=onCall({region},async request=>{
 export async function registerInvoiceChargePolicy(db:Firestore,id:string,policy:Policy){
   return db.runTransaction(async tx=>{const ref=db.doc(`invoices/${id}`),snapshot=await tx.get(ref),value=snapshot.data();
     if(!policy.enabled||!value||value.lateChargePolicy||(opening(value)&&!policy.includeOpeningBalances)||['cancelled','deleted','void'].includes(String(value.status??value.recordStatus??'').toLowerCase()))return false;
+    const customer=await tx.get(db.doc(`customers/${value.customerId}`));
+    if(!isCustomerInvoiceChargeEligible(value,customer.data()))return false;
     if(policy.scope==='new_only'){
       const created=value.createdAt?.toDate?.()??(value.createdAt instanceof Date?value.createdAt:new Date(String(value.createdAt??'')));
       if(!Number.isFinite(created.getTime())||new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(created)<policy.effectiveDate)return false;
@@ -62,6 +64,7 @@ export async function postInvoiceLateCharges(db:Firestore,id:string,asOf:string)
     const customerRef=db.doc(`customers/${value.customerId}`);
     const [customer,paymentDocs]=await Promise.all([tx.get(customerRef),tx.get(db.collection('payments').where('invoiceId','==',id))]);
     if(!customer.exists)throw new Error('Customer missing; charge requires review');
+    if(!isCustomerInvoiceChargeEligible(value,customer.data())){if(value.nextLateChargeDate!==null)tx.update(ref,{nextLateChargeDate:null});return{added:0};}
     const payments=paymentDocs.docs.map(d=>mapPaymentDoc(d.id,d.data()));
     const at=new Date().toISOString(),result=assessInvoiceCharges({id,...value} as ChargeInvoice,payments,asOf,at);
     // All reads precede writes. Assessment IDs and the invoice state change atomically.
@@ -98,12 +101,19 @@ export const assessDueInvoiceLateCharges=onSchedule({schedule:'every 60 minutes'
   for(const invoice of due.docs)await postInvoiceLateCharges(db,invoice.id,day);
 });
 
-export const reopenInvoiceLateCharges=onDocumentWritten({document:'payments/{paymentId}',region},async event=>{
-  const db=database();const ids=new Set([event.data?.before.data()?.invoiceId,event.data?.after.data()?.invoiceId].filter(Boolean));
-  const config=(await db.doc('settings/invoiceLateChargePolicy').get()).data() as Policy|undefined;
-  for(const id of ids){if(config?.enabled)await registerInvoiceChargePolicy(db,id,config);await db.runTransaction(async tx=>{const ref=db.doc(`invoices/${id}`),invoice=await tx.get(ref),value=invoice.data();if(!value?.lateChargePolicy||value.nextLateChargeDate!==null)return;
+export async function reopenInvoiceChargeSchedule(db:Firestore,id:string){
+  return db.runTransaction(async tx=>{
+    const ref=db.doc(`invoices/${id}`),invoice=await tx.get(ref),value=invoice.data();
+    if(!value?.lateChargePolicy||value.nextLateChargeDate!==null)return;
+    const customer=await tx.get(db.doc(`customers/${value.customerId}`));
+    if(!isCustomerInvoiceChargeEligible(value,customer.data()))return;
     const payments=await tx.get(db.collection('payments').where('invoiceId','==',id));
     const paid=payments.docs.reduce((sum,d)=>sum+getInvoicePaymentEffect(mapPaymentDoc(d.id,d.data())),0);
     if(invoiceReceivableAmount(value as ChargeInvoice)>paid)tx.update(ref,{nextLateChargeDate:chargeDate(value.lateChargePolicy.firstChargeDate,value.lateChargePolicy.nextIndex*15)});
-  });}
+  });
+}
+export const reopenInvoiceLateCharges=onDocumentWritten({document:'payments/{paymentId}',region},async event=>{
+  const db=database();const ids=new Set<string>([event.data?.before.data()?.invoiceId,event.data?.after.data()?.invoiceId].filter(Boolean));
+  const config=(await db.doc('settings/invoiceLateChargePolicy').get()).data() as Policy|undefined;
+  for(const id of ids){if(config?.enabled)await registerInvoiceChargePolicy(db,id,config);await reopenInvoiceChargeSchedule(db,id);}
 });

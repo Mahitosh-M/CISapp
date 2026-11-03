@@ -1,4 +1,5 @@
 import type { AppState, Trip, User } from "./domain";
+import type {DeliveryLocation} from './route-geo';
 import { now } from "./domain";
 interface ConnectedIdentity { uid:string;issuer:'cisapp-236ab'|'delivery-28165';actorId:string;role:'ADMIN'|'MANAGER'|'DRIVER';shopIds:string[];name:string; }
 export interface CloudClaim {
@@ -23,6 +24,8 @@ export interface CloudClaim {
   receiptIds?: string[];
 }
 export interface CloudRequest {
+  location?: DeliveryLocation | null;
+  routeRevision?: number;
   routeId?: string; routeName?: string; routeDays?: number[]; routeStopId?: string | null; routeStopName?: string | null;
   id: string;
   sourceInvoiceId: string;
@@ -43,6 +46,7 @@ export interface CloudRequest {
 export interface CloudSnapshot {
   identity: ConnectedIdentity;
   customers: Array<{
+    location?: DeliveryLocation | null;
     id: string;
     name: string;
     phone: string;
@@ -60,7 +64,7 @@ export interface CloudSnapshot {
   }>;
   requests: CloudRequest[];
   trips: Array<
-    {routeTemplateId?: string} & Pick<
+    {routeTemplateId?: string; routeSnapshot?: Trip['routeSnapshot']; pendingRouteAcknowledgements?: string[]; visitedWaypoints?: string[]} & Pick<
       Trip,
       | "id"
       | "name"
@@ -118,6 +122,8 @@ export function mergeCloudSnapshot(s: AppState, cloud: CloudSnapshot) {
       externalId: c.id,
       name: c.name,
       phone: c.phone,
+      location:c.location!==undefined?c.location:old?.location,
+      lat:c.location?.lat??old?.lat,lng:c.location?.lng??old?.lng,
       alternate: old?.alternate ?? "",
       address: old?.address ?? "",
       area: c.area,
@@ -161,8 +167,8 @@ export function mergeCloudSnapshot(s: AppState, cloud: CloudSnapshot) {
       old &&
       (old.customerId !== cid(r.sourceCustomerId) ||
         old.shopId !== r.shopId ||
-        (old.tripId &&
-          (old.address !== r.address || old.packages !== r.packages || old.routeId !== r.routeId || old.routeStopId !== r.routeStopId)));
+        (old.tripId && s.trips.find(t=>t.id===old.tripId)?.status!=='Draft' &&
+          (old.address !== r.address || old.packages !== r.packages || old.routeId !== r.routeId || old.routeStopId !== r.routeStopId || JSON.stringify(old.location??null)!==JSON.stringify(r.location??null))));
     if (r.sourceIssue || sourceChanged) {
       if (old)
         old.sourceBlocked =
@@ -190,6 +196,7 @@ export function mergeCloudSnapshot(s: AppState, cloud: CloudSnapshot) {
         remaining: r.packages,
         description: "",
         instructions: r.instructions,
+        location:r.location,routeRevision:r.routeRevision,
         routeId:r.routeId,routeName:r.routeName,routeDays:r.routeDays,routeStopId:r.routeStopId,routeStopName:r.routeStopName,
         priority: "Normal",
         status: !r.active ? "Cancelled" : r.tripId ? "Assigned" : "Ready",
@@ -210,17 +217,19 @@ export function mergeCloudSnapshot(s: AppState, cloud: CloudSnapshot) {
       else old.status = "Cancelled";
     } else {
       old.date = r.scheduledDate;
-      if (!old.tripId) {
+      if (!old.tripId || s.trips.find(t=>t.id===old.tripId)?.status==='Draft') {
         old.address = r.address;
         old.phone = r.contact;
         old.packages = r.packages;
         old.remaining = r.packages;
         old.instructions = r.instructions;
+        old.location=r.location;old.routeRevision=r.routeRevision;
         old.routeId=r.routeId;old.routeName=r.routeName;old.routeDays=r.routeDays;old.routeStopId=r.routeStopId;old.routeStopName=r.routeStopName;
       }
     }
   }
   for (const t of cloud.trips) {
+    if(t.routeSnapshot)t.routeSnapshot={...t.routeSnapshot,points:t.routeSnapshot.points.map(p=>({...p,customerId:p.customerId&&!p.customerId.startsWith('cis-customer:')?cid(p.customerId):p.customerId}))};
     const old = s.trips.find((x) => x.id === t.id);
     if (old) {
       if (t.status === "Closed" && old.status !== "Closed")
@@ -249,6 +258,9 @@ export function mergeCloudSnapshot(s: AppState, cloud: CloudSnapshot) {
           }
           Object.assign(old, {
             routeTemplateId: t.routeTemplateId,
+            routeSnapshot: t.routeSnapshot,
+            pendingRouteAcknowledgements: t.pendingRouteAcknowledgements,
+            visitedWaypoints: t.visitedWaypoints,
             name: t.name,
             date: t.date,
             startShopId: t.startShopId,

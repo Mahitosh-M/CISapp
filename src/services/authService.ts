@@ -1,3 +1,6 @@
+import {clearCustomerSessionCache} from './customerSessionCache';
+import {clearSharedCustomerModes} from '../utils/sharedCustomerMode';
+import {clearFirestoreSessionCache} from './firestoreService';
 import { assertLoginInput } from "../inputSecurity";
 import { deleteApp, initializeApp } from 'firebase/app';
 import {
@@ -47,6 +50,7 @@ const getReusableAuthCredential = async (secondaryAuth: ReturnType<typeof getAut
 };
 
 export const listenToAuthState = (callback: (user: User | null) => void) => onAuthStateChanged(auth, (user) => {
+  if(!user){clearCustomerSessionCache();clearFirestoreSessionCache();clearSharedCustomerModes();}
   callback(user);
 });
 
@@ -60,6 +64,9 @@ export const loginWithEmail = async (email: string, password: string) => {
 };
 
 export const logoutUser = async () => {
+  clearSharedCustomerModes();
+  clearCustomerSessionCache();
+  clearFirestoreSessionCache();
   return signOut(auth);
 };
 

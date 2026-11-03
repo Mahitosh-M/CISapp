@@ -1,6 +1,6 @@
 # Separate Medical customer policies
 
-This release adds separate Medical customer policies and theme-matched invoice overdue-charge controls. No production settings, existing invoices or posted PC are migrated by deployment. Unfinished smart-route work is excluded.
+Implemented on `dev-smart-routes`. No production settings, existing invoices or posted PC were migrated or changed. Main, GitHub and live deployments were not changed by this work.
 
 ## Admin workflow
 
@@ -39,7 +39,7 @@ The active Medical bonus amounts and monthly targets are separate as requested. 
 - CISapp build and Functions TypeScript build: passed.
 - Ordinary CISapp tests: **164 passed**, including Medical default dates, category isolation, PC/credit snapshots, Medical targets/bonuses and starter cap validation.
 - Cross-app React component checks: **6 passed**, including real invoice form selection/date changes and Admin Medical settings saves while normal settings remain unchanged.
-- Firestore security/financial checks: **62 passed in the isolated release**. The Medical test additionally verifies a saved 7-PC bonus posts once to the PC ledger and balance after settings change, and rejects a duplicate credit.
+- Firestore security/financial checks: **63 passed**. The Medical test additionally verifies a saved 7-PC bonus posts once to the PC ledger and balance after settings change, and rejects a duplicate credit.
 - Backend Firestore/Auth workflow checks: passed for existing collection posting, customer credit/PC, cash integration and account lifecycle.
 
-Release the frontend, Medical-aware Dispatch Functions and Firestore Rules together. No credentials or migration are needed to read legacy settings: missing Medical configuration receives independent defaults. Do not remove request policy metadata when rolling code back; retain awarded history and review compatible rules first.
+Deploy the frontend, Functions shared utilities and Firestore Rules together in a reviewed release. No credentials or migration are needed to read legacy settings: missing Medical configuration receives independent defaults. Do not remove request policy metadata when rolling code back; retain awarded history and review compatible rules first.

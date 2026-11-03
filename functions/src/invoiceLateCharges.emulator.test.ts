@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initializeApp} from 'firebase-admin/app';
 import {getFirestore} from 'firebase-admin/firestore';
-import {registerInvoiceChargePolicy,postInvoiceLateCharges} from './invoiceLateCharges';
+import {registerInvoiceChargePolicy,postInvoiceLateCharges,reopenInvoiceChargeSchedule} from './invoiceLateCharges';
 const enabled=!!process.env.FIRESTORE_EMULATOR_HOST;
 
 test('late charges are atomic, compound only unpaid debt, and never duplicate cash or sales',{skip:!enabled},async()=>{
@@ -71,4 +71,27 @@ test('December policy includes opening debt, protects younger invoices and keeps
  assert.equal((await db.doc('invoices/opening').get()).data()?.lateChargesTotal,13,'Next 1% uses remaining 310');
  assert.equal((await db.doc('customers/c').get()).data()?.openingBalanceOutstandingAmount,313);
  assert.equal((await db.collection('shopCash').get()).size,0,'Assessment does not create cash');
+});
+
+
+test('Medical invoices never enrol, assess or reopen while posted history is preserved',{skip:!enabled},async()=>{
+ const db=getFirestore(initializeApp({projectId:'demo-medical-no-charges'},'medical-no-charges'));
+ const policy={enabled:true,scope:'existing_from_start' as const,effectiveDate:'2026-12-01',includeOpeningBalances:true,revision:1};
+ await db.doc('customers/med').set({customerType:'medical',invoiceOutstandingAmount:1020,totalOutstandingAmount:1020});
+ await db.doc('customers/regular').set({customerType:'customer',invoiceOutstandingAmount:1000,totalOutstandingAmount:1000});
+ const base={customerId:'med',invoiceNumber:'MED-1',date:'2026-10-01',createdAt:'2026-10-01',totalSales:1000,totalProfit:100};
+ for(const extra of [{id:'ordinary'},{id:'opening',isOpeningBalance:true,invoiceNumber:'0000-OPENING-med'},{id:'new',createdAt:'2026-12-02'}]){
+  const {id,...data}=extra;await db.doc('invoices/'+id).set({...base,...data});assert.equal(await registerInvoiceChargePolicy(db,id,policy),false);
+  assert.equal((await db.doc('invoices/'+id).get()).data()?.lateChargePolicy,undefined);
+ }
+ const event={id:'old:0',date:'2026-10-31',index:0,rateBasisPoints:200,baseAmount:1000,amount:20,roundingPaise:0,createdAt:'2026-10-31'};
+ await db.doc('invoices/old').set({...base,lateChargePolicy:{version:1,firstChargeDate:'2026-10-31',nextIndex:1},lateChargeEvents:[event],lateChargesTotal:20,nextLateChargeDate:'2026-11-15'});
+ await db.doc('invoiceLateCharges/posted').set(event);
+ const customerBefore=(await db.doc('customers/med').get()).data();
+ await postInvoiceLateCharges(db,'old','2026-12-31');
+ const after=(await db.doc('invoices/old').get()).data()!;
+ assert.equal(after.nextLateChargeDate,null);assert.equal(after.lateChargesTotal,20);assert.deepEqual(after.lateChargeEvents,[event]);assert.deepEqual((await db.doc('customers/med').get()).data(),customerBefore);assert.equal((await db.collection('invoiceLateCharges').get()).size,1);
+ await reopenInvoiceChargeSchedule(db,'old');assert.equal((await db.doc('invoices/old').get()).data()?.nextLateChargeDate,null);
+ await db.doc('invoices/saved-medical').set({...base,customerId:'regular',medicalReward:{version:1}});assert.equal(await registerInvoiceChargePolicy(db,'saved-medical',policy),false,'A saved Medical invoice remains exempt after customer reclassification');
+ await db.doc('invoices/regular').set({...base,customerId:'regular'});assert.equal(await registerInvoiceChargePolicy(db,'regular',policy),true);await postInvoiceLateCharges(db,'regular','2026-12-01');assert.equal((await db.doc('invoices/regular').get()).data()?.lateChargesTotal,20);
 });

@@ -9,7 +9,7 @@ const CustomerProfile = () => {
   return (
     <div>
       <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900, marginBottom: 14 }}>My Profile</div>
-      <div style={{ background: '#FFFFFF', color: '#11185A', borderRadius: 22, padding: 18, boxShadow: '0 10px 24px rgba(11,31,58,0.08)' }}>
+      <div data-portal-box="card" style={{ background: '#FFFFFF', color: '#11185A', borderRadius: 22, padding: 18, boxShadow: '0 10px 24px rgba(11,31,58,0.08)' }}>
         <div style={{ width: 58, height: 58, borderRadius: 18, background: '#FFF7D6', color: '#11185A', display: 'grid', placeItems: 'center', marginBottom: 14 }}>
           <User size={28} />
         </div>
@@ -17,7 +17,7 @@ const CustomerProfile = () => {
         <div style={{ color: '#67738E', marginTop: 4 }}>{userProfile?.email}</div>
 
         {settings.showCustomerTierToCustomer && customer ? (
-          <div style={{ background: tierColors.background, color: tierColors.color, border: `1px solid ${tierColors.border}`, borderRadius: 16, padding: 12, fontWeight: 900, marginTop: 16 }}>
+          <div data-portal-box="card" style={{ background: tierColors.background, color: tierColors.color, border: `1px solid ${tierColors.border}`, borderRadius: 16, padding: 12, fontWeight: 900, marginTop: 16 }}>
             Customer Category: {getTierDisplayName(customer.tier)}
           </div>
         ) : null}

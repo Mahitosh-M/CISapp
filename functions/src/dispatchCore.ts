@@ -1,5 +1,6 @@
 import {invoiceReceivableAmount} from '../../src/utils/invoiceCharges';
-﻿import { createHash } from "node:crypto";
+import {deliveryLocation} from '../../src/utils/route-geo';
+import { createHash } from "node:crypto";
 import type { Invoice, Payment } from "../../src/types";
 import {
   sortInvoicesForPaymentAllocation,
@@ -70,6 +71,7 @@ export function deliveryFields(input: Data) {
     contact: text(input.contact, "Contact", 40),
     packages: input.packages as number,
     instructions: String(input.instructions ?? "").slice(0, 1500),
+    ...(input.location!==undefined?{location:deliveryLocation(input.location)}:{}),
   };
 }
 export function assertDeliverable(invoice: Data) {

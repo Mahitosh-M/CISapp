@@ -58,6 +58,7 @@ export interface LoyaltySettings {
 }
 
 export interface Customer {
+  deliveryLocation?: import('./utils/route-geo').DeliveryLocation | null;
   customerType?: 'customer' | 'medical';
   id: string;
   name: string;
@@ -163,9 +164,10 @@ export interface CreditAuditLog {
   reason: string;
 }
 
-export interface InvoiceDeliveryDetails { routeId?: string; routeName?: string; routeFrom?: string; routeTo?: string; routeDays?: number[]; routeRevision?: number; routeStopId?: string | null; routeStopName?: string | null; required: boolean; scheduledDate: string; address: string; contact: string; packages: number; instructions: string; }
+export interface InvoiceDeliveryDetails { location?: import('./utils/route-geo').DeliveryLocation | null; routeId?: string; routeName?: string; routeFrom?: string; routeTo?: string; routeDays?: number[]; routeRevision?: number; routeStopId?: string | null; routeStopName?: string | null; required: boolean; scheduledDate: string; address: string; contact: string; packages: number; instructions: string; }
 
 export interface Invoice {
+  medicalReward?: MedicalInvoiceReward;
   lateChargePolicy?: import('./utils/invoiceCharges').InvoiceChargePolicy;
   lateChargeEvents?: import('./utils/invoiceCharges').InvoiceChargeEvent[];
   lateChargesTotal?: number;
@@ -323,7 +325,19 @@ export interface AppSettings {
   updatedAt?: string;
 }
 
-export type MedicalSettings = Pick<AppSettings, 'giftPercentages' | 'creditDays' | 'paymentBuffers' | 'creditPolicy' | 'overduePolicy' | 'targetSettings' | 'loyaltySettings'>;
+export type MedicalSettings = Pick<AppSettings, 'giftPercentages' | 'creditDays' | 'paymentBuffers' | 'creditPolicy' | 'overduePolicy' | 'targetSettings' | 'loyaltySettings'> & { maximumCombinedRewardPercentage?: number };
+
+export interface MedicalInvoiceReward {
+  version: 1;
+  manualTroikaaCoins: number;
+  maximumPercentage: number;
+  levelPercentage: number;
+  maximumAllowedCoins: number;
+  levelRewardCoins: number;
+  normalRewardValue: number;
+  finalCombinedRewardCoins: number;
+  settingsId: string;
+}
 
 export interface Offer {
   id: string;
@@ -461,6 +475,7 @@ export interface CustomerFormData {
 }
 
 export interface InvoiceFormData {
+  manualTroikaaCoins?: number;
   customerId: string;
   customerName: string;
   date: string;

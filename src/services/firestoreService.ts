@@ -1,3 +1,5 @@
+import {buildMedicalReward} from '../utils/medicalReward';
+import {postMedicalReward} from './medicalRewardService';
 import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import { requireWholeRupees } from '../utils/wholeRupees';
 import { cashBalanceFields } from './cashRounding';
@@ -7,6 +9,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getCountFromServer,
   getDoc,
@@ -1459,7 +1462,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
   for (const key of ['salesAmount','costAmount','transportAmount','totalSales','totalCost'] as const) requireWholeRupees(invoice[key], key);
   if (!Number.isSafeInteger(invoice.totalProfit)) throw new Error('Invoice profit must be a whole rupee amount');
   invoice = prepareNewInvoicePayload(invoice, auditUser);
-  const activeSettings = await getAppSettings();
+  const activeSettings = await getAppSettings(true);
   const counter = getInvoiceCounterDetails(activeSettings, invoice.date);
   const initialCounterSnapshot = await getDoc(counter.ref);
   const initialSequence = initialCounterSnapshot.exists()
@@ -1489,6 +1492,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     const customerTier = (customerSnapshot.data().tier as CustomerTier | undefined) || 'Tier 4';
     const customerType = customerSnapshot.data().customerType;
     const invoiceTerms = buildInvoiceTimeTerms(invoice.date, invoice.dueDate, customerTier, activeSettings, undefined, undefined, customerType);
+    const medicalReward = buildMedicalReward(customerType,customerTier,invoice.totalProfit,activeSettings,invoice.manualTroikaaCoins ?? 0);
+    const {manualTroikaaCoins:_manual,...invoiceFields}=invoice;
     const advanceBalance = customerSnapshot.exists()
       ? Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
       : 0;
@@ -1509,7 +1514,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       updatedAt: timestamp
     });
     transaction.set(docRef, {
-      ...invoice,
+      ...invoiceFields,
+      ...(medicalReward ? {medicalReward} : {}),
       dueDate: invoiceTerms.savedDueDate,
       ...invoiceTerms,
       pcPolicyVersionAtInvoice: CURRENT_PC_POLICY_VERSION,
@@ -1626,8 +1632,23 @@ export const updateInvoiceRecord = async (
         undefined, customer.customerType
       );
 
+  const {manualTroikaaCoins:_manual,...invoiceFields}=invoice;
+  let medicalReward=existingInvoice.medicalReward;
+  if (!medicalReward && (invoice.manualTroikaaCoins ?? 0)!==0) throw new Error('Historical invoice rewards are preserved. TROIKAA proposals apply to new invoices.');
+  if (medicalReward) {
+    const posted=await getDoc(doc(db,LOYALTY_LEDGER,existingInvoice.customerId+'_'+invoiceId+'_invoice_pc'));
+    if (posted.exists()) {
+      if (invoice.customerId!==existingInvoice.customerId || (invoice.manualTroikaaCoins ?? medicalReward.manualTroikaaCoins)!==medicalReward.manualTroikaaCoins) throw new Error('The posted invoice reward is protected.');
+    } else if (customer.customerType!=='medical') {
+      if ((invoice.manualTroikaaCoins??0)!==0) throw new Error('Remove TROIKAA promotional data before saving a non-MEDICAL invoice.');
+      medicalReward=undefined;
+    } else {
+      medicalReward=buildMedicalReward(customer.customerType,customer.tier,invoice.totalProfit,activeSettings,invoice.manualTroikaaCoins??medicalReward.manualTroikaaCoins,invoice.customerId===existingInvoice.customerId?medicalReward:undefined);
+    }
+  }
   await updateDoc(doc(db, INVOICES, invoiceId), {
-    ...invoice,
+    ...invoiceFields,
+    ...(existingInvoice.medicalReward ? {medicalReward:medicalReward ?? deleteField()} : {}),
     ...(editingOpeningBalance ? {
       invoiceType: OPENING_BALANCE_INVOICE_TYPE,
       isOpeningBalance: true,
@@ -2035,6 +2056,7 @@ const awardInvoicePcOnce = async (invoiceId: string): Promise<InvoicePcAwardResu
   if (!invoice.customerId || isOpeningBalanceInvoice(invoice)) {
     return { invoiceId, status: 'not_applicable', points: 0 };
   }
+  if (invoice.medicalReward) return postMedicalReward(invoice.id);
   const ledgerRef = doc(db, LOYALTY_LEDGER, `${invoice.customerId}_${invoice.id}_invoice_pc`);
 
   // Most edit/delete calls hit an already-posted invoice. Stop after one

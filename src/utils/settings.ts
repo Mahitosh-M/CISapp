@@ -101,6 +101,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export const DEFAULT_MEDICAL_SETTINGS: MedicalSettings = {
+ maximumCombinedRewardPercentage: 8,
  giftPercentages: {...DEFAULT_SETTINGS.giftPercentages},
  creditDays: {'Tier 1':15,'Tier 2':15,'Tier 3':15,'Tier 4':15},
  paymentBuffers: {...DEFAULT_SETTINGS.paymentBuffers},
@@ -109,7 +110,7 @@ export const DEFAULT_MEDICAL_SETTINGS: MedicalSettings = {
 };
 export const getMedicalSettings = (settings?: Partial<AppSettings>):MedicalSettings => {
  const value=settings?.medicalSettings;
- return {giftPercentages:{...DEFAULT_MEDICAL_SETTINGS.giftPercentages,...value?.giftPercentages},creditDays:{...DEFAULT_MEDICAL_SETTINGS.creditDays,...value?.creditDays},paymentBuffers:{...DEFAULT_MEDICAL_SETTINGS.paymentBuffers,...value?.paymentBuffers},creditPolicy:{...DEFAULT_MEDICAL_SETTINGS.creditPolicy,...value?.creditPolicy},overduePolicy:{...DEFAULT_MEDICAL_SETTINGS.overduePolicy,...value?.overduePolicy},targetSettings:Object.fromEntries(Object.entries(DEFAULT_MEDICAL_SETTINGS.targetSettings).map(([key,defaults])=>[key,{...defaults,...value?.targetSettings?.[key as TargetTierKey]}])) as MedicalSettings['targetSettings'],loyaltySettings:{...DEFAULT_MEDICAL_SETTINGS.loyaltySettings,...value?.loyaltySettings}};
+ return {maximumCombinedRewardPercentage:value?.maximumCombinedRewardPercentage ?? DEFAULT_MEDICAL_SETTINGS.maximumCombinedRewardPercentage,giftPercentages:{...DEFAULT_MEDICAL_SETTINGS.giftPercentages,...value?.giftPercentages},creditDays:{...DEFAULT_MEDICAL_SETTINGS.creditDays,...value?.creditDays},paymentBuffers:{...DEFAULT_MEDICAL_SETTINGS.paymentBuffers,...value?.paymentBuffers},creditPolicy:{...DEFAULT_MEDICAL_SETTINGS.creditPolicy,...value?.creditPolicy},overduePolicy:{...DEFAULT_MEDICAL_SETTINGS.overduePolicy,...value?.overduePolicy},targetSettings:Object.fromEntries(Object.entries(DEFAULT_MEDICAL_SETTINGS.targetSettings).map(([key,defaults])=>[key,{...defaults,...value?.targetSettings?.[key as TargetTierKey]}])) as MedicalSettings['targetSettings'],loyaltySettings:{...DEFAULT_MEDICAL_SETTINGS.loyaltySettings,...value?.loyaltySettings}};
 };
 export const getCustomerPolicy = (settings:AppSettings|undefined,customerType?:string):MedicalSettings => customerType==='medical'?getMedicalSettings(settings):mergeWithDefaultSettings(settings);
 
@@ -349,6 +350,11 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
   });
 
   const medical=getMedicalSettings(activeSettings);
+  const maximum = medical.maximumCombinedRewardPercentage!;
+  if (!Number.isInteger(maximum) || maximum < 0 || maximum > 100) errors.push('Maximum Combined Reward Percentage must be a whole number from 0 to 100.');
+  else for (const [tier, rate] of Object.entries(medical.giftPercentages)) {
+    if (maximum < rate) errors.push('Maximum Combined Reward Percentage cannot be below the Medical ' + getTierDisplayName(tier as CustomerTier) + ' level rate of ' + rate + '%.');
+  }
   for(const tier of ['Tier 1','Tier 2','Tier 3','Tier 4'] as CustomerTier[]){
    if(!Number.isFinite(medical.giftPercentages[tier])||medical.giftPercentages[tier]<0||medical.giftPercentages[tier]>100)errors.push('Medical PC percentages must be between 0 and 100');
    for(const key of ['creditDays','paymentBuffers'] as const)if(!Number.isInteger(medical[key][tier])||medical[key][tier]<0||medical[key][tier]>365)errors.push('Medical credit and buffer days must be whole days from 0 to 365');

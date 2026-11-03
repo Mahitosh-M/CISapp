@@ -1,7 +1,9 @@
 import {routeDays,nextRouteDate,type WeeklyRoute} from '../utils/dispatchRoutes';
+import DeliveryLocationEditor from './DeliveryLocationEditor';
+import type {DeliveryLocation} from '../utils/route-geo';
 import {Truck, CalendarDays, Package, MapPin, Phone, FileText, X, Check} from "lucide-react";
 import "../delivery.css";
-﻿import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import type { Invoice } from "../types";
 import { dispatchRequest } from "../services/dispatchService";
 import { getTodayDateString } from "../utils/dateUtils";
@@ -16,10 +18,12 @@ export default function DeliveryDialog({
   invoice,
   onClose,
   onSaved,
+  allowMasterEdit = false,
 }: {
   invoice: DeliveryTarget;
   onClose: () => void;
   onSaved: () => void;
+  allowMasterEdit?: boolean;
 }) {
   const [value, setValue] = useState({
     routeId: invoice.deliveryDetails?.routeId || "",
@@ -31,6 +35,7 @@ export default function DeliveryDialog({
     contact: invoice.deliveryDetails?.contact || "",
     packages: invoice.deliveryDetails?.packages || 1,
     instructions: invoice.deliveryDetails?.instructions || "",
+    location: invoice.deliveryDetails?.location ?? null,
   });
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -38,6 +43,8 @@ export default function DeliveryDialog({
   async function loadRoutes(){setRoutesLoading(true);setRouteError('');try{const result=await dispatchRequest<{routes:WeeklyRoute[]}>('routeCatalog');setRoutes(result.routes.filter(r=>!invoice.shopId||r.shopIds.includes(invoice.shopId)));}catch(e){setRouteError((e as Error).message);}finally{setRoutesLoading(false);}}
   useEffect(()=>{void loadRoutes();},[invoice.id]);
   const selectedRoute=routes.find(r=>r.id===value.routeId);
+  const locationEdited=useRef(false),[masterCustomerId,setMasterCustomerId]=useState(''),[locationError,setLocationError]=useState('');
+  useEffect(()=>{let active=true;void dispatchRequest<{customerId:string;location:DeliveryLocation|null}>('invoiceDeliveryLocation',{invoiceId:invoice.id}).then(result=>{if(!active)return;setMasterCustomerId(result.customerId);if(invoice.deliveryDetails?.location===undefined&&!locationEdited.current)setValue(v=>({...v,location:result.location}));}).catch(()=>{if(active)setLocationError('Saved customer pin unavailable. Select an invoice pin manually or retry later.');});return()=>{active=false;};},[invoice.id]);
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -72,6 +79,10 @@ export default function DeliveryDialog({
         </div>
         <label><span><MapPin size={17} aria-hidden="true"/> Verified delivery address</span><textarea required rows={3} value={value.address} onChange={e=>setValue({...value,address:e.target.value})}/></label>
         <label><span><Phone size={17} aria-hidden="true"/> Delivery contact</span><input required type="tel" maxLength={40} value={value.contact} onChange={e=>setValue({...value,contact:e.target.value})}/></label>
+        <DeliveryLocationEditor value={value.location} route={selectedRoute} onChange={location=>{locationEdited.current=true;setValue({...value,location});}}/>
+        {locationError&&<small role="status">{locationError}</small>}
+        {selectedRoute&&<small>Next planned service: {nextRouteDate(selectedRoute.days,getTodayDateString())??'Unscheduled'}</small>}
+        {allowMasterEdit&&<button type="button" disabled={busy||!masterCustomerId||!value.location?.confirmed} onClick={async()=>{if(!window.confirm('Update this customer’s saved delivery pin for future invoices? Existing invoices retain their location snapshots.'))return;try{setBusy(true);await dispatchRequest('saveCustomerDeliveryLocation',{customerId:masterCustomerId,location:value.location});}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}>Save confirmed pin to customer profile (Admin)</button>}
         <label><span><FileText size={17} aria-hidden="true"/> Instructions</span><textarea rows={2} maxLength={1500} value={value.instructions} onChange={e=>setValue({...value,instructions:e.target.value})}/></label>
       </>}
       {error&&<p className="cis-delivery-error" role="alert">{error}</p>}

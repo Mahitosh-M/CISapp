@@ -3,6 +3,12 @@ import { getInvoicePaymentEffect } from './paymentUtils';
 export interface InvoiceChargePolicy { version: 1; firstChargeDate: string; nextIndex: number; paymentCutoff?: 'before_date' | 'through_date'; openingBalanceIncluded?: boolean; }
 export interface InvoiceChargeEvent { id: string; date: string; index: number; rateBasisPoints: number; baseAmount: number; amount: number; roundingPaise: number; createdAt: string; }
 export interface ChargeInvoice { id: string; totalSales: number; lateChargesTotal?: number; lateChargePolicy?: InvoiceChargePolicy; lateChargeEvents?: InvoiceChargeEvent[]; }
+/** Missing customer types are legacy regular customers; Medical invoice snapshots stay excluded. */
+export function isCustomerInvoiceChargeEligible(invoice: {medicalReward?: unknown; customerTypeAtInvoice?: unknown; customerType?: unknown}, customer?: {customerType?: unknown}) {
+  return !!customer && (customer.customerType ?? 'customer') === 'customer'
+    && invoice.medicalReward == null && invoice.customerTypeAtInvoice !== 'medical' && invoice.customerType !== 'medical';
+}
+
 export const invoiceReceivableAmount = (invoice: Pick<ChargeInvoice,'totalSales'|'lateChargesTotal'>) => invoice.totalSales + (invoice.lateChargesTotal ?? 0);
 /** Historical views must not include charges assessed for later business dates. */
 export const invoiceReceivableAt = (invoice: Pick<ChargeInvoice,'totalSales'|'lateChargeEvents'>, date: string, inclusive = true) => invoice.totalSales + (invoice.lateChargeEvents ?? []).filter(event=>inclusive ? event.date<=date : event.date<date).reduce((sum,event)=>sum+event.amount,0);

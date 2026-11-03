@@ -1,11 +1,12 @@
-﻿import { beforeAll, afterAll, describe, it } from "vitest";
+import { beforeAll, afterAll, describe, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   initializeTestEnvironment,
   assertFails,
+  assertSucceeds,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 const emulator = process.env.FIRESTORE_EMULATOR_HOST;
 (emulator ? describe : describe.skip)(
   "Dispatch direct-access isolation",
@@ -36,6 +37,7 @@ const emulator = process.env.FIRESTORE_EMULATOR_HOST;
           role: "Admin",
           active: true,
         });
+        await setDoc(doc(db, "users/staff"), {uid:'staff',role:'Staff',active:true});
         await setDoc(doc(db, "invoices/private"), {
           customerId: "customer",
           totalSales: 2000,
@@ -83,6 +85,16 @@ const emulator = process.env.FIRESTORE_EMULATOR_HOST;
             active: true,
           }),
         );
+      }
+    });
+    it('keeps master delivery pins permission controlled while retaining ordinary staff edits',async()=>{
+      const staff=env.authenticatedContext('staff').firestore(),admin=env.authenticatedContext('admin').firestore();
+      await assertSucceeds(updateDoc(doc(staff,'customers/customer'),{name:'Revised fictional pharmacy'}));
+      await assertFails(updateDoc(doc(staff,'customers/customer'),{deliveryLocation:{lat:15.96,lng:76.65,confirmed:true}}));
+      await assertSucceeds(updateDoc(doc(admin,'customers/customer'),{deliveryLocation:{lat:15.96,lng:76.65,confirmed:true}}));
+      await assertFails(setDoc(doc(staff,'customers/new-pin'),{name:'Test',deliveryLocation:{lat:15.96,lng:76.65,confirmed:true}}));
+      for(const collection of ['dispatchRouteTemplateVersions','dispatchRouteCodes','dispatchRouteCostSettings','dispatchTripValuations']){
+        await assertFails(setDoc(doc(admin,collection+'/forged'),{value:1}));await assertFails(getDoc(doc(admin,collection+'/private')));
       }
     });
   },

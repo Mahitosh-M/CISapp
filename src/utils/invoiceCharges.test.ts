@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {assessInvoiceCharges,chargeDate} from './invoiceCharges';
+import {assessInvoiceCharges,chargeDate,isCustomerInvoiceChargeEligible} from './invoiceCharges';
 const invoice={id:'i',totalSales:100,lateChargePolicy:{version:1 as const,firstChargeDate:'2026-01-31',nextIndex:0}};
 describe('invoice late charges',()=>{
  it('starts after 30 days then compounds every 15 days in whole rupees',()=>{
@@ -41,4 +41,8 @@ describe('invoice late charges',()=>{
   const result=assessInvoiceCharges(i,[{invoiceId:'i',date:'2026-12-01',amount:102}],'2026-12-16','now');
   expect(result.events.map(e=>e.amount)).toEqual([2]);expect(result.nextDate).toBe(null);
  });
+});
+
+it('allows only regular customers including legacy records and excludes Medical invoice snapshots',()=>{
+ expect(isCustomerInvoiceChargeEligible({},{})).toBe(true);expect(isCustomerInvoiceChargeEligible({},{customerType:'customer'})).toBe(true);expect(isCustomerInvoiceChargeEligible({},{customerType:'medical'})).toBe(false);expect(isCustomerInvoiceChargeEligible({medicalReward:{}},{customerType:'customer'})).toBe(false);expect(isCustomerInvoiceChargeEligible({customerTypeAtInvoice:'medical'},{customerType:'customer'})).toBe(false);expect(isCustomerInvoiceChargeEligible({},undefined)).toBe(false);
 });

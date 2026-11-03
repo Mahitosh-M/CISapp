@@ -1,0 +1,38 @@
+.medical-ledger{color:#fff}.medical-ledger h1{text-align:center;color:#f2ce64;font-size:26px;margin:0 0 16px}.medical-ledger-month{text-align:center;color:#f2ce64;margin:18px 0 8px;font-size:18px}.medical-ledger-total{background:linear-gradient(135deg,#071a33,#000);border:1px solid #526080;border-radius:16px;padding:18px;text-align:center;margin-bottom:18px}.medical-ledger-total h2{font-size:16px;color:#f2ce64;margin:0 0 10px}.medical-ledger-total>strong{font-size:clamp(32px,8vw,44px);color:#ff6b6b;font-weight:900;display:block;overflow-wrap:anywhere;line-height:1.15}.medical-ledger-months{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-width:420px;margin:0 auto}.medical-ledger-months button{border:1px solid #d4af37;border-radius:9px;background:#071a33;color:#fde68a;padding:10px 12px;font-weight:800;cursor:pointer}.medical-ledger-months button[aria-pressed=true]{background:#d4af37;color:#11185a}.medical-ledger-counts{text-align:center;color:#cbd5e1;font-size:13px;margin:0 0 16px}.medical-ledger-table{background:#000;border:1px solid #334155;border-radius:12px;overflow-x:auto}.medical-ledger table{border-collapse:collapse;width:100%;min-width:380px;text-align:left;font-size:13px;color:#fff}.medical-ledger caption{color:#fff;text-align:left;padding:14px;font-weight:800;font-size:16px}.medical-ledger th,.medical-ledger td{padding:12px 9px;border-top:1px solid #334155}.medical-ledger thead th{background:#000;color:#fff;font-size:12px;white-space:nowrap}.medical-ledger small{display:block;color:#fff;font-size:11px;margin-top:4px}.medical-ledger .medical-ledger-invoice{color:#60a5fa;font-weight:800;white-space:nowrap}.medical-ledger .medical-ledger-payment{color:#4ade80;font-weight:800;white-space:nowrap}.medical-ledger .medical-ledger-running{color:#ff6b6b;font-weight:900;white-space:nowrap}.medical-ledger-balance{background:#000}.medical-ledger-balance th{font-weight:800}
+
+.ledger-history .medical-ledger-invoice,
+.ledger-history .medical-ledger-payment,
+.ledger-history .medical-ledger-running {
+  font-size: 15px;
+}
+
+.medical-ledger .ledger-opening-value {
+  color: #FDE047;
+  font-size: 18px;
+}
+
+.ledger-closing {
+  margin: 16px 0 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 12px;
+  border: 2px solid #D4AF37;
+  border-radius: 14px;
+  background: #000000;
+  text-align: center;
+}
+
+.ledger-closing h2 {
+  color: #FFFFFF;
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.ledger-closing strong {
+  display: block;
+  color: #FDE047;
+  font-size: clamp(24px, 6vw, 28px);
+  line-height: 1.15;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
