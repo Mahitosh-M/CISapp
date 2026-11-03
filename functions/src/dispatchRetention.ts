@@ -1,4 +1,4 @@
-import {getFirestore} from 'firebase-admin/firestore';
+import {getFirestore,FieldValue} from 'firebase-admin/firestore';
 import {onSchedule} from 'firebase-functions/v2/scheduler';
 import {logger} from 'firebase-functions';
 import type {AppState} from './dispatchDomain/domain';
@@ -25,7 +25,7 @@ export async function expireClosedDispatchData(at=new Date().toISOString(),db=ge
     if(claims.docs.some(d=>d.data().status==='Pending'||d.data().status==='Posted'&&d.data().unallocated>0))return;
     const result=expireDeliveryDetails(s,new Set([tripId]),at);
     tx.set(stateRef,{state:JSON.parse(JSON.stringify(s)),updatedAt:at});
-    if(published.exists)tx.update(tripRef,{purgedAt:at,closedAt:closedTimestamp(s,t),stops:[],openingPhoto:null,closingPhoto:null,openingNote:'',endNote:''});
+    if(published.exists)tx.update(tripRef,{purgedAt:at,closedAt:closedTimestamp(s,t),stops:[],routeSnapshot:FieldValue.delete(),openingPhoto:null,closingPhoto:null,openingNote:'',endNote:''});
     tx.create(retentionRef,{tripId,purgedAt:at,status:'PendingEvidence',jobCount:result.jobIds.length});
     tx.create(db.collection('dispatchAudit').doc(),{action:'Closed Dispatch delivery details removed after seven days',entityId:tripId,actorId:'system:retention',at,details:{policyDays:7,jobCount:result.jobIds.length,financialRecordsRetained:true}});
     return true;

@@ -1,6 +1,7 @@
+export {buildOutstandingHistory} from '../../utils/customerOutstandingHistory';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, ChevronDown, CircleDollarSign, Coins, Gift, ReceiptText, Sparkles, Trophy, Wallet } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, Coins, ReceiptText, Sparkles, Trophy, Wallet } from 'lucide-react';
+import CustomerWelcomeBanner from '../../components/CustomerWelcomeBanner';
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { formatDate, formatMoney } from '../../utils/formatters';
 import { getTodayDateString } from '../../utils/dateUtils';
@@ -22,183 +23,12 @@ interface PcHistoryItem {
   date: string;
 }
 
-interface OutstandingHistoryItem {
-  id: string;
-  type: 'invoice' | 'payment';
-  date: string;
-  transactionAmount: number;
-  transactionCount: number;
-  previousOutstanding: number;
-  currentOutstanding: number;
-  shopName?: string;
-}
-
-interface PaymentLedgerEvent {
-  id: string;
-  type: 'payment';
-  date: string;
-  createdAt?: string;
-  order: number;
-  amount: number;
-  shopName: string;
-}
-
-const splitPaymentPattern = /Split payment\s+(\d+)\/(\d+)/i;
-
-const getPaymentOutstandingEffect = (payment: Payment) => (
-  getInvoicePaymentEffect(payment) + Math.max(0, payment.amountUsedForOldBalance ?? 0)
-);
-
-const getCustomerPaymentShopName = (payment: Payment) => {
-  if (payment.shopId === 'SHOP_S') return 'SND';
-  if (payment.shopId === 'SHOP_A') return 'MSK';
-  return getShopName(payment.shopId);
-};
-
-const getPaymentGroupKey = (payment: Payment) => {
-  if (payment.splitPaymentGroupId) return `split:${payment.splitPaymentGroupId}`;
-
-  const splitMatch = payment.notes.match(splitPaymentPattern);
-  if (!splitMatch) return `payment:${payment.id}`;
-
-  const baseNotes = payment.notes.replace(/\s*\|?\s*Split payment\s+\d+\/\d+/i, '').trim();
-  return `legacy-split:${payment.customerId}|${payment.date}|${payment.mode}|${baseNotes}|${splitMatch[2]}`;
-};
-
-const buildPaymentLedgerEvents = (payments: Payment[]) => {
-  const groupedEvents = new Map<string, PaymentLedgerEvent>();
-
-  payments.forEach((payment) => {
-    const groupKey = getPaymentGroupKey(payment);
-    const existingEvent = groupedEvents.get(groupKey);
-    const paymentEffect = getPaymentOutstandingEffect(payment);
-
-    if (existingEvent) {
-      existingEvent.amount += paymentEffect;
-
-      if ((payment.createdAt ?? '') > (existingEvent.createdAt ?? '')) {
-        existingEvent.createdAt = payment.createdAt;
-      }
-      return;
-    }
-
-    groupedEvents.set(groupKey, {
-      id: groupKey,
-      type: 'payment',
-      date: payment.date,
-      createdAt: payment.createdAt,
-      order: 1,
-      amount: paymentEffect,
-      shopName: getCustomerPaymentShopName(payment)
-    });
-  });
-
-  return Array.from(groupedEvents.values());
-};
-
-const compareLedgerDates = (
-  left: { date: string; createdAt?: string; id: string; order: number },
-  right: { date: string; createdAt?: string; id: string; order: number }
-) => (
-  left.date.localeCompare(right.date)
-  || (left.createdAt ?? '').localeCompare(right.createdAt ?? '')
-  || left.order - right.order
-  || left.id.localeCompare(right.id)
-);
-
-const outstandingMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-const formatOutstandingDate = (dateString: string) => {
-  const [, month = '', day = ''] = dateString.match(/^\d{4}-(\d{2})-(\d{2})/) ?? [];
-  const monthLabel = outstandingMonths[Number(month) - 1];
-  return monthLabel && day ? `${Number(day)} ${monthLabel}` : dateString;
-};
-
-export const buildOutstandingHistory = (
-  invoices: Invoice[],
-  payments: Payment[],
-  currentOutstanding: number
-): OutstandingHistoryItem[] => {
-  const events = [
-    ...invoices.map((invoice) => ({
-      id: invoice.id,
-      type: isOpeningBalanceInvoice(invoice) ? 'opening_balance' as const : 'invoice' as const,
-      date: invoice.date,
-      createdAt: invoice.createdAt,
-      order: 0,
-      amount: Math.max(0, invoice.totalSales || invoice.salesAmount)
-    })),
-    ...buildPaymentLedgerEvents(payments).filter((payment) => payment.amount > 0)
-  ].sort(compareLedgerDates).reverse();
-
-  let runningOutstanding = Math.max(0, currentOutstanding);
-  const newestHistory: OutstandingHistoryItem[] = [];
-  let eventIndex = 0;
-  let paymentCount = 0;
-
-  while (eventIndex < events.length) {
-    const event = events[eventIndex];
-
-    if (event.type === 'opening_balance') {
-      runningOutstanding = Math.max(0, runningOutstanding - event.amount);
-      eventIndex += 1;
-      continue;
-    }
-
-    if (event.type === 'payment') {
-      if (paymentCount === 3) break;
-
-      newestHistory.push({
-        id: event.id,
-        type: 'payment',
-        date: event.date,
-        transactionAmount: event.amount,
-        transactionCount: 1,
-        previousOutstanding: runningOutstanding + event.amount,
-        currentOutstanding: runningOutstanding,
-        shopName: event.shopName
-      });
-      runningOutstanding += event.amount;
-      paymentCount += 1;
-      eventIndex += 1;
-      continue;
-    }
-
-    const currentAfterInvoices = runningOutstanding;
-    const latestInvoiceDate = event.date;
-    const invoiceIds: string[] = [];
-    let invoiceAmount = 0;
-
-    while (eventIndex < events.length && events[eventIndex].type === 'invoice') {
-      invoiceIds.push(events[eventIndex].id);
-      invoiceAmount += events[eventIndex].amount;
-      eventIndex += 1;
-    }
-
-    const previousBeforeInvoices = Math.max(0, currentAfterInvoices - invoiceAmount);
-    newestHistory.push({
-      id: `invoices:${invoiceIds.join(':')}`,
-      type: 'invoice',
-      date: latestInvoiceDate,
-      transactionAmount: invoiceAmount,
-      transactionCount: invoiceIds.length,
-      previousOutstanding: previousBeforeInvoices,
-      currentOutstanding: currentAfterInvoices
-    });
-    runningOutstanding = previousBeforeInvoices;
-  }
-
-  return newestHistory;
-};
-
 const CustomerDashboard = () => {
   const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests, refreshPcBalance } = useCustomerPortalContext();
-  const navigate = useNavigate();
   const previousPcBalanceRef = useRef<number | null>(null);
   const bonusNoticeKeyRef = useRef('');
   const bonusNoticeVisibleRef = useRef(false);
   const [showPcHistory, setShowPcHistory] = useState(false);
-  const [showOutstandingHistory, setShowOutstandingHistory] = useState(false);
   const [pcHistoryFilter, setPcHistoryFilter] = useState<PcHistoryFilter>('all');
   const [pcBalanceChange, setPcBalanceChange] = useState<number | null>(null);
   const [showCurrentMonthBonusCredit, setShowCurrentMonthBonusCredit] = useState(false);
@@ -254,10 +84,6 @@ const CustomerDashboard = () => {
   ].filter((item) => item.points > 0).sort((left, right) => right.date.localeCompare(left.date));
   const currentMonthTotalPc = currentMonthPcHistory.reduce((sum, item) => sum + item.points, 0);
   const visiblePcHistory = pcHistoryFilter === 'all' ? currentMonthPcHistory : currentMonthPcHistory.filter((item) => item.type === pcHistoryFilter);
-  const outstandingHistory = useMemo(
-    () => buildOutstandingHistory(invoices, payments, totalOutstanding),
-    [invoices, payments, totalOutstanding]
-  );
   const pcHistoryFilters: { key: PcHistoryFilter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'purchase', label: 'Purchase' },
@@ -318,7 +144,7 @@ const CustomerDashboard = () => {
   }, [currentMonthBonusNoticeKey, currentMonthBonusPc]);
 
   return (
-    <div>
+    <div className="customer-dashboard">
       <style>
         {`
           @keyframes dashboardCoinPulse {
@@ -337,11 +163,10 @@ const CustomerDashboard = () => {
           }
         `}
       </style>
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ color: '#BFC8D9', fontSize: 13, fontWeight: 800 }}>Welcome back</div>
-      </div>
+      <CustomerWelcomeBanner customerName={customer?.name} />
 
-      <div
+      <div data-portal-box="card"
+        className="customer-dashboard__coins"
         style={{
           background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)',
           color: '#FFFFFF',
@@ -355,7 +180,7 @@ const CustomerDashboard = () => {
       >
         <div style={{ position: 'absolute', right: -22, top: -24, width: 110, height: 110, borderRadius: '50%', border: '18px solid rgba(212,175,55,0.16)' }} />
         <div style={{ position: 'absolute', left: -44, top: -18, width: 190, height: 132, opacity: 0.18, pointerEvents: 'none', transform: 'rotate(-10deg)' }}>
-          <div style={{ position: 'absolute', inset: '16px 6px 10px 20px', border: '3px solid #FDE68A', borderRadius: 26, background: 'linear-gradient(135deg, rgba(212,175,55,0.22), rgba(253,230,138,0.04))', boxShadow: 'inset 0 0 0 2px rgba(212,175,55,0.30), 0 0 28px rgba(212,175,55,0.28)' }} />
+          <div data-portal-box="card" style={{ position: 'absolute', inset: '16px 6px 10px 20px', border: '3px solid #FDE68A', borderRadius: 26, background: 'linear-gradient(135deg, rgba(212,175,55,0.22), rgba(253,230,138,0.04))', boxShadow: 'inset 0 0 0 2px rgba(212,175,55,0.30), 0 0 28px rgba(212,175,55,0.28)' }} />
           <div style={{ position: 'absolute', right: 10, top: 48, width: 58, height: 40, border: '3px solid #FDE68A', borderRadius: 16, background: 'rgba(212,175,55,0.18)' }}>
             <div style={{ position: 'absolute', left: 15, top: 13, width: 10, height: 10, borderRadius: '50%', background: '#FDE68A', boxShadow: '0 0 14px rgba(253,230,138,0.80)' }} />
           </div>
@@ -364,7 +189,7 @@ const CustomerDashboard = () => {
           <div style={{ position: 'absolute', left: 78, top: 18, width: 2, height: 62, background: '#FDE68A', boxShadow: '34px 16px 0 #FDE68A, -18px 34px 0 #FDE68A' }} />
           <div style={{ position: 'absolute', left: 42, top: 84, width: 8, height: 8, borderRadius: '50%', background: '#FDE68A', boxShadow: '32px -22px 0 #FDE68A, 76px -8px 0 #FDE68A, 102px -38px 0 #FDE68A' }} />
         </div>
-        <div style={{ display: 'grid', justifyItems: 'center', gap: 12, position: 'relative' }}>
+        <div style={{ display: 'grid', justifyItems: 'center', gap: 4, position: 'relative' }}>
           <div style={{ textAlign: 'center', justifySelf: 'start' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(212,175,55,0.16)', color: '#FDE68A', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>
               <Sparkles size={14} />
@@ -375,12 +200,12 @@ const CustomerDashboard = () => {
             type="button"
             onClick={() => setShowPcHistory((current) => !current)}
             aria-label="Toggle monthly PC history"
-            style={{ position: 'relative', flex: '0 0 auto', width: 122, height: 122, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}
+            style={{ position: 'relative', flex: '0 0 auto', width: 'var(--dashboard-coin-size, 122px)', height: 'var(--dashboard-coin-size, 122px)', border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}
           >
             <div
               style={{
-                width: 122,
-                height: 122,
+                width: 'var(--dashboard-coin-size, 122px)',
+                height: 'var(--dashboard-coin-size, 122px)',
                 borderRadius: '50%',
                 display: 'grid',
                 placeItems: 'center',
@@ -390,9 +215,9 @@ const CustomerDashboard = () => {
                 animation: pcBalanceChange !== null ? 'dashboardCoinPulse 900ms ease-out' : undefined
               }}
             >
-              <div style={{ width: 88, height: 88, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.55)', color: '#4A3000', textAlign: 'center' }}>
+              <div style={{ width: '72%', height: '72%', borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.55)', color: '#4A3000', textAlign: 'center' }}>
                 <div>
-                  <div style={{ fontSize: 31, lineHeight: 1, fontWeight: 900 }}>{formatApc(pcBalance)}</div>
+                  <div style={{ fontSize: 'var(--dashboard-coin-font, 31px)', lineHeight: 1, fontWeight: 900 }}>{formatApc(pcBalance)}</div>
                   <div style={{ fontSize: 11, fontWeight: 900, marginTop: 5 }}>PC</div>
                 </div>
               </div>
@@ -409,34 +234,11 @@ const CustomerDashboard = () => {
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => navigate('/customer/partner-points')}
-          style={{
-            position: 'relative',
-            marginTop: 18,
-            width: '100%',
-            border: 0,
-            borderRadius: 16,
-            background: '#D4AF37',
-            color: '#11185A',
-            padding: '12px 14px',
-            fontWeight: 900,
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: 8,
-            cursor: 'pointer'
-          }}
-        >
-          <Gift size={18} />
-          Explore Rewards
-          <ArrowRight size={18} />
-        </button>
       </div>
 
       {showPcHistory ? (
-        <section style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12 }}>
+        <section data-portal-box="card" className="customer-dashboard__history" aria-label="Monthly PC history" style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12 }}>
+          <button type="button" className="customer-dashboard__close-history" onClick={() => setShowPcHistory(false)}>Close PC history</button>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
             <div>
               <div style={{ color: '#D4AF37', fontWeight: 900 }}>This Month PC History</div>
@@ -472,7 +274,7 @@ const CustomerDashboard = () => {
           </div>
 
           {visiblePcHistory.length === 0 ? (
-            <div style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 14, padding: 12, color: '#67738E', fontSize: 13, fontWeight: 800 }}>
+            <div data-portal-box="detail" style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 14, padding: 12, color: '#67738E', fontSize: 13, fontWeight: 800 }}>
               No PC credits in this category for the current month.
             </div>
           ) : (
@@ -483,7 +285,7 @@ const CustomerDashboard = () => {
                 const iconColor = item.type === 'purchase' ? '#166534' : item.type === 'bonus' ? '#11185A' : '#B42318';
 
                 return (
-                  <div
+                  <div data-portal-box="card"
                     key={item.id}
                     style={{
                       border: '1px solid #E8EDF4',
@@ -512,64 +314,17 @@ const CustomerDashboard = () => {
         </section>
       ) : null}
 
-      <div style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 12 }}>
-        <div style={{ color: '#D4AF37', fontWeight: 900, textAlign: 'center' }}>Total Outstanding</div>
-        <button
-          type="button"
-          aria-expanded={showOutstandingHistory}
-          aria-controls="customer-outstanding-history"
-          onClick={() => setShowOutstandingHistory((current) => !current)}
-          style={{ width: '100%', border: 0, background: 'transparent', color: '#FF7B7B', padding: '6px 0 2px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}
-        >
-          <span style={{ fontSize: 30, lineHeight: 1.2, fontWeight: 900 }}>{formatMoney(totalOutstanding)}</span>
-          <ChevronDown size={21} aria-hidden="true" style={{ flex: '0 0 auto', transform: showOutstandingHistory ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }} />
-        </button>
-
-        {showOutstandingHistory ? <div id="customer-outstanding-history" style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.18)' }}>
-          <div style={{ color: '#FDE68A', fontSize: 16, fontWeight: 900, marginBottom: 10 }}>Outstanding Record</div>
-          {outstandingHistory.length === 0 ? (
-            <div style={{ color: '#BFC8D9', fontSize: 15, fontWeight: 700 }}>No outstanding transactions found.</div>
-          ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {outstandingHistory.map((item) => (
-                <div key={item.id} style={{ background: item.type === 'payment' ? '#DCFCE7' : '#090B10', border: item.type === 'payment' ? '1px solid #86EFAC' : '1px solid #252932', borderRadius: 8, padding: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
-                    {item.type === 'invoice' ? (
-                      <>
-                        <span title={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} aria-label={`${item.transactionCount} ${item.transactionCount === 1 ? 'invoice' : 'invoices'} added`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#FF7B7B', fontSize: 16, fontWeight: 900 }}>
-                          <ReceiptText size={21} aria-hidden="true" />
-                          {item.transactionCount}
-                        </span>
-                        <span style={{ color: '#FF9A9A', fontSize: 13, fontWeight: 900 }}>Invoice added</span>
-                      </>
-                    ) : (
-                      <>
-                        <span title={`Payment received from ${item.shopName ?? 'Legacy / shared'}`} aria-label={`Payment received from ${item.shopName ?? 'Legacy / shared'} on ${formatOutstandingDate(item.date)}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: '#102A43', fontSize: 15, fontWeight: 900, whiteSpace: 'nowrap' }}>
-                          <CircleDollarSign size={22} aria-hidden="true" style={{ color: '#2563EB', flex: '0 0 auto' }} />
-                          {formatOutstandingDate(item.date)}
-                        </span>
-                        <span style={{ minWidth: 0, color: '#1E3A8A', background: '#FFFFFF', border: '1px solid #93C5FD', borderRadius: 6, padding: '4px 7px', fontSize: 12, lineHeight: 1.2, fontWeight: 900, overflowWrap: 'anywhere', textAlign: 'right' }}>
-                          {item.shopName ?? 'Legacy / shared'}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, paddingTop: 9, borderTop: item.type === 'payment' ? '1px solid #86EFAC' : '1px solid #252932', color: item.type === 'payment' ? '#111827' : '#FFFFFF', fontSize: 15, lineHeight: 1.35, fontWeight: 900, whiteSpace: 'nowrap', overflowX: 'auto' }}>
-                    <span>{formatMoney(item.previousOutstanding)}</span>
-                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#B45309' }}>{item.type === 'invoice' ? '+' : '-'}</span>
-                    <span style={{ color: item.type === 'invoice' ? '#FF7B7B' : '#1D4ED8' }}>{formatMoney(item.transactionAmount)}</span>
-                    <span style={{ color: item.type === 'payment' ? '#475569' : '#FDE68A' }}>=</span>
-                    <span style={{ color: item.type === 'payment' ? '#DC2626' : '#FF7B7B', fontWeight: 900 }}>{formatMoney(item.currentOutstanding)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div> : null}
-      </div>
+      {customer?.customerType !== 'medical' && (
+        <div data-portal-box="card" className="customer-dashboard__balance" style={{ background: 'linear-gradient(135deg, #11185A 0%, #1E2961 45%, #4C1D95 100%)', color: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 12 }}>
+          <div style={{ color: '#D4AF37', fontWeight: 900, textAlign: 'center' }}>Total Outstanding</div>
+          <div style={{ color: '#FF7B7B', padding: '6px 0 2px', textAlign: 'center', fontSize: 30, lineHeight: 1.2, fontWeight: 900 }}>
+            {formatMoney(totalOutstanding)}
+          </div>
+        </div>
+      )}
 
       {(customer?.advanceBalance ?? 0) > 0 ? (
-        <div style={{ background: '#ECFDF3', color: '#166534', border: '1px solid #BBE7C8', borderRadius: 20, padding: 16, marginBottom: 12 }}>
+        <div data-portal-box="card" className="customer-dashboard__balance customer-dashboard__advance" style={{ background: '#ECFDF3', color: '#166534', border: '1px solid #BBE7C8', borderRadius: 20, padding: 16, marginBottom: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 900 }}>Available Advance</div>
           <div style={{ fontSize: 26, fontWeight: 900, marginTop: 5 }}>{formatMoney(customer?.advanceBalance ?? 0)}</div>
           <div style={{ color: '#477A58', fontSize: 12, fontWeight: 800, marginTop: 5 }}>Automatically adjusted on your next invoice.</div>
@@ -577,7 +332,7 @@ const CustomerDashboard = () => {
       ) : null}
 
       {currentMonthBonusPc > 0 && showCurrentMonthBonusCredit ? (
-        <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12, border: '1px solid #F4DE91' }}>
+        <div data-portal-box="card" className="customer-dashboard__balance customer-dashboard__bonus" style={{ background: '#FFFFFF', borderRadius: 20, padding: 15, boxShadow: '0 10px 24px rgba(11,31,58,0.08)', marginBottom: 12, border: '1px solid #F4DE91' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <div style={{ width: 46, height: 46, borderRadius: 16, background: '#FFF7D6', display: 'grid', placeItems: 'center', color: '#11185A' }}>
               <Coins size={24} />

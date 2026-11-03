@@ -1,3 +1,5 @@
+import TroikaaCoins from '../components/TroikaaCoins';
+import {calculateInvoiceApcInfo} from '../utils/customerPortal';
 import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import { Link } from 'react-router-dom';
 import { Truck, ArrowRight } from 'lucide-react';
@@ -7,6 +9,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
+import {useSharedCustomerData} from '../hooks/useSharedCustomerData';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   calculateDueDate,
@@ -14,8 +17,6 @@ import {
   createInvoice,
   deleteInvoiceRecord,
   getAppSettings,
-  getCustomers,
-  getInvoices,
   getInvoicesByCustomerId,
   getNextInvoiceNumber,
   getPaymentsByInvoiceId,
@@ -100,6 +101,7 @@ const formatReminderAmount = (amount: number) => {
 };
 
 const Invoices = () => {
+  const {getCustomers,getInvoices}=useSharedCustomerData();
   const [deliveryRequested, setDeliveryRequested] = useState(false);
   const [deliveryTarget, setDeliveryTarget] = useState<DeliveryTarget | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -138,6 +140,7 @@ const Invoices = () => {
   };
   const assignedStaffShopId = getAssignedStaffShopId(userProfile);
   const isAdmin = userProfile?.role === 'Admin';
+  const selectedInvoiceCustomer = customers.find(customer => customer.id === formData.customerId);
   const formIsBranchAware = isBranchAwareRecord(formData);
   const transactionShopId = assignedStaffShopId ?? (isShopId(formData.shopId) ? formData.shopId : undefined);
   const editingInvoice = editingInvoiceId ? invoices.find((invoice) => invoice.id === editingInvoiceId) : undefined;
@@ -315,7 +318,8 @@ const Invoices = () => {
         ...current,
         customerId: value,
         customerName: selectedCustomer?.name ?? '',
-        dueDate: selectedCustomer ? calculateDueDate(current.date, selectedCustomer.tier, settings) : current.date
+        manualTroikaaCoins: selectedCustomer?.customerType==='medical' ? current.manualTroikaaCoins ?? 0 : 0,
+        dueDate: selectedCustomer ? calculateDueDate(current.date, selectedCustomer.tier, settings,selectedCustomer.customerType) : current.date
       }));
       return;
     }
@@ -328,7 +332,7 @@ const Invoices = () => {
         dueDate: editingOpeningBalance
           ? value
           : selectedCustomer
-            ? calculateDueDate(value, selectedCustomer.tier, settings)
+            ? calculateDueDate(value, selectedCustomer.tier, settings,selectedCustomer.customerType)
             : value
       }));
       return;
@@ -377,6 +381,12 @@ const Invoices = () => {
       return;
     }
 
+    if (!Number.isSafeInteger(formData.manualTroikaaCoins??0) || (formData.manualTroikaaCoins??0)<0) {
+      setError('TROIKAA coins must be a non-negative whole number.'); return;
+    }
+    if (customers.find(customer=>customer.id===formData.customerId)?.customerType!=='medical' && (formData.manualTroikaaCoins??0)!==0) {
+      setError('Remove TROIKAA promotional data before saving a non-MEDICAL invoice.'); return;
+    }
     if (!formData.date || !formData.dueDate) {
       setError('Invoice date and due date must be valid dates.');
       return;
@@ -542,6 +552,7 @@ const Invoices = () => {
       salesStaffEmail: invoice.salesStaffEmail || '',
       salesStaffName: invoice.salesStaffName || '',
       salesStaffDirectoryToken: invoice.salesStaffDirectoryToken || '',
+      manualTroikaaCoins: invoice.medicalReward?.manualTroikaaCoins ?? 0,
       notes: invoice.notes,
       ...(isBranchAwareRecord(invoice) ? {
         shopId: invoice.shopId,
@@ -594,7 +605,7 @@ const Invoices = () => {
 
     if (!printWindow) return;
 
-    // The print view is customer-facing, so internal cost, transport, and profit values are hidden.
+    // The print view is customer-facing, so cost, transport, and profit values are hidden.
     printWindow.document.write(`
       <html>
         <head>
@@ -747,7 +758,7 @@ const Invoices = () => {
       <SectionHeader title="Invoices" />
       <Link to="/dispatch" className="invoice-delivery-link"><Truck size={20} aria-hidden="true" />Delivery requests<ArrowRight size={18} aria-hidden="true" /></Link>
 
-      {deliveryTarget && <DeliveryDialog invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Invoice marked for delivery. Ready for Dispatch synchronisation."); void loadData(); }} />}
+      {deliveryTarget && <DeliveryDialog allowMasterEdit={isAdmin} invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Invoice marked for delivery. Ready for Dispatch synchronisation."); void loadData(); }} />}
       <form style={cardStyle} onSubmit={handleSubmit}>
         {!editingOpeningBalance && <label className={`invoice-delivery-option${deliveryRequested ? ' selected' : ''}`}>
           <Truck size={25} aria-hidden="true" />
@@ -769,6 +780,30 @@ const Invoices = () => {
         </div>
 
         <div style={formGridStyle}>
+          <div style={{ gridColumn: '1 / -1' }}>
+          {!editingOpeningBalance && formData.customerId ? <div style={{ marginBottom: 12 }}>
+            <div style={{
+              display: 'inline-flex',
+              maxWidth: '100%',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid #334155',
+              background: '#000000',
+              color: '#FFFFFF'
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>Credit Limit</span>
+              <strong style={{
+                fontSize: 17,
+                fontWeight: 900,
+                color: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#FCA5A5' : '#86EFAC'
+              }}>
+                {loadingCreditLimit ? 'Loading...' : formatMoney(selectedCreditSummary?.availableCredit ?? 0)}
+              </strong>
+            </div>
+          </div> : null}
           <label style={labelStyle}>
             Customer
             <select style={inputStyle} value={formData.customerId} disabled={editingOpeningBalance} onChange={(event) => handleFieldChange('customerId', event.target.value)}>
@@ -778,6 +813,8 @@ const Invoices = () => {
               ))}
             </select>
           </label>
+          <p role="status" style={{ color: '#D7DEEA', fontSize: 13, margin: '8px 0' }}>{selectedInvoiceCustomer ? selectedInvoiceCustomer.customerType === 'medical' ? 'Customer type: MEDICAL' : 'Customer type: Customer. TROIKAA Coins require Medical customer type.' : 'Select a Medical customer to show TROIKAA Coins.'}</p>
+          </div>
 
           {!editingOpeningBalance && isAdmin && (!editingInvoiceId || formIsBranchAware || adminNeedsSameDayPaymentShop) ? <label style={labelStyle}>
             Shop
@@ -814,7 +851,6 @@ const Invoices = () => {
               <option value="">Direct customer order</option>
               {salesStaff.map((staff) => <option key={staff.token} value={staff.token}>{staff.name}</option>)}
             </select>
-            <small style={{ display: 'block', marginTop: 4, color: '#D7DEEA', fontWeight: 500 }}>Direct customer order is the default. Select a Salesapp Staff name only when they brought this sale.</small>
           </label> : null}
 
           <label style={labelStyle}>
@@ -842,25 +878,7 @@ const Invoices = () => {
             <input style={inputStyle} type="number" min="0" value={formData.transportAmount} onChange={(event) => handleFieldChange('transportAmount', event.target.value)} />
           </label> : null}
 
-          {!editingOpeningBalance ? <div style={labelStyle}>
-            Credit Limit
-            <div style={{
-              ...inputStyle,
-              minHeight: 42,
-              display: 'flex',
-              alignItems: 'center',
-              fontSize: 17,
-              fontWeight: 900,
-              color: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#B42318' : '#166534',
-              background: selectedCreditSummary?.creditStatus === 'hold' || selectedCreditSummary?.creditStatus === 'disabled' ? '#FDECEC' : '#ECFDF3'
-            }}>
-              {loadingCreditLimit
-                ? 'Loading...'
-                : formData.customerId
-                  ? formatMoney(selectedCreditSummary?.availableCredit ?? 0)
-                  : 'Select customer'}
-            </div>
-          </div> : null}
+
 
           {!editingOpeningBalance ? <label style={labelStyle}>
             Payment Received
@@ -883,6 +901,7 @@ const Invoices = () => {
               onChange={(event) => setSameDayCashDiscount(Number(event.target.value) || 0)}
             />
           </label> : null}
+          <TroikaaCoins customerType={selectedInvoiceCustomer?.customerType} input={{customerId:formData.customerId,...(editingInvoiceId?{invoiceId:editingInvoiceId}:{}),salesAmount:formData.salesAmount,costAmount:formData.costAmount,transportAmount:formData.transportAmount,manualTroikaaCoins:formData.manualTroikaaCoins??0}} onChange={coins=>setFormData(current=>({...current,manualTroikaaCoins:coins}))}/>
 
           {!editingOpeningBalance && sameDayPaymentAmount > 0 && sameDayPaymentShopId ? <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'end', minHeight: 42 }}>
             <input
@@ -939,7 +958,7 @@ const Invoices = () => {
                 <th style={headerCellStyle}>Due</th>
                 <th style={headerCellStyle}>Sales</th>
                 <th style={headerCellStyle}>Balance Due</th>
-                <th style={headerCellStyle}>Cost</th>
+                <th style={headerCellStyle}>PC</th>
                 <th style={headerCellStyle}>Transport</th>
                 <th style={headerCellStyle}>Profit</th>
                 <th style={headerCellStyle}>Paid</th>
@@ -962,7 +981,7 @@ const Invoices = () => {
                     <td style={{ ...cellStyle, color: invoice.balanceDue > 0 ? '#F87171' : '#FFFFFF', fontWeight: 800 }}>
                       {formatMoney(invoice.balanceDue)}
                     </td>
-                    <td style={cellStyle}>{formatMoney(invoice.costAmount)}</td>
+                    <td style={cellStyle}>{formatPc(isOpeningBalanceInvoice(invoice) ? 0 : calculateInvoiceApcInfo(invoice,payments,customers.find(customer=>customer.id===invoice.customerId)?.tier,settings).expectedApc)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.transportAmount)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.totalProfit)}</td>
                     <td style={cellStyle}>{formatMoney(invoice.paidAmount)}</td>

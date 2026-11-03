@@ -1,8 +1,8 @@
 import { CalendarDays, Landmark, Tags } from 'lucide-react';
-import { useMemo } from 'react';
+import {lazy,Suspense,useMemo,useState} from 'react';
 import { Link } from 'react-router-dom';
 import ExternalImage from '../../components/ExternalImage';
-import CustomerLevelJourney from '../../components/CustomerLevelJourney';
+const CustomerLevelJourney=lazy(()=>import('../../components/CustomerLevelJourney'));
 import { useCustomerPortalContext } from '../../components/CustomerMobileLayout';
 import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } from '../../utils/offers';
 
@@ -26,7 +26,17 @@ const customerPromoImageStyle = {
 };
 
 const CustomerOffers = () => {
-  const { offers, partnerJourney, loading, refreshData, customer } = useCustomerPortalContext();
+  const { offers, partnerJourney, loadPartnerJourney, customer, userProfile } = useCustomerPortalContext();
+  const showPartnership=customer?.customerType!=='medical'&&userProfile?.role!=='Medical';
+  const [sections,setSections]=useState({growth:false,benefits:false});
+  const [journeyLoading,setJourneyLoading]=useState(false);
+  const [journeyError,setJourneyError]=useState('');
+  const openSection=async(section:'growth'|'benefits')=>{
+    setSections(current=>({...current,[section]:!current[section]}));
+    if(partnerJourney)return;
+    setJourneyLoading(true);setJourneyError('');
+    try{await loadPartnerJourney();}catch(error){setJourneyError(error instanceof Error?error.message:'Unable to load partner details.');}finally{setJourneyLoading(false);}
+  };
   const activeOffers = useMemo(() => {
     // Inactive offer filtering: customer carousel only shows currently active offers.
     return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer)));
@@ -37,10 +47,16 @@ const CustomerOffers = () => {
       <div style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 900, marginBottom: 4 }}>Offers</div>
       <div style={{ color: '#BFC8D9', fontSize: 13, marginBottom: 14 }}>Latest active schemes from the business.</div>
 
-      <CustomerLevelJourney journey={partnerJourney} loading={loading} onRefresh={() => void refreshData()} hideCreditDays={customer?.customerType === 'medical'} />
+      {showPartnership && <div style={{display:'grid',gap:10,marginBottom:16}}>
+        {(['growth','benefits'] as const).map(section=><div key={section}>
+          <button type="button" aria-expanded={sections[section]} disabled={journeyLoading} onClick={()=>void openSection(section)} style={{width:'100%',padding:14,borderRadius:10,border:'1px solid #D4AF37',background:'#101B34',color:'#FDE68A',fontWeight:900,fontSize:16}}>{section==='growth'?'Grow your partnership':'Benefits at every level'}</button>
+          {sections[section]&&<Suspense fallback={<p>Loading partner details…</p>}><CustomerLevelJourney journey={partnerJourney} loading={journeyLoading} section={section}/></Suspense>}
+        </div>)}
+        {journeyError&&<p role="alert">{journeyError}</p>}
+      </div>}
 
       {activeOffers.length === 0 ? (
-        <div style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#67738E' }}>
+        <div data-portal-box="card" style={{ background: '#FFFFFF', borderRadius: 18, padding: 18, color: '#67738E' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 900, color: '#11185A' }}>
             <Tags size={18} color="#D4AF37" />
             No active offers
@@ -49,11 +65,11 @@ const CustomerOffers = () => {
       ) : (
         <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollSnapType: 'x mandatory', paddingBottom: 12 }}>
           {activeOffers.map((offer) => (
-            <div key={offer.id} style={{ ...customerPromoCardStyle, minWidth: '85%', scrollSnapAlign: 'start' }}>
+            <div data-portal-box="card" key={offer.id} style={{ ...customerPromoCardStyle, minWidth: '85%', scrollSnapAlign: 'start' }}>
               {offer.imageUrl ? (
                 <ExternalImage src={offer.imageUrl} alt={offer.title} style={customerPromoImageStyle} />
               ) : (
-                <div style={{ background: '#FFF7D6', borderRadius: 14, minHeight: 170, display: 'grid', placeItems: 'center', color: '#11185A', fontWeight: 900 }}>
+                <div data-portal-box="detail" style={{ background: '#FFF7D6', borderRadius: 14, minHeight: 170, display: 'grid', placeItems: 'center', color: '#11185A', fontWeight: 900 }}>
                   Offer poster will appear here
                 </div>
               )}

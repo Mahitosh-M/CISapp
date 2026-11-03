@@ -1,4 +1,4 @@
-import type { AppSettings, CustomerTier, Invoice, TargetTierKey, TierTargetSetting } from '../types';
+import type { AppSettings, CustomerTier, MedicalSettings, Invoice, TargetTierKey, TierTargetSetting } from '../types';
 import { addDaysToDateString } from './dateUtils';
 import { getTierDisplayName } from './tiers';
 
@@ -100,6 +100,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customerDown: false
 };
 
+export const DEFAULT_MEDICAL_SETTINGS: MedicalSettings = {
+ maximumCombinedRewardPercentage: 8,
+ giftPercentages: {...DEFAULT_SETTINGS.giftPercentages},
+ creditDays: {'Tier 1':15,'Tier 2':15,'Tier 3':15,'Tier 4':15},
+ paymentBuffers: {...DEFAULT_SETTINGS.paymentBuffers},
+ creditPolicy: {...DEFAULT_SETTINGS.creditPolicy},overduePolicy:{...DEFAULT_SETTINGS.overduePolicy},
+ targetSettings: structuredClone(DEFAULT_SETTINGS.targetSettings),loyaltySettings:structuredClone(DEFAULT_SETTINGS.loyaltySettings)
+};
+export const getMedicalSettings = (settings?: Partial<AppSettings>):MedicalSettings => {
+ const value=settings?.medicalSettings;
+ return {maximumCombinedRewardPercentage:value?.maximumCombinedRewardPercentage ?? DEFAULT_MEDICAL_SETTINGS.maximumCombinedRewardPercentage,giftPercentages:{...DEFAULT_MEDICAL_SETTINGS.giftPercentages,...value?.giftPercentages},creditDays:{...DEFAULT_MEDICAL_SETTINGS.creditDays,...value?.creditDays},paymentBuffers:{...DEFAULT_MEDICAL_SETTINGS.paymentBuffers,...value?.paymentBuffers},creditPolicy:{...DEFAULT_MEDICAL_SETTINGS.creditPolicy,...value?.creditPolicy},overduePolicy:{...DEFAULT_MEDICAL_SETTINGS.overduePolicy,...value?.overduePolicy},targetSettings:Object.fromEntries(Object.entries(DEFAULT_MEDICAL_SETTINGS.targetSettings).map(([key,defaults])=>[key,{...defaults,...value?.targetSettings?.[key as TargetTierKey]}])) as MedicalSettings['targetSettings'],loyaltySettings:{...DEFAULT_MEDICAL_SETTINGS.loyaltySettings,...value?.loyaltySettings}};
+};
+export const getCustomerPolicy = (settings:AppSettings|undefined,customerType?:string):MedicalSettings => customerType==='medical'?getMedicalSettings(settings):mergeWithDefaultSettings(settings);
+
 const roundToTwoDecimals = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 const numberOrZero = (value: unknown) => {
@@ -121,6 +135,7 @@ const mergeTierTargetSettings = (targetSettings: Partial<TierTargetSetting> | un
 export const mergeWithDefaultSettings = (settings?: Partial<AppSettings>): AppSettings => ({
   ...DEFAULT_SETTINGS,
   ...settings,
+  medicalSettings:getMedicalSettings(settings),
   highOutstandingThreshold: settings?.highOutstandingThreshold ?? DEFAULT_SETTINGS.highOutstandingThreshold,
   fixedMonthlyCosts: settings?.fixedMonthlyCosts ?? DEFAULT_SETTINGS.fixedMonthlyCosts,
   invoicePrefix: settings?.invoicePrefix || DEFAULT_SETTINGS.invoicePrefix,
@@ -193,11 +208,11 @@ export const getTargetTierKey = (tier?: CustomerTier): TargetTierKey => {
   return 'tier4';
 };
 
-export const getTierTargetSettings = (tier: CustomerTier | undefined, settings?: AppSettings): TierTargetSetting => {
+export const getTierTargetSettings = (tier: CustomerTier | undefined, settings?: AppSettings, customerType?:string): TierTargetSetting => {
   const activeSettings = mergeWithDefaultSettings(settings);
 
   // Future target rules should be edited in Settings and kept under targetSettings.
-  return activeSettings.targetSettings[getTargetTierKey(tier)];
+  return getCustomerPolicy(activeSettings,customerType).targetSettings[getTargetTierKey(tier)];
 };
 
 export const getScoringWeightTotal = (settings?: Partial<AppSettings>) => {
@@ -334,6 +349,20 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
     }
   });
 
+  const medical=getMedicalSettings(activeSettings);
+  const maximum = medical.maximumCombinedRewardPercentage!;
+  if (!Number.isInteger(maximum) || maximum < 0 || maximum > 100) errors.push('Maximum Combined Reward Percentage must be a whole number from 0 to 100.');
+  else for (const [tier, rate] of Object.entries(medical.giftPercentages)) {
+    if (maximum < rate) errors.push('Maximum Combined Reward Percentage cannot be below the Medical ' + getTierDisplayName(tier as CustomerTier) + ' level rate of ' + rate + '%.');
+  }
+  for(const tier of ['Tier 1','Tier 2','Tier 3','Tier 4'] as CustomerTier[]){
+   if(!Number.isFinite(medical.giftPercentages[tier])||medical.giftPercentages[tier]<0||medical.giftPercentages[tier]>100)errors.push('Medical PC percentages must be between 0 and 100');
+   for(const key of ['creditDays','paymentBuffers'] as const)if(!Number.isInteger(medical[key][tier])||medical[key][tier]<0||medical[key][tier]>365)errors.push('Medical credit and buffer days must be whole days from 0 to 365');
+  }
+  if(!Number.isSafeInteger(medical.creditPolicy.starterLimitCap)||medical.creditPolicy.starterLimitCap<0||medical.creditPolicy.starterLimitCap>10000)errors.push('Medical starter limit cap must be whole rupees from 0 to 10000');
+  for(const key of ['monthlyTargetBonus','cleanPaymentMonthBonus','newCustomerBonus','referralBonus'] as const)if(!Number.isSafeInteger(medical.loyaltySettings[key])||medical.loyaltySettings[key]<0||medical.loyaltySettings[key]>100000)errors.push('Medical bonus PC must be whole points from 0 to 100000');
+  for(const value of Object.values(medical.targetSettings))if(!Number.isSafeInteger(value.monthlySalesTarget)||value.monthlySalesTarget<0||!Number.isSafeInteger(value.monthlyOrderTarget)||value.monthlyOrderTarget<0)errors.push('Medical targets must be non-negative whole rupees and orders');
+  const risk=medical.overduePolicy;if(Object.values(risk).some(n=>!Number.isFinite(n)||n<0)||risk.seriousSalesRatioPercent<=risk.minorSalesRatioPercent||risk.seriousDays<=risk.materialDays||risk.seriousInvoiceCount<1||!Number.isInteger(risk.seriousInvoiceCount)||!Number.isInteger(risk.repeatedEventCount))errors.push('Medical overdue risk thresholds are invalid');
   return {
     isValid: errors.length === 0,
     errors: [...new Set(errors)],
@@ -341,27 +370,27 @@ export const validateAppSettings = (settings?: Partial<AppSettings>) => {
   };
 };
 
-export const getGiftPercentageForTier = (tier: CustomerTier, settings?: AppSettings) => {
+export const getGiftPercentageForTier = (tier: CustomerTier, settings?: AppSettings, customerType?:string) => {
   const activeSettings = mergeWithDefaultSettings(settings);
-  return activeSettings.giftPercentages[tier] ?? DEFAULT_SETTINGS.giftPercentages[tier];
+  return getCustomerPolicy(activeSettings,customerType).giftPercentages[tier] ?? DEFAULT_SETTINGS.giftPercentages[tier];
 };
 
-export const getCreditDaysForTierFromSettings = (tier: CustomerTier, settings?: AppSettings) => {
+export const getCreditDaysForTierFromSettings = (tier: CustomerTier, settings?: AppSettings, customerType?:string) => {
   const activeSettings = mergeWithDefaultSettings(settings);
-  return activeSettings.creditDays[tier] ?? DEFAULT_SETTINGS.creditDays[tier];
+  return getCustomerPolicy(activeSettings,customerType).creditDays[tier] ?? DEFAULT_SETTINGS.creditDays[tier];
 };
 
-export const getPaymentBufferForTier = (tier: CustomerTier, settings?: AppSettings) => {
+export const getPaymentBufferForTier = (tier: CustomerTier, settings?: AppSettings, customerType?:string) => {
   const activeSettings = mergeWithDefaultSettings(settings);
-  return activeSettings.paymentBuffers[tier] ?? DEFAULT_SETTINGS.paymentBuffers[tier];
+  return getCustomerPolicy(activeSettings,customerType).paymentBuffers[tier] ?? DEFAULT_SETTINGS.paymentBuffers[tier];
 };
 
 export const getTotalCreditDaysForTier = (tier: CustomerTier, settings?: AppSettings) => {
   return getCreditDaysForTierFromSettings(tier, settings) + getPaymentBufferForTier(tier, settings);
 };
 
-export const calculateDynamicDueDate = (invoiceDate: string, tier: CustomerTier, settings?: AppSettings) => {
-  return addDaysToDateString(invoiceDate, getCreditDaysForTierFromSettings(tier, settings));
+export const calculateDynamicDueDate = (invoiceDate: string, tier: CustomerTier, settings?: AppSettings, customerType?:string) => {
+  return addDaysToDateString(invoiceDate, getCreditDaysForTierFromSettings(tier, settings,customerType));
 };
 
 export const getInvoiceSavedDueDate = (invoice: Pick<Invoice, 'date' | 'dueDate' | 'savedDueDate' | 'creditDaysAtInvoice'>, tier: CustomerTier, settings?: AppSettings) => {
@@ -397,17 +426,18 @@ export const buildInvoiceTimeTerms = (
     | 'savedDueDate'
     | 'termsEstimated'
   >>,
-  creditDaysOverride?: number
+  creditDaysOverride?: number,
+  customerType?:string
 ) => {
   const tierAtInvoice = existing?.tierAtInvoice ?? tier;
   const creditDaysAtInvoice = Math.max(0, Math.round(
-    existing?.creditDaysAtInvoice ?? creditDaysOverride ?? getCreditDaysForTierFromSettings(tierAtInvoice, settings)
+    existing?.creditDaysAtInvoice ?? creditDaysOverride ?? getCreditDaysForTierFromSettings(tierAtInvoice, settings,customerType)
   ));
   const bufferDaysAtInvoice = Math.max(0, Math.round(
-    existing?.bufferDaysAtInvoice ?? getPaymentBufferForTier(tierAtInvoice, settings)
+    existing?.bufferDaysAtInvoice ?? getPaymentBufferForTier(tierAtInvoice, settings,customerType)
   ));
   const pcPercentageAtInvoice = Math.max(0,
-    existing?.pcPercentageAtInvoice ?? getGiftPercentageForTier(tierAtInvoice, settings)
+    existing?.pcPercentageAtInvoice ?? getGiftPercentageForTier(tierAtInvoice, settings,customerType)
   );
   const savedDueDate = dueDate.trim()
     || existing?.savedDueDate?.trim()
@@ -441,9 +471,9 @@ export const getEffectiveInvoiceDueDate = (
   return normalizedStoredDueDate || calculateDynamicDueDate(invoiceDate, tier, settings);
 };
 
-export const getPaymentTermsLabel = (tier: CustomerTier, settings?: AppSettings) => {
-  const creditDays = getCreditDaysForTierFromSettings(tier, settings);
-  const bufferDays = getPaymentBufferForTier(tier, settings);
+export const getPaymentTermsLabel = (tier: CustomerTier, settings?: AppSettings, customerType?:string) => {
+  const creditDays = getCreditDaysForTierFromSettings(tier, settings,customerType);
+  const bufferDays = getPaymentBufferForTier(tier, settings,customerType);
 
   if (creditDays <= 0) {
     return 'No credit - same day payment preferred';

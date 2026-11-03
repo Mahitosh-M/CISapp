@@ -3,14 +3,12 @@ import type { CSSProperties } from 'react';
 import { BookOpen, CircleDollarSign, Download, FileText, MapPin, ShoppingCart, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
+import {useSharedCustomerData} from '../hooks/useSharedCustomerData';
 import {
   createCustomer,
   deleteCustomerRecord,
   getAppSettings,
-  getCustomers,
-  getInvoices,
   getInvoicesByCustomerId,
-  getPayments,
   getPaymentsByCustomerId,
   getPaymentTermsForTier,
   updateCustomerBranch,
@@ -24,7 +22,7 @@ import { addDaysToDateString, getTodayDateString } from '../utils/dateUtils';
 import { formatDate, formatMoney, formatShortDate } from '../utils/formatters';
 import { latestFiveScrollStyle, sortNewestFirst } from '../utils/listDisplay';
 import { getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../utils/openingBalance';
-import { DEFAULT_SETTINGS } from '../utils/settings';
+import { DEFAULT_SETTINGS,getPaymentTermsLabel } from '../utils/settings';
 import { getShopName } from '../utils/shops';
 import { CUSTOMER_TIERS, getTierWithCodeLabel } from '../utils/tiers';
 import { formatCustomerSelectLabel } from '../utils/customerLabels';
@@ -56,6 +54,7 @@ const LEDGER_RANGES: Array<{ id: LedgerRange; label: string }> = [
 ];
 
 const Customers = () => {
+  const {mode,getCustomers,getInvoices,getPayments}=useSharedCustomerData();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -372,7 +371,7 @@ const Customers = () => {
       setFormData((current) => ({
         ...current,
         tier,
-        paymentTerms: current.customerType === 'medical' ? '15 day credit' : getPaymentTermsForTier(tier)
+        paymentTerms: getPaymentTermsLabel(tier,settings,current.customerType)
       }));
       return;
     }
@@ -402,6 +401,7 @@ const Customers = () => {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
 
+    if(mode && (formData.customerType==='medical'?'medical':'customer')!==mode){setError('Choose the matching customer mode before saving.');return;}
     if (!formData.name.trim() || !formData.mobile.trim()) {
       setError('Customer name and mobile number are required.');
       return;
@@ -448,7 +448,7 @@ const Customers = () => {
       area: customer.area,
       branchId: customer.branchId || 'SINDHANUR',
       tier: customer.tier,
-      paymentTerms: customer.paymentTerms,
+      paymentTerms: customer.customerType==='medical'?getPaymentTermsLabel(customer.tier,settings,'medical'):customer.paymentTerms,
       notes: customer.notes,
       previousOutstandingAmount: customer.previousOutstandingAmount ?? 0,
       status: customer.status || 'Active'
@@ -497,7 +497,7 @@ const Customers = () => {
     setFormData({
       ...emptyCustomerForm,
       customerType,
-      paymentTerms: customerType === 'medical' ? '15 day credit' : emptyCustomerForm.paymentTerms
+      paymentTerms: getPaymentTermsLabel(emptyCustomerForm.tier,settings,customerType)
     });
     setEditingCustomerId('');
     setError('');
@@ -636,7 +636,7 @@ const Customers = () => {
               <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Open order entry</span>
             </span>
           </button>
-          <button
+          {mode!=='medical'&&<button
             type="button"
             className="customer-action-tile"
             style={staffTileStyle}
@@ -647,8 +647,8 @@ const Customers = () => {
               <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId && formData.customerType !== 'medical' ? 'Hide Form' : 'Add Customer'}</span>
               <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Create customer record</span>
             </span>
-          </button>
-          <button
+          </button>}
+          {mode!=='customer'&&<button
             type="button"
             className="customer-action-tile"
             style={staffTileStyle}
@@ -659,7 +659,7 @@ const Customers = () => {
               <span style={{ display: 'block', fontWeight: 900 }}>{showCustomerForm && !editingCustomerId && formData.customerType === 'medical' ? 'Hide Medical Form' : 'Add MEDICAL'}</span>
               <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Create medical customer record</span>
             </span>
-          </button>
+          </button>}
           {isAdmin ? <button
             type="button"
             className="customer-action-tile"

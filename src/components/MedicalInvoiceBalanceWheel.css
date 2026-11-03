@@ -1,0 +1,87 @@
+.medical-invoice-circle {
+  width: 100%;
+  max-width: 112px;
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  border-radius: 50%;
+  position: relative;
+  margin: 0 auto;
+  container-type: inline-size;
+  box-shadow: 0 4px 16px #0004;
+}
+
+.medical-invoice-circle-center {
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: #000000;
+  color: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  text-align: center;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+.medical-invoice-circle-center strong {
+  font-size: clamp(12px, 22cqw, 25px);
+  line-height: 1.1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.medical-invoice-circle-center small {
+  font-size: clamp(6px, 9cqw, 10px);
+  line-height: 1.1;
+  font-weight: 900;
+  max-width: 100%;
+}
+
+.medical-invoice-pc-coin {
+  background: radial-gradient(circle at 34% 27%, #FFFBE8 0 10%, #FDE68A 28%, #D4AF37 62%, #8A5A00 100%);
+  border: 3px solid #F6E6A8;
+}
+
+.medical-invoice-pc-coin .medical-invoice-circle-center {
+  background: #FFFFFF2E;
+  border: 1px solid #FFFFFF8C;
+  color: #4A3000;
+}
+
+.medical-invoice-balance-center {
+  background: #000000;
+  gap: 2px;
+}
+
+.medical-invoice-balance-center strong,
+.medical-invoice-balance-center span,
+.medical-invoice-balance-center small {
+  font-size: clamp(7px, 11cqw, 12px);
+  font-weight: 900;
+  line-height: 1.15;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.medical-invoice-balance-center .medical-invoice-pending-value {
+  color: #F87171;
+  font-size: clamp(12px, 17cqw, 19px);
+  font-weight: 900;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.medical-invoice-balance-center .medical-invoice-paid-value {
+  color: #4ADE80;
+  font-size: clamp(7px, 10cqw, 11px);
+  font-weight: 700;
+}
+
+.medical-invoice-balance-center .medical-invoice-total-value {
+  color: #60A5FA;
+  font-size: clamp(7px, 9cqw, 10px);
+  font-weight: 700;
+}

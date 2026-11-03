@@ -1,3 +1,4 @@
+import {completedDeliveryStops,plannedArrival} from './smart-routing';
 import type {
   AppState,
   User,
@@ -14,6 +15,7 @@ import type {
   SalesRequest,
 } from "./domain";
 import { uuid, now, activeJob, fuelBill } from "./domain";
+import {buildTripRoute,reminderCandidate,nextItineraryPoint} from './smart-routing';
 import {
   assert,
   integer,
@@ -34,7 +36,13 @@ function wholeAmount(value: number, label: string, min = 0) {
   integer(value, label, min);
   assert(value % 100 === 0, label + ' must be a whole rupee amount');
 }
+function reportReferences(s:AppState,t:Trip){return [...new Set(t.stops.flatMap(stop=>{const job=s.jobs.find(j=>j.id===stop.jobId),ref=job?s.invoices.find(r=>r.id===job.invoiceId):null;return ref?.externalId?[ref.externalId]:[];}))];}
 export type Command =
+  | {type:'visitWaypoint';tripId:string;pointId:string;revision:number}
+  | {type:'amendStops';id:string;stopIds:string[];note:string;revision:number}
+  | {type:'reviewLocation';id:string;note:string;revision:number;location?:import('./route-geo').DeliveryLocation}
+  | {type:'ackRoute';id:string;revision:number}
+  | {type:'arrivalReminder';tripId:string;action:'Raise'|'Acknowledge'|'Dismiss';id?:string;minutes?:number;revision:number}
   | {
       type: "saveMaster";
       kind: "shops" | "vehicles" | "users";
@@ -391,6 +399,7 @@ export function applyCommand(
       const old = s.trips.find((t) => t.id === v.id);
       if (old) {
         editableTrip(old);
+        if(old.status==='Released')assert(v.amendmentNote?.trim(),'Explain the released route amendment');
         assert(
           old.revision === v.revision,
           "Route changed. Reopen before saving.",
@@ -472,6 +481,10 @@ export function applyCommand(
       if (c.action === "Release") {
         assert(t.status === "Draft", "Already released");
         assert(t.stops.length, "Route has no stops");
+        t.routeSnapshot=buildTripRoute(s,t,t.routeSnapshot?.template??null,now());
+        t.reportingInvoiceIds=reportReferences(s,t);t.routeReferenceKm=t.routeSnapshot.template?.referenceKm;t.routeReferenceMinutes=t.routeSnapshot.template?.referenceMinutes;
+        t.routeTargetArrival=t.routeSnapshot.template?.targetArrival??'17:00';t.routePlannedArrival=plannedArrival(t.routeSnapshot);t.routeDeparture=t.routeSnapshot.template?.departure;
+        t.reportingCustomerIds=[...new Set(t.stops.map(st=>st.customerId))];t.reportingTerritoryNames=[...new Set((t.routeSnapshot.template?.stops??[]).filter(p=>p.kind!=='Shop'&&p.kind!=='Loading'&&p.kind!=='Unloading').map(p=>p.name))];
         t.status = "Released";
       } else {
         t.status = "Cancelled";
@@ -486,6 +499,32 @@ export function applyCommand(
       t.revision++;
       audit(s, actor, "trip", t.id, c.action, before, { ...t, note: c.note });
       break;
+    }
+    case 'amendStops': {
+      const t=find(s.trips,c.id);manager(actor,t.startShopId);assert(t.status==='Active','Only active trips use this amendment');assert(c.revision===t.revision,'Trip changed; refresh before amending');assert(c.note.trim(),'Amendment reason required');
+      assert(c.stopIds.length===t.stops.length&&new Set(c.stopIds).size===t.stops.length&&c.stopIds.every(id=>t.stops.some(st=>st.id===id)),'Amendment must retain the assigned deliveries');
+      const before=structuredClone(t),stops=c.stopIds.map(id=>find(t.stops,id));assert(t.stops.every((st,index)=>!st.completed||stops[index].id===st.id),'Completed stops cannot move');assert(t.stops.every((st,index)=>!st.locked||stops[index].id===st.id),'Locked stops cannot move');
+      const proposed={...t,stops};proposed.routeSnapshot=buildTripRoute(s,proposed,t.routeSnapshot?.template??null,now());proposed.pendingRouteAcknowledgements=[t.primaryDriverId,...(t.companionId?[t.companionId]:[])];proposed.revision++;Object.assign(t,proposed);audit(s,actor,'trip',t.id,'Active itinerary amended',before,{...t,note:c.note});break;
+    }
+    case 'reviewLocation': {
+      const job=find(s.jobs,c.id),t=find(s.trips,job.tripId??'');manager(actor,t.startShopId);
+      assert(['Released','Active'].includes(t.status)&&t.revision===c.revision,'Refresh the current released or active trip');
+      assert(!t.stops.find(st=>st.jobId===job.id)?.completed,'Completed delivery locations are historical');
+      assert(c.location?.confirmed&&c.note.trim(),'A confirmed source pin and review explanation are required');
+      const before=structuredClone(t),previous=job.location;job.location=structuredClone(c.location);delete job.sourceBlocked;
+      t.routeSnapshot=buildTripRoute(s,t,t.routeSnapshot?.template??null,now());t.pendingRouteAcknowledgements=[t.primaryDriverId,...(t.companionId?[t.companionId]:[])];t.revision++;
+      audit(s,actor,'trip',t.id,'Source delivery pin reviewed',before,{...t,note:c.note,jobId:job.id,previousLocation:previous});break;
+    }
+    case 'ackRoute': {
+      const t=find(s.trips,c.id);driver(actor,t);assert(t.routeSnapshot?.revision===c.revision,'Route changed again; review the current itinerary');t.pendingRouteAcknowledgements=t.pendingRouteAcknowledgements?.filter(id=>id!==actor.id);audit(s,actor,'trip',t.id,'Driver acknowledged itinerary',null,{revision:c.revision});break;
+    }
+    case 'visitWaypoint': {
+      const t=find(s.trips,c.tripId);driver(actor,t);assert(t.status==='Active'&&t.loaded,'Start the loaded trip first');assert(t.routeSnapshot?.revision===c.revision&&!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the current itinerary first');const point=nextItineraryPoint(t);assert(point?.id===c.pointId&&!point.customerId,'Confirm the next waypoint; customer deliveries use delivery proof');t.visitedWaypoints??=[];if(!t.visitedWaypoints.includes(point.id))t.visitedWaypoints.push(point.id);audit(s,actor,'trip',t.id,'Waypoint visit confirmed',null,{pointId:point.id,name:point.name});break;
+    }
+    case 'arrivalReminder': {
+      const t=find(s.trips,c.tripId);driver(actor,t);assert(t.status==='Active'&&t.routeSnapshot?.revision===c.revision,'Use the current active itinerary');assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Acknowledge the changed itinerary first');s.arrivalReminders??=[];
+      if(c.action==='Raise'){const candidate=reminderCandidate(t,s.arrivalReminders,c.minutes??Infinity,'Manual',now(),actor.id);if(candidate){s.arrivalReminders.push(candidate);audit(s,actor,'reminder',candidate.id,'Manual arrival reminder raised',null,candidate);}}
+      else{const reminder=find(s.arrivalReminders,c.id??'');assert(reminder.tripId===t.id&&reminder.actorId===actor.id,'Reminder belongs to another trip or driver');const before=reminder.status;reminder.status=c.action==='Dismiss'?'Dismissed':'Acknowledged';audit(s,actor,'reminder',reminder.id,'Arrival reminder '+reminder.status,before,reminder.status);}break;
     }
     case "changeDriver": {
       const t = find(s.trips, c.id);
@@ -553,6 +592,7 @@ export function applyCommand(
         t.status === "Released",
         "Trip must be released and not already started",
       );
+      assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review and acknowledge the updated itinerary first');
       assert(
         actor.id === t.primaryDriverId,
         "Primary responsible driver must start the shift",
@@ -614,10 +654,12 @@ export function applyCommand(
       const t = find(s.trips, c.id);
       driver(actor, t);
       assert(t.status === "Active", "Start shift before loading");
+      assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review and acknowledge the updated itinerary first');
       assert(!t.loaded, "Packages already confirmed");
       const jobs = t.stops.filter(stop=>!!stop.jobId).map(stop=>s.jobs.find(job=>job.id===stop.jobId));
       assert(jobs.every(Boolean), "Assigned delivery details are missing. Open Connection & pending work and synchronise before confirming packages loaded.");
       t.loaded = true;
+      if(t.routeSnapshot?.points[0])t.visitedWaypoints=[...new Set([...(t.visitedWaypoints??[]),t.routeSnapshot.points[0].id])];
       for (const job of jobs) job!.status = "Out for delivery";
       audit(s, actor, "trip", t.id, "Packages loaded", false, true);
       break;
@@ -628,6 +670,7 @@ export function applyCommand(
       driver(actor, t);
       assert(t.status === "Active" && t.loaded, "Active loaded trip required");
       const stop = find(t.stops, c.stopId);
+      if(t.routeSnapshot){assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the updated itinerary first');assert(nextItineraryPoint(t)?.stopIds.includes(stop.id),'Visit the next authorised destination first');}
       assert(!stop.completed, "Stop already completed");
       if (c.type === "arrive") {
         assert(!stop.arrivedAt, "Arrival already recorded");
@@ -658,6 +701,7 @@ export function applyCommand(
       );
       const stop = t.stops.find((x) => x.jobId === j.id);
       assert(stop && !stop.completed, "Delivery attempt already completed");
+      if(t.routeSnapshot){assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the updated itinerary first');assert(nextItineraryPoint(t)?.stopIds.includes(stop.id),'Visit the next authorised destination first');}
       integer(c.delivered, "Delivered packages");
       assert(
         c.delivered <= j.remaining,
@@ -1042,6 +1086,9 @@ export function applyCommand(
         "Complete stops or request manager Unfinished stops exception",
       );
       t.closing = c.closing;
+      const fixed=t.routeSnapshot?.points.filter(p=>!p.customerId)??[];
+      assert(fixed.slice(1,-1).every(p=>t.visitedWaypoints?.includes(p.id))||t.exceptions.some(x=>x.startsWith('Route waypoints:')),'Confirm intermediate route waypoints or request a Manager Route waypoints exception');
+      if(fixed.length)t.visitedWaypoints=[...new Set([...(t.visitedWaypoints??[]),fixed[fixed.length-1].id])];
       t.closingPhoto = c.photo;
       t.returnConfirmed = !s.jobs.some(j => j.tripId === t.id && !j.returnsReconciled);
       t.endNote = c.note;
@@ -1094,7 +1141,7 @@ export function applyCommand(
       manager(actor, t.startShopId);
       assert(!["Closed", "Cancelled"].includes(t.status), "Trip is terminal");
       assert(
-        /^(Opening photo:|Closing photo:|Unfinished stops:|Proof [^:]+:|Settlement:)/.test(
+        /^(Opening photo:|Closing photo:|Unfinished stops:|Route waypoints:|Proof [^:]+:|Settlement:)/.test(
           c.note,
         ) && c.note.split(":").slice(1).join(":").trim().length >= 5,
         "Use a recognised exception prefix and a meaningful reason",
@@ -1143,6 +1190,10 @@ export function applyCommand(
         "Invalid odometer",
       );
       t.approvedOdometer = true;
+      t.reportingInvoiceIds=reportReferences(s,t);
+      t.reportingCompletedInvoiceIds=t.stops.flatMap(stop=>{const job=s.jobs.find(j=>j.id===stop.jobId),ref=job?s.invoices.find(r=>r.id===job.invoiceId):null;if(!job||!ref?.externalId)return[];const attempts=s.attempts.filter(a=>a.jobId===job.id&&a.delivered>0);return job.status==='Delivered'&&attempts.length>0&&attempts.every(a=>a.tripId===t.id)&&attempts.reduce((n,a)=>n+a.delivered,0)>=job.packages?[ref.externalId]:[];});
+      t.reportingCompletedStops=completedDeliveryStops(s,t);
+      t.reportingFailedAttempts=s.attempts.filter(a=>a.tripId===t.id&&['Failed','Partial'].includes(a.outcome)).length;
       t.returnConfirmed = true;
       t.status = "Closed";
       t.closedAt = now();

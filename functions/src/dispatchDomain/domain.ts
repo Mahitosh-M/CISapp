@@ -29,6 +29,7 @@ export interface Vehicle {
   active: boolean;
 }
 export interface Customer {
+  location?: import('./route-geo').DeliveryLocation | null;
   id: ID;
   externalId: string | null;
   name: string;
@@ -67,6 +68,8 @@ export type JobStatus =
   | "Cancelled"
   | "Returned pending";
 export interface DeliveryJob {
+  location?: import('./route-geo').DeliveryLocation | null;
+  routeRevision?: number;
   purgedAt?: string; deliveredPackages?: number;
   routeId?: string; routeName?: string; routeDays?: number[]; routeStopId?: string | null; routeStopName?: string | null;
   sourceBlocked?: string;
@@ -103,6 +106,7 @@ export interface DeliveryAttempt {
 }
 export type StopKind = "Delivery" | "Collection" | "Sales visit";
 export interface Stop {
+  locked?: boolean;
   id: ID;
   kind: StopKind;
   customerId: ID;
@@ -111,6 +115,22 @@ export interface Stop {
   arrivedAt?: string;
 }
 export interface Trip {
+  routeSnapshot?: import('./smart-routing').TripRouteSnapshot;
+  amendmentNote?: string;
+  pendingRouteAcknowledgements?: string[];
+  reportingInvoiceIds?: string[];
+  reportingCompletedInvoiceIds?: string[];
+  routeCostSettingsId?: string;
+  routeReferenceKm?: number;
+  routeReferenceMinutes?: number;
+  routeTargetArrival?: string;
+  routePlannedArrival?: string | null;
+  routeDeparture?: string;
+  reportingCustomerIds?: string[];
+  reportingTerritoryNames?: string[];
+  visitedWaypoints?: string[];
+  reportingFailedAttempts?: number;
+  reportingCompletedStops?: number;
   closedAt?: string; purgedAt?: string;
   routeTemplateId?: string;
   corrections?: {
@@ -251,6 +271,7 @@ export interface Evidence {
   at: string;
 }
 export interface AppState {
+  arrivalReminders?: import('./smart-routing').ArrivalReminder[];
   integration?: {
     lastPull: string;
     identityKey: string;

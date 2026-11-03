@@ -97,6 +97,23 @@ describeWithFirestoreEmulator('PC and branch cash Firestore permissions', () => 
     });
   };
 
+  it('enforces Medical-only configurable bonus amounts and preserves their request snapshot',async()=>{
+    await seed('Admin');
+    await testEnvironment.withSecurityRulesDisabled(async context=>{
+      const db=context.firestore();await setDoc(doc(db,'customers','customer-1'),{name:'Medical',customerType:'medical'});await setDoc(doc(db,'customers','normal'),{name:'Normal',customerType:'customer'});await setDoc(doc(db,'settings','appSettings'),{key:'erpSettings',medicalSettings:{loyaltySettings:{monthlyTargetBonus:7}}});
+    });
+    const db=testEnvironment.authenticatedContext('team-user').firestore(),ref=doc(db,'bonusPcRequests','medical-bonus');
+    const request={customerId:'customer-1',customerName:'Medical',bonusType:'monthly_target',bonusLabel:'Monthly target',triggerType:'monthly_target_paid',referenceId:'customer-1_2026_10',suggestedCoins:7,approvedCoins:7,status:'Pending',generatedAt:timestamp,policyCategory:'medical',policySettingsId:'appSettings'};
+    await assertFails(setDoc(doc(db,'bonusPcRequests','forged-rate'),{...request,suggestedCoins:70,approvedCoins:70}));
+    await assertFails(setDoc(doc(db,'bonusPcRequests','wrong-category'),{...request,customerId:'normal'}));
+    await assertSucceeds(setDoc(ref,request));await assertSucceeds(updateDoc(doc(db,'settings','appSettings'),{'medicalSettings.loyaltySettings.monthlyTargetBonus':20}));
+    await assertFails(updateDoc(ref,{suggestedCoins:20,approvedCoins:20}));
+    const ledger=doc(db,'loyaltyLedger','customer-1_medical-bonus_bonus_pc'),approval=writeBatch(db);
+    approval.update(ref,{status:'Approved',approvedCoins:7});approval.set(ledger,{customerId:'customer-1',type:'bonus',points:7,reason:'Medical monthly target',referenceId:'medical-bonus',month:'2026-10',createdAt:timestamp});approval.update(doc(db,'pcBalances','customer-1'),{availablePc:107,incomingPc:127,lastMutationReferenceId:ledger.id,updatedAt:timestamp});await assertSucceeds(approval.commit());expect((await getDoc(doc(db,'pcBalances','customer-1'))).data()?.availablePc).toBe(107);
+    const repeat=writeBatch(db);repeat.set(ledger,{customerId:'customer-1',type:'bonus',points:7,reason:'Duplicate',referenceId:'medical-bonus',month:'2026-10',createdAt:timestamp});repeat.update(doc(db,'pcBalances','customer-1'),{availablePc:114,incomingPc:134,lastMutationReferenceId:ledger.id,updatedAt:timestamp});await assertFails(repeat.commit());await assertFails(updateDoc(ref,{approvedCoins:0,status:'Rejected'}));
+    const normal={...request,customerId:'normal',customerName:'Normal',suggestedCoins:5,approvedCoins:5} as Record<string,unknown>;delete normal.policyCategory;delete normal.policySettingsId;await assertSucceeds(setDoc(doc(db,'bonusPcRequests','normal-fixed'),normal));await assertFails(setDoc(doc(db,'bonusPcRequests','normal-forged'),{...normal,suggestedCoins:7,approvedCoins:7}));
+  });
+
   it('reserves overdue policies and assessments for trusted backend operations', async () => {
     await seed('Admin');
     const database = testEnvironment.authenticatedContext('team-user').firestore();

@@ -4,13 +4,12 @@ import type { CSSProperties } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
+import {useSharedCustomerData} from '../hooks/useSharedCustomerData';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   createPayment,
   deletePaymentRecord,
-  getCustomers,
   getInvoicesByCustomerId,
-  getPayments,
   getPaymentsByInvoiceIds,
   getPaymentsByCustomerId,
   getPaymentsBySplitPaymentGroupIds,
@@ -61,6 +60,7 @@ const createSplitPaymentGroupId = () => {
 };
 
 const Payments = () => {
+  const {getCustomers,getPayments}=useSharedCustomerData();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [storedInvoices, setInvoices] = useState<Invoice[]>([]);
   const invoices = useMemo(() => withCurrentCustomerNames(storedInvoices, customers), [storedInvoices, customers]);

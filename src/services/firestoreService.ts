@@ -1,3 +1,5 @@
+import {buildMedicalReward} from '../utils/medicalReward';
+import {postMedicalReward} from './medicalRewardService';
 import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import { requireWholeRupees } from '../utils/wholeRupees';
 import { cashBalanceFields } from './cashRounding';
@@ -7,6 +9,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getCountFromServer,
   getDoc,
@@ -95,7 +98,7 @@ import {
 } from '../utils/pcAwardPolicy';
 import {
   buildAutomaticBonusCandidates,
-  FIXED_BONUS_PC,
+  getBonusPcAmount,
   getBonusPcLedgerId,
   getNewCustomerBonusRequestIds,
   getReferralBonusId,
@@ -658,14 +661,14 @@ export const getPaymentTermsForTier = (tier: CustomerTier) => {
   return getPaymentTermsLabel(tier);
 };
 
-const MEDICAL_PAYMENT_TERMS = '15 day credit';
+
 
 export const getCreditDaysForTier = (tier: CustomerTier) => {
   return DEFAULT_SETTINGS.creditDays[tier];
 };
 
-export const calculateDueDate = (invoiceDate: string, tier: CustomerTier, settings?: AppSettings) => {
-  return calculateDynamicDueDate(invoiceDate, tier, settings);
+export const calculateDueDate = (invoiceDate: string, tier: CustomerTier, settings?: AppSettings, customerType?:string) => {
+  return calculateDynamicDueDate(invoiceDate, tier, settings,customerType);
 };
 
 
@@ -695,6 +698,7 @@ const mapSettingsDoc = (id: string, data: Record<string, unknown>): AppSettings 
   return mergeWithDefaultSettings({
     id,
     key: 'erpSettings',
+    medicalSettings: data.medicalSettings as AppSettings['medicalSettings'],
     giftPercentages: data.giftPercentages as AppSettings['giftPercentages'],
     creditDays: data.creditDays as AppSettings['creditDays'],
     paymentBuffers: data.paymentBuffers as AppSettings['paymentBuffers'],
@@ -969,6 +973,7 @@ const mapBonusPcRequestDoc = (id: string, data: Record<string, unknown>): BonusP
     customerId: String(data.customerId || ''),
     customerName: String(data.customerName || ''),
     bonusType,
+    ...(data.policyCategory==='medical'?{policyCategory:'medical' as const,policySettingsId:String(data.policySettingsId||'')}:{}),
     bonusLabel: String(data.bonusLabel || BONUS_PC_LABELS[bonusType]),
     triggerType: String(data.triggerType || ''),
     referenceId: String(data.referenceId || ''),
@@ -1195,7 +1200,7 @@ export const createCustomer = async (customer: CustomerFormData, auditUser?: Aud
   const batch = writeBatch(db);
   const customerPayload = {
     ...customer,
-    ...(customer.customerType === 'medical' ? { paymentTerms: MEDICAL_PAYMENT_TERMS } : {}),
+    ...(customer.customerType === 'medical' ? { paymentTerms: getPaymentTermsLabel(customer.tier, await getAppSettings(),customer.customerType) } : {}),
     previousOutstandingAmount: 0,
     totalOutstandingAmount: previousOutstandingAmount,
     invoiceOutstandingAmount: 0,
@@ -1230,7 +1235,7 @@ export const updateCustomerRecord = async (customerId: string, customer: Custome
   const timestamp = nowIso();
   const customerPayload = {
     ...customer,
-    ...(customer.customerType === 'medical' ? { paymentTerms: MEDICAL_PAYMENT_TERMS } : {}),
+    ...(customer.customerType === 'medical' ? { paymentTerms: getPaymentTermsLabel(customer.tier, await getAppSettings(),customer.customerType) } : {}),
     previousOutstandingAmount: 0
   };
 
@@ -1291,7 +1296,7 @@ export const syncCustomerPartnerLevelsFromFirestore = async () => {
       updateDoc(doc(db, CUSTOMERS, score.customerId), {
         tier: score.tier,
         paymentTerms: customersById.get(score.customerId)?.customerType === 'medical'
-          ? MEDICAL_PAYMENT_TERMS
+          ? getPaymentTermsLabel(score.tier,appSettings,'medical')
           : getPaymentTermsLabel(score.tier, appSettings),
         updatedAt: timestamp
       })
@@ -1457,7 +1462,7 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
   for (const key of ['salesAmount','costAmount','transportAmount','totalSales','totalCost'] as const) requireWholeRupees(invoice[key], key);
   if (!Number.isSafeInteger(invoice.totalProfit)) throw new Error('Invoice profit must be a whole rupee amount');
   invoice = prepareNewInvoicePayload(invoice, auditUser);
-  const activeSettings = await getAppSettings();
+  const activeSettings = await getAppSettings(true);
   const counter = getInvoiceCounterDetails(activeSettings, invoice.date);
   const initialCounterSnapshot = await getDoc(counter.ref);
   const initialSequence = initialCounterSnapshot.exists()
@@ -1485,8 +1490,10 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
     const nextSequence = currentSequence + 1;
     invoiceNumber = `${counter.prefix}-${String(nextSequence).padStart(4, '0')}`;
     const customerTier = (customerSnapshot.data().tier as CustomerTier | undefined) || 'Tier 4';
-    const medicalCreditDays = customerSnapshot.data().customerType === 'medical' ? 15 : undefined;
-    const invoiceTerms = buildInvoiceTimeTerms(invoice.date, invoice.dueDate, customerTier, activeSettings, undefined, medicalCreditDays);
+    const customerType = customerSnapshot.data().customerType;
+    const invoiceTerms = buildInvoiceTimeTerms(invoice.date, invoice.dueDate, customerTier, activeSettings, undefined, undefined, customerType);
+    const medicalReward = buildMedicalReward(customerType,customerTier,invoice.totalProfit,activeSettings,invoice.manualTroikaaCoins ?? 0);
+    const {manualTroikaaCoins:_manual,...invoiceFields}=invoice;
     const advanceBalance = customerSnapshot.exists()
       ? Math.max(0, numberOrZero(customerSnapshot.data().advanceBalance))
       : 0;
@@ -1507,7 +1514,8 @@ export const createInvoice = async (invoice: InvoiceFormData, auditUser?: AuditU
       updatedAt: timestamp
     });
     transaction.set(docRef, {
-      ...invoice,
+      ...invoiceFields,
+      ...(medicalReward ? {medicalReward} : {}),
       dueDate: invoiceTerms.savedDueDate,
       ...invoiceTerms,
       pcPolicyVersionAtInvoice: CURRENT_PC_POLICY_VERSION,
@@ -1621,11 +1629,26 @@ export const updateInvoiceRecord = async (
         customer.tier,
         activeSettings,
         preserveExistingTerms ? existingInvoice : undefined,
-        customer.customerType === 'medical' ? 15 : undefined
+        undefined, customer.customerType
       );
 
+  const {manualTroikaaCoins:_manual,...invoiceFields}=invoice;
+  let medicalReward=existingInvoice.medicalReward;
+  if (!medicalReward && (invoice.manualTroikaaCoins ?? 0)!==0) throw new Error('Historical invoice rewards are preserved. TROIKAA proposals apply to new invoices.');
+  if (medicalReward) {
+    const posted=await getDoc(doc(db,LOYALTY_LEDGER,existingInvoice.customerId+'_'+invoiceId+'_invoice_pc'));
+    if (posted.exists()) {
+      if (invoice.customerId!==existingInvoice.customerId || (invoice.manualTroikaaCoins ?? medicalReward.manualTroikaaCoins)!==medicalReward.manualTroikaaCoins) throw new Error('The posted invoice reward is protected.');
+    } else if (customer.customerType!=='medical') {
+      if ((invoice.manualTroikaaCoins??0)!==0) throw new Error('Remove TROIKAA promotional data before saving a non-MEDICAL invoice.');
+      medicalReward=undefined;
+    } else {
+      medicalReward=buildMedicalReward(customer.customerType,customer.tier,invoice.totalProfit,activeSettings,invoice.manualTroikaaCoins??medicalReward.manualTroikaaCoins,invoice.customerId===existingInvoice.customerId?medicalReward:undefined);
+    }
+  }
   await updateDoc(doc(db, INVOICES, invoiceId), {
-    ...invoice,
+    ...invoiceFields,
+    ...(existingInvoice.medicalReward ? {medicalReward:medicalReward ?? deleteField()} : {}),
     ...(editingOpeningBalance ? {
       invoiceType: OPENING_BALANCE_INVOICE_TYPE,
       isOpeningBalance: true,
@@ -2033,6 +2056,7 @@ const awardInvoicePcOnce = async (invoiceId: string): Promise<InvoicePcAwardResu
   if (!invoice.customerId || isOpeningBalanceInvoice(invoice)) {
     return { invoiceId, status: 'not_applicable', points: 0 };
   }
+  if (invoice.medicalReward) return postMedicalReward(invoice.id);
   const ledgerRef = doc(db, LOYALTY_LEDGER, `${invoice.customerId}_${invoice.id}_invoice_pc`);
 
   // Most edit/delete calls hit an already-posted invoice. Stop after one
@@ -3151,7 +3175,9 @@ export const approveReferralBonus = async (referrerId: string, referredCustomerI
     throw new Error('The referred customer first valid business invoice must be fully paid before referral PC is awarded.');
   }
 
-  const referralCoins = FIXED_BONUS_PC.referral;
+  const bonusSettings=await getAppSettings();
+  const referralCoins = getBonusPcAmount(referrer.customerType,'referral',bonusSettings);
+  if(referralCoins<=0)throw new Error('Referral bonus is disabled for this customer category.');
   const requestId = getReferralBonusId(referrer.id, referredCustomer.id);
   const requestRef = doc(db, BONUS_PC_REQUESTS, requestId);
   const timestamp = nowIso();
@@ -3173,6 +3199,7 @@ export const approveReferralBonus = async (referrerId: string, referredCustomerI
       customerId: referrer.id,
       customerName: referrer.name,
       bonusType: 'referral',
+      ...(referrer.customerType==='medical'?{policyCategory:'medical',policySettingsId:bonusSettings.id||APP_SETTINGS_DOC_ID}:{}),
       bonusLabel: BONUS_PC_LABELS.referral,
       triggerType: 'referred_first_invoice_fully_paid',
       referenceId: referredCustomer.id,
@@ -3254,15 +3281,16 @@ export const generateBonusPcRequests = async (
               firestoreLimit(1)
             ))).docs[0]
           : await getDoc(requestRef);
-        const amount = FIXED_BONUS_PC[candidate.bonusType];
+        const amount = getBonusPcAmount(customer.customerType,candidate.bonusType,appSettings);
+        if(amount<=0&&!existingSnapshot?.exists())return;
         if (existingSnapshot?.exists()) {
           const existing = mapBonusPcRequestDoc(existingSnapshot.id, existingSnapshot.data());
           if (existing.status === 'Pending' && existing.triggerType !== candidate.triggerType) {
             await updateDoc(existingSnapshot.ref, {
               triggerType: candidate.triggerType,
               referenceId: candidate.referenceId,
-              suggestedCoins: amount,
-              approvedCoins: amount,
+              suggestedCoins: existing.suggestedCoins,
+              approvedCoins: existing.approvedCoins,
               notes: candidate.notes
             });
           }
@@ -3273,6 +3301,7 @@ export const generateBonusPcRequests = async (
           customerId: customer.id,
           customerName: customer.name,
           bonusType: candidate.bonusType,
+          ...(customer.customerType==='medical'?{policyCategory:'medical',policySettingsId:appSettings.id||APP_SETTINGS_DOC_ID}:{}),
           bonusLabel: BONUS_PC_LABELS[candidate.bonusType],
           triggerType: candidate.triggerType,
           referenceId: candidate.referenceId,
@@ -3326,7 +3355,7 @@ export const reviewBonusPcRequest = async (
       throw new Error('The monthly target bonus cannot be released until the qualifying invoices are fully paid.');
     }
 
-    const cleanCoins = status === 'Approved' ? FIXED_BONUS_PC[bonusRequest.bonusType] : 0;
+    const cleanCoins = status === 'Approved' ? bonusRequest.suggestedCoins : 0;
     const balanceRef = doc(db, PC_BALANCES, bonusRequest.customerId);
     const ledgerRef = doc(db, LOYALTY_LEDGER, getBonusPcLedgerId(bonusRequest.customerId, requestId));
     const otherWelcomeRequestRefs = status === 'Approved' && bonusRequest.bonusType === 'new_customer'
@@ -3358,7 +3387,7 @@ export const reviewBonusPcRequest = async (
     transaction.update(requestRef, {
       bonusType: bonusRequest.bonusType,
       bonusLabel: BONUS_PC_LABELS[bonusRequest.bonusType],
-      suggestedCoins: FIXED_BONUS_PC[bonusRequest.bonusType],
+      suggestedCoins: bonusRequest.suggestedCoins,
       status,
       approvedCoins: cleanCoins,
       reviewedAt: timestamp,

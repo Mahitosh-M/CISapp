@@ -1312,6 +1312,68 @@ service cloud.firestore {
         || (entryType != 'on_time_payment' && isAdmin());
     }
 
+    // Additive Medical reward snapshots. Legacy invoices without the map remain unchanged.
+    // Only the existing Staff cost-entry privileges supply invoice financial inputs.
+    function medicalRates(data) { return data.get('medicalSettings', {}).get('giftPercentages', {}); }
+    function medicalMaximum(data) { return data.get('medicalSettings', {}).get('maximumCombinedRewardPercentage', 8); }
+    function validMedicalMaximum(data) {
+      let cap=medicalMaximum(data);
+      let rates=medicalRates(data);
+      return cap is number && cap>=0 && cap<=100 && cap==int(cap)
+        && cap>=rates.get('Tier 1',4) && cap>=rates.get('Tier 2',3)
+        && cap>=rates.get('Tier 3',2) && cap>=rates.get('Tier 4',1);
+    }
+    function medicalRewardShape(data) {
+      let r=data.medicalReward;
+      let profit=(data.totalProfit > 0 ? data.totalProfit : 0);
+      return r is map && r.keys().hasOnly(['version','manualTroikaaCoins','maximumPercentage','levelPercentage','maximumAllowedCoins','levelRewardCoins','normalRewardValue','finalCombinedRewardCoins','settingsId'])
+        && r.keys().hasAll(['version','manualTroikaaCoins','maximumPercentage','levelPercentage','maximumAllowedCoins','levelRewardCoins','normalRewardValue','finalCombinedRewardCoins','settingsId'])
+        && r.version==1 && r.manualTroikaaCoins is int && r.manualTroikaaCoins>=0 && r.manualTroikaaCoins<=9007199254740991
+        && r.maximumPercentage is number && r.maximumPercentage>=0 && r.maximumPercentage<=100
+        && r.levelPercentage is number && r.levelPercentage>=0 && r.levelPercentage<=r.maximumPercentage
+        && r.settingsId is string && r.settingsId.size()>0 && r.settingsId.size()<=160 && !r.settingsId.matches('.*/.*')
+        && data.costAmount>=0 && data.transportAmount>=0 && data.totalSales==data.salesAmount
+        && data.totalCost==data.costAmount+data.transportAmount && data.totalProfit==data.totalSales-data.totalCost
+        && r.maximumAllowedCoins is int && r.maximumAllowedCoins==int(profit * r.maximumPercentage / 100 + 0.000000001)
+        && r.normalRewardValue is number && r.normalRewardValue == profit * r.levelPercentage / 100
+        && r.levelRewardCoins is int && r.levelRewardCoins==int(r.normalRewardValue + 0.5)
+        && r.manualTroikaaCoins<=r.maximumAllowedCoins && r.levelRewardCoins<=r.maximumAllowedCoins
+        && r.finalCombinedRewardCoins is int && r.finalCombinedRewardCoins==(r.levelRewardCoins > r.manualTroikaaCoins ? r.levelRewardCoins : r.manualTroikaaCoins)
+        && data.pcPercentageAtInvoice==r.levelPercentage;
+    }
+    function medicalRewardCurrentPolicy(data) {
+      let customer=getAfter(/databases/$(database)/documents/customers/$(data.customerId)).data;
+      let settings=getAfter(/databases/$(database)/documents/settings/$(data.medicalReward.settingsId)).data;
+      let tier=customer.get('tier','Tier 4');
+      let fallback=tier=='Tier 1'?4:tier=='Tier 2'?3:tier=='Tier 3'?2:1;
+      return customer.get('customerType','')=='medical' && data.tierAtInvoice==tier
+        && settings.key=='erpSettings'
+        && (!exists(/databases/$(database)/documents/settings/appSettings) || data.medicalReward.settingsId=='appSettings')
+        && data.medicalReward.maximumPercentage==int(data.medicalReward.maximumPercentage)
+        && data.medicalReward.maximumPercentage==medicalMaximum(settings)
+        && data.medicalReward.levelPercentage==medicalRates(settings).get(tier,fallback);
+    }
+    function validMedicalRewardCreate(data) {
+      return !('manualTroikaaCoins' in data)
+        && ('medicalReward' in data ? medicalRewardShape(data) && medicalRewardCurrentPolicy(data) : !exists(/databases/$(database)/documents/customers/$(data.customerId)) || get(/databases/$(database)/documents/customers/$(data.customerId)).data.get('customerType','')!='medical');
+    }
+    function validMedicalRewardUpdate(data,invoiceId) {
+      let old=resource.data;
+      let posted=exists(/databases/$(database)/documents/loyaltyLedger/$(old.customerId+'_'+invoiceId+'_invoice_pc'));
+      let customer=getAfter(/databases/$(database)/documents/customers/$(data.customerId)).data;
+      return !('manualTroikaaCoins' in data) && (
+        !('medicalReward' in old) ? !('medicalReward' in data)
+        : posted ? data.get('medicalReward',{})==old.medicalReward && data.customerId==old.customerId
+        : !('medicalReward' in data) ? customer.get('customerType','')!='medical'
+        : medicalRewardShape(data) && customer.get('customerType','')=='medical'
+          && (data.customerId==old.customerId
+            ? data.medicalReward.settingsId==old.medicalReward.settingsId
+              && data.medicalReward.maximumPercentage==old.medicalReward.maximumPercentage
+              && data.medicalReward.levelPercentage==old.medicalReward.levelPercentage
+            : medicalRewardCurrentPolicy(data))
+      );
+    }
+
     function validInvoicePcPolicyVersionOnCreate() {
       return !('pcPolicyVersionAtInvoice' in request.resource.data)
         || (request.resource.data.pcPolicyVersionAtInvoice is int
@@ -1354,6 +1416,7 @@ service cloud.firestore {
         || (
           entryId == entry.customerId + "_" + entry.referenceId + "_invoice_pc"
           && exists(linkedInvoicePath)
+          && !('medicalReward' in get(linkedInvoicePath).data)
           && get(linkedInvoicePath).data.customerId == entry.customerId
         );
     }
@@ -1602,6 +1665,34 @@ service cloud.firestore {
             : -1;
     }
 
+    function configuredMedicalBonus(data) {
+      let settings = get(/databases/$(database)/documents/settings/$(data.policySettingsId)).data;
+      let bonuses = settings.get('medicalSettings', {}).get('loyaltySettings', {});
+      let field = data.bonusType == 'monthly_target' ? 'monthlyTargetBonus'
+        : data.bonusType == 'clean_payment_month' ? 'cleanPaymentMonthBonus'
+        : data.bonusType == 'new_customer' ? 'newCustomerBonus' : 'referralBonus';
+      return settings.key == 'erpSettings' ? bonuses.get(field, fixedBonusPc(data.bonusType)) : -1;
+    }
+
+    function validBonusAmount(data) {
+      return !('policyCategory' in data)
+        ? data.suggestedCoins == fixedBonusPc(data.bonusType)
+          && data.approvedCoins in [0, fixedBonusPc(data.bonusType)]
+          && (request.method != 'update' || !('policyCategory' in resource.data))
+        : data.policyCategory == 'medical'
+          && data.policySettingsId is string && data.policySettingsId.size() <= 128
+          && data.suggestedCoins is int && data.suggestedCoins >= 0 && data.suggestedCoins <= 100000
+          && data.approvedCoins in [0, data.suggestedCoins]
+          && (request.method == 'create'
+            ? get(/databases/$(database)/documents/customers/$(data.customerId)).data.get('customerType', 'customer') == 'medical'
+              && data.suggestedCoins == configuredMedicalBonus(data)
+            : resource.data.get('policyCategory', '') == 'medical'
+              && data.policySettingsId == resource.data.policySettingsId
+              && data.customerId == resource.data.customerId && data.bonusType == resource.data.bonusType
+              && data.referenceId == resource.data.referenceId && data.suggestedCoins == resource.data.suggestedCoins
+              && (resource.data.status == 'Pending' || (data.status == resource.data.status && data.approvedCoins == resource.data.approvedCoins)));
+    }
+
     function validBonusPcRequest(data) {
       return data.keys().hasOnly([
           'customerId',
@@ -1611,6 +1702,8 @@ service cloud.firestore {
           'triggerType',
           'referenceId',
           'suggestedCoins',
+          'policyCategory',
+          'policySettingsId',
           'approvedCoins',
           'status',
           'generatedAt',
@@ -1630,9 +1723,8 @@ service cloud.firestore {
         && data.referenceId is string
         && data.referenceId.size() <= 160
         && data.suggestedCoins is number
-        && data.suggestedCoins == fixedBonusPc(data.bonusType)
+        && validBonusAmount(data)
         && data.approvedCoins is number
-        && data.approvedCoins in [0, fixedBonusPc(data.bonusType)]
         && data.status in ['Pending', 'Approved', 'Rejected']
         && data.generatedAt is string
         && validOptionalString(data, 'reviewedAt', 40)
@@ -2096,7 +2188,7 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if isActive();
-      allow write: if isAdmin() && settingId != 'invoiceLateChargePolicy';
+      allow write: if isAdmin() && settingId != 'invoiceLateChargePolicy' && validMedicalMaximum(request.resource.data);
     }
 
     match /invoiceLateCharges/{chargeId} {
@@ -2110,7 +2202,8 @@ service cloud.firestore {
 
     match /customers/{customerDocId} {
       allow read: if isTeam() || (isCustomer() && customerDocId == customerId()) || ownsCustomerRecord(resource.data);
-      allow create, update: if isTeam();
+      allow create: if isTeam() && (!('deliveryLocation' in request.resource.data) || isAdmin());
+      allow update: if isTeam() && (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryLocation']));
       allow delete: if isAdmin();
     }
 
@@ -2119,12 +2212,14 @@ service cloud.firestore {
       allow create: if isTeam()
         && !request.resource.data.keys().hasAny(['lateChargePolicy','lateChargesTotal','lateChargeEvents','nextLateChargeDate','lateChargesUpdatedAt'])
         && wholeInvoiceAmounts(request.resource.data)
+        && validMedicalRewardCreate(request.resource.data)
         && validInvoicePcPolicyVersionOnCreate()
         && validBranchCreateForActor(request.resource.data);
       allow update: if isTeam()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lateChargePolicy','lateChargesTotal','lateChargeEvents','nextLateChargeDate','lateChargesUpdatedAt'])
         && (!('lateChargePolicy' in resource.data) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['customerId','date','invoiceType','isOpeningBalance']))
         && (wholeInvoiceAmounts(request.resource.data) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['salesAmount','costAmount','transportAmount','totalSales','totalCost','totalProfit']))
+        && validMedicalRewardUpdate(request.resource.data,invoiceId)
         && preservesInvoicePcPolicyVersion()
         && validInvoiceBranchUpdateForActor();
       allow delete: if isAdmin() && (!('lateChargesTotal' in resource.data) || resource.data.lateChargesTotal == 0);

@@ -1,7 +1,9 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Truck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
+import {SharedCustomerModeProvider,useSharedCustomerMode} from '../contexts/SharedCustomerModeContext';
+import SharedCustomerModeSwitch from './SharedCustomerModeSwitch';
 import { useAuth } from '../contexts/AuthContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -30,7 +32,10 @@ const navItems: NavItem[] = [
   { to: '/settings', label: 'Settings', icon: Settings, mobileColor: '#CBD5E1', adminOnly: true }
 ];
 
-const Layout = () => {
+const LayoutBody = () => {
+  const {pathname}=useLocation();
+  const mode=useSharedCustomerMode()?.mode;
+  const sharedPage=['/customers','/invoices','/payments','/dispatch'].includes(pathname.replace(/\/$/,''));
   const { userProfile, logout } = useAuth();
   const isMobile = useIsMobile();
   const isStaffMobile = isMobile && userProfile?.role === 'Staff';
@@ -212,7 +217,7 @@ const Layout = () => {
       <main style={contentStyle}>
         <div style={topBarStyle}>
           <div>
-            <div style={titleStyle}>COINS</div>
+            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>{sharedPage&&<SharedCustomerModeSwitch/>}<div style={titleStyle}>COINS</div></div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: isMobile ? 0 : 'auto' }}>
             <div style={{ color: '#D4AF37', fontWeight: 700 }}>{userProfile?.role ?? 'User'}</div>
@@ -225,7 +230,7 @@ const Layout = () => {
             </button>
           </div>
         </div>
-        <Outlet />
+        <Outlet key={sharedPage?mode:'unscoped'} />
       </main>
       {isMobile ? (
         <nav style={mobileNavStyle}>
@@ -256,4 +261,5 @@ const Layout = () => {
   );
 };
 
+const Layout=()=>{const {userProfile}=useAuth();return <SharedCustomerModeProvider key={userProfile?.uid} userId={userProfile?.uid??''}><LayoutBody/></SharedCustomerModeProvider>;};
 export default Layout;

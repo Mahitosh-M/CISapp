@@ -1,3 +1,4 @@
+import {getGiftPercentageForTier} from '../utils/settings';
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import ExternalImage from './ExternalImage';
@@ -207,7 +208,7 @@ const SuggestedGiftManager = () => {
       periodEnd: getTodayDateString(),
       salesAmount: row.salesAmount,
       profitConsidered: row.profitConsidered,
-      giftPercentage: settings.giftPercentages[row.customer.tier],
+      giftPercentage: getGiftPercentageForTier(row.customer.tier,settings,row.customer.customerType),
       giftAmount: status === 'Given' ? selectedRewardCost : 0,
       suggestedGiftBudget: row.giftBudget,
       actualGiftAmount: status === 'Given' ? selectedRewardCost : 0,

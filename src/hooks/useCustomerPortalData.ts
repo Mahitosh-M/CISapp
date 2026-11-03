@@ -1,3 +1,5 @@
+import {useLocation} from 'react-router-dom';
+import {readCustomerSessionResource} from '../services/customerSessionCache';
 import { withCurrentCustomerNames } from '../utils/customerLabels';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,6 +46,8 @@ const optionalCustomerRead = async <T,>(read: () => Promise<T>, fallback: T) => 
 
 export const useCustomerPortalData = () => {
   const { userProfile } = useAuth();
+  const {pathname}=useLocation();
+  const needsTransactions=!['/customer','/customer/','/customer/offers','/customer/profile'].includes(pathname.replace(/\/$/,'')||'/customer');
   const [customer, setCustomer] = useState<Customer>();
   const [partnerJourney, setPartnerJourney] = useState<PartnerLevelJourney>();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -59,6 +63,8 @@ export const useCustomerPortalData = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const pcBalanceReadAtRef = useRef(0);
+
+  useEffect(()=>{setPartnerJourney(undefined);},[userProfile?.uid]);
 
   const applyAvailablePcBalance = useCallback((availablePc: number) => {
     setApcSummary((current) => {
@@ -89,7 +95,7 @@ export const useCustomerPortalData = () => {
     try {
       setLoading(true);
       setError('');
-      setPartnerJourney(undefined);
+
 
       let linkedCustomer = userProfile.customerId ? await getCustomerById(userProfile.customerId) : undefined;
 
@@ -100,9 +106,11 @@ export const useCustomerPortalData = () => {
       // Customer portal free-tier/privacy rule: these helpers query only the linked customer
       // (customerId first, customerName only as a legacy fallback), never full company collections.
       const customerId = linkedCustomer?.id ?? userProfile.customerId;
-      const [customerInvoices, customerPayments, appSettings, activeOffers, activeRewards, redemptions, approvedOverduePcRequests, approvedBonusPcRequests, customerCreditSummary, protectedPcBalance] = await Promise.all([
-        getInvoicesForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
-        getPaymentsForCustomerViewer(linkedCustomer?.id ?? userProfile.customerId, linkedCustomer?.name ?? userProfile.customerName),
+      const [transactionData, appSettings, activeOffers, activeRewards, redemptions, approvedOverduePcRequests, approvedBonusPcRequests, customerCreditSummary, protectedPcBalance] = await Promise.all([
+        needsTransactions ? (async()=>{
+          const [invoices,payments]=await Promise.all([getInvoicesForCustomerViewer(customerId,linkedCustomer?.name??userProfile.customerName),getPaymentsForCustomerViewer(customerId,linkedCustomer?.name??userProfile.customerName)]);
+          return {invoices,payments};
+        })() : Promise.resolve({invoices:[] as Invoice[],payments:[] as Payment[]}),
         getAppSettings(),
         getActiveOffers(),
         optionalCustomerRead(() => getActiveRewardItems(), []),
@@ -112,12 +120,13 @@ export const useCustomerPortalData = () => {
         customerId ? optionalCustomerRead(() => getCustomerCreditSummary(customerId), undefined) : Promise.resolve(undefined),
         customerId ? optionalCustomerRead(() => getCustomerPcBalanceRecord(customerId), undefined) : Promise.resolve(undefined)
       ]);
+      const {invoices:customerInvoices,payments:customerPayments}=transactionData;
       pcBalanceReadAtRef.current = Date.now();
 
       const scopedInvoices = withCurrentCustomerNames(filterCustomerRecords(customerInvoices, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName }), linkedCustomer ? [linkedCustomer] : []);
       const scopedPayments = withCurrentCustomerNames(filterCustomerRecords(customerPayments, { customerId: linkedCustomer?.id ?? userProfile.customerId, customerName: linkedCustomer?.name ?? userProfile.customerName }), linkedCustomer ? [linkedCustomer] : []);
       const businessInvoices = getBusinessInvoices(scopedInvoices);
-      const intelligenceResult = linkedCustomer ? buildCustomerScores([linkedCustomer], businessInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
+      const intelligenceResult = linkedCustomer && needsTransactions ? buildCustomerScores([linkedCustomer], businessInvoices, scopedPayments, new Date(), appSettings)[0] : undefined;
       const customerWithIntelligenceTier = linkedCustomer && intelligenceResult ? { ...linkedCustomer, tier: intelligenceResult.tier } : linkedCustomer;
       const calculatedPcBalance = customerWithIntelligenceTier
         ? buildCustomerPortalPcBalance(customerWithIntelligenceTier, businessInvoices, scopedPayments, appSettings, redemptions, approvedOverduePcRequests, approvedBonusPcRequests)
@@ -161,15 +170,12 @@ export const useCustomerPortalData = () => {
         ? calculateCustomerCreditSummaryLocally(customerWithIntelligenceTier, scopedInvoices, scopedPayments, appSettings, customerCreditSummary)
         : customerCreditSummary;
 
-      setPartnerJourney(linkedCustomer && intelligenceResult
-        ? buildPartnerLevelJourney(linkedCustomer, scopedInvoices, scopedPayments, appSettings, intelligenceResult)
-        : undefined);
       setCustomer(customerWithIntelligenceTier);
       setInvoices(scopedInvoices);
       setPayments(scopedPayments);
       setSettings(appSettings);
       setOffers(eligibleOffers);
-      setApcSummary(apcData);
+      setApcSummary(current=>!needsTransactions&&!protectedPcBalance?current:apcData);
       setAvailableRewards(levelEligibleRewards);
       setRedemptionRequests(redemptions);
       setBonusPcRequests(approvedBonusPcRequests);
@@ -180,11 +186,27 @@ export const useCustomerPortalData = () => {
     } finally {
       setLoading(false);
     }
-  }, [userProfile]);
+  }, [userProfile,needsTransactions]);
 
   useEffect(() => {
     refreshData();
   }, [refreshData]);
+
+  const loadPartnerJourney=useCallback(async()=>{
+    if(!customer||!userProfile)throw new Error('Customer details are not available.');
+    const key=userProfile.uid+':'+customer.id;
+    const journey=await readCustomerSessionResource(key+':partnership',async()=>{
+      const rows=await readCustomerSessionResource(key+':transactions',async()=>{
+        const [invoices,payments]=await Promise.all([getInvoicesForCustomerViewer(customer.id,customer.name),getPaymentsForCustomerViewer(customer.id,customer.name)]);
+        return {invoices,payments};
+      });
+      const scopedInvoices=withCurrentCustomerNames(filterCustomerRecords(rows.invoices,{customerId:customer.id,customerName:customer.name}),[customer]);
+      const scopedPayments=withCurrentCustomerNames(filterCustomerRecords(rows.payments,{customerId:customer.id,customerName:customer.name}),[customer]);
+      const intelligence=buildCustomerScores([customer],getBusinessInvoices(scopedInvoices),scopedPayments,new Date(),settings)[0];
+      return buildPartnerLevelJourney(customer,scopedInvoices,scopedPayments,settings,intelligence);
+    });
+    setPartnerJourney(journey);return journey;
+  },[customer,userProfile,settings]);
 
   const refreshPcBalance = useCallback(async () => {
     const customerId = customer?.id ?? userProfile?.customerId;
@@ -209,6 +231,7 @@ export const useCustomerPortalData = () => {
     userProfile,
     customer,
     partnerJourney,
+    loadPartnerJourney,
     invoices,
     payments,
     invoiceViews,

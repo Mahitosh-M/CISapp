@@ -1,0 +1,80 @@
+/* Only the Customer/Medical dashboard uses the available screen height. */
+.customer-portal-dashboard {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0 !important;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.customer-portal-dashboard > header { flex: 0 0 auto; padding: clamp(8px, 2dvh, 18px) 18px !important; }
+.customer-portal-dashboard > main {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 8px 14px !important;
+  container-type: size;
+  overflow: auto;
+}
+.customer-portal-dashboard > .cis-bottom-nav {
+  position: static;
+  flex: 0 0 auto;
+  width: calc(100% - 24px);
+  margin: 0 auto;
+}
+.customer-dashboard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 1.5cqh, 10px);
+  height: 100%;
+  min-height: 0;
+  --dashboard-coin-size: clamp(48px, 23cqh, 122px);
+  --dashboard-coin-font: clamp(16px, 6cqh, 31px);
+}
+.customer-dashboard > .customer-welcome-banner {
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 0;
+  padding: clamp(4px, 1.5cqh, 14px) 16px;
+  gap: clamp(2px, 1cqh, 6px);
+  align-content: center;
+  overflow: visible;
+}
+.customer-dashboard .customer-welcome-banner__heading { grid-template-columns: minmax(0, 1fr) clamp(32px, 16cqh, 100px) minmax(0, 1fr); }
+.customer-dashboard .customer-welcome-banner__name { font-size: clamp(10px, 2.8cqh, 13px); }
+.customer-dashboard > .customer-dashboard__coins {
+  flex: 1.15 1 0;
+  min-height: 0;
+  display: grid;
+  align-content: center;
+  margin: 0 !important;
+  padding: clamp(6px, 2cqh, 16px) !important;
+}
+.customer-dashboard > .customer-dashboard__balance {
+  flex: 0.6 1 0;
+  min-height: 0;
+  display: grid;
+  align-content: center;
+  margin: 0 !important;
+  padding: clamp(5px, 1.6cqh, 16px) !important;
+}
+.customer-dashboard__balance > div:nth-child(2) { font-size: clamp(19px, 6cqh, 30px) !important; overflow-wrap: anywhere; }
+.customer-dashboard__advance > div:last-child { font-size: clamp(10px, 2.4cqh, 12px) !important; }
+.customer-dashboard > .customer-dashboard__history {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  margin: 0 !important;
+}
+.customer-dashboard__close-history { display: block; margin: 0 0 12px auto; border: 1px solid #D4AF37; border-radius: 10px; padding: 8px 12px; background: #11185A; color: #FDE68A; font-weight: 800; cursor: pointer; }
+
+/* Extra account summaries share the same screen space when present. */
+.customer-dashboard:has(.customer-dashboard__advance, .customer-dashboard__bonus) {
+  --dashboard-coin-size: clamp(40px, 16cqh, 96px);
+  --dashboard-coin-font: clamp(14px, 4.5cqh, 27px);
+}
+.customer-dashboard:has(.customer-dashboard__advance, .customer-dashboard__bonus) .customer-welcome-banner__heading {
+  grid-template-columns: minmax(0, 1fr) clamp(28px, 10cqh, 78px) minmax(0, 1fr);
+}

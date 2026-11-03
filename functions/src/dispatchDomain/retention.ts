@@ -1,6 +1,7 @@
 import type {AppState,Trip} from './domain';
 import {cashSummary} from './rules';
 export const DELIVERY_RETENTION_MS=7*24*60*60*1000;
+function redactRouteDetail(value:unknown):unknown {if(Array.isArray(value))return value.map(redactRouteDetail);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([key])=>!['routeSnapshot','location','lat','lng','phone','alternate','address','contactName','instructions'].includes(key)).map(([key,v])=>[key,redactRouteDetail(v)]));return value;}
 export function closedTimestamp(s:AppState,t:Trip):string|undefined {
  if(t.closedAt&&Number.isFinite(Date.parse(t.closedAt)))return t.closedAt;
  return s.audit.filter(a=>a.entityId===t.id&&a.action==='Shift closed and odometer verified'&&Number.isFinite(Date.parse(a.at))).map(a=>a.at).sort().at(-1);
@@ -26,11 +27,15 @@ export function tripEvidenceIds(s:AppState,tripIds:Set<string>):string[]{
 export function expireDeliveryDetails(s:AppState,tripIds:Set<string>,at:string){
  const jobIds=new Set(s.jobs.filter(j=>!!j.tripId&&tripIds.has(j.tripId)).map(j=>j.id));
  const evidenceIds=tripEvidenceIds(s,tripIds);
- for(const job of s.jobs){const expiredPackages=s.attempts.filter(a=>a.jobId===job.id&&tripIds.has(a.tripId)).reduce((n,a)=>n+a.delivered,0);if(expiredPackages)job.deliveredPackages=(job.deliveredPackages??0)+expiredPackages;if(jobIds.has(job.id)){job.address='';job.phone='';job.description='';job.instructions='';job.purgedAt=at;}}
+ for(const job of s.jobs){const expiredPackages=s.attempts.filter(a=>a.jobId===job.id&&tripIds.has(a.tripId)).reduce((n,a)=>n+a.delivered,0);if(expiredPackages)job.deliveredPackages=(job.deliveredPackages??0)+expiredPackages;if(jobIds.has(job.id)){job.address='';job.phone='';job.description='';job.instructions='';delete job.location;job.purgedAt=at;}}
  s.attempts=s.attempts.filter(a=>!tripIds.has(a.tripId));
- for(const t of s.trips.filter(t=>tripIds.has(t.id))){t.purgedAt=at;t.stops=[];t.openingPhoto=null;t.closingPhoto=null;t.openingNote='';t.endNote='';}
+ for(const t of s.trips.filter(t=>tripIds.has(t.id))){t.purgedAt=at;t.stops=[];delete t.routeSnapshot;t.openingPhoto=null;t.closingPhoto=null;t.openingNote='';t.endNote='';}
+ const reminderIds=new Set(s.arrivalReminders?.filter(r=>tripIds.has(r.tripId)).map(r=>r.id));
+ s.arrivalReminders=s.arrivalReminders?.filter(r=>!tripIds.has(r.tripId));
+ for(const event of s.audit.filter(a=>a.entityType==='reminder'&&reminderIds.has(a.entityId))){event.before='"Reminder detail removed after seven-day retention"';event.after=event.before;}
  for(const c of s.collections.filter(c=>tripIds.has(c.tripId)))c.evidenceId=null;
  for(const f of s.fuels.filter(f=>tripIds.has(f.tripId)))f.receiptId='';
  for(const a of s.audit.filter(a=>a.entityType==='delivery'&&jobIds.has(a.entityId))){a.before='"Delivery detail removed after seven-day retention"';a.after='"Delivery detail removed after seven-day retention"';}
+ for(const event of s.audit.filter(a=>a.entityType==='trip'&&tripIds.has(a.entityId)))for(const key of ['before','after'] as const){try{event[key]=JSON.stringify(redactRouteDetail(JSON.parse(event[key])));}catch{/* Preserve existing non-JSON audit descriptions. */}}
  return {jobIds:[...jobIds],evidenceIds};
 }

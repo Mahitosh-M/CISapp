@@ -1,3 +1,4 @@
+import MedicalSettingsEditor from '../components/MedicalSettingsEditor';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { RefreshCw } from 'lucide-react';
@@ -358,7 +359,8 @@ const Settings = () => {
           />
         </div>
 
-        <SettingsSection title="Gift Settings">
+        <SettingsSection title="Medical Customer Settings"><MedicalSettingsEditor settings={settings} onChange={medicalSettings=>setSettings(current=>({...current,medicalSettings}))}/></SettingsSection>
+        <SettingsSection title="Normal Customer Gift Settings">
           <div style={gridStyle}>
           {CUSTOMER_TIERS.map((tier) => (
             <label key={tier} style={labelStyle}>
@@ -376,7 +378,7 @@ const Settings = () => {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="Credit Days">
+        <SettingsSection title="Normal Customer Credit Days">
           <div style={gridStyle}>
           {CUSTOMER_TIERS.map((tier) => (
             <label key={tier} style={labelStyle}>
@@ -393,7 +395,7 @@ const Settings = () => {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="Payment Buffer Days">
+        <SettingsSection title="Normal Customer Payment Buffer Days">
           <div style={gridStyle}>
           {CUSTOMER_TIERS.map((tier) => (
             <label key={tier} style={labelStyle}>

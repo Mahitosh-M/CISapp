@@ -1,5 +1,8 @@
 import {serverCashBalanceFields} from './cashRounding';
-import {routeCatalog,saveWeeklyRoute} from './dispatchRouteCatalog';
+import {prepareLegacyPublishedRoute} from './dispatchSmartRoutes';
+import {routeCatalog,saveWeeklyRoute,routeHistory,seedWeeklyRoutes,confirmShopLocations,invoiceDeliveryLocation,saveCustomerDeliveryLocation} from './dispatchRouteCatalog';
+import {deliveryLocation as normalizeLocation} from '../../src/utils/route-geo';
+import {routeCostSettings,saveRouteCostSettings,routeProfitability} from './dispatchProfitability';
 import {allowed,resolveAccount,administration,saveRole,saveAccount,removeAccount,saveMaster} from "./dispatchAdmin";
 import {workspace,scopedState,operation,putEvidence,getEvidence} from "./dispatchOperations";
 import {
@@ -209,7 +212,7 @@ async function markDelivery(identity: Identity, p: Data) {
     const details =
       p.required === false
         ? { ...(previous ?? {}), required: false, active: false }
-        : deliveryFields(p);
+        : deliveryFields({...p,...(p.location===undefined&&customer.data()?.deliveryLocation?{location:customer.data()!.deliveryLocation}:{})});
     // Resolve route metadata from the trusted catalogue, never trust client snapshots.
     if (p.required !== false && p.routeId) {
       const route=(await tx.get(db().doc(`dispatchRouteTemplates/${identifier(p.routeId)}`))).data();
@@ -300,6 +303,8 @@ async function publishTrip(identity: Identity, p: Data) {
       vehicleRef = db().doc(`dispatchVehicleLocks/${vehicleId}`);
     const [old, lock] = await Promise.all([tx.get(ref), tx.get(vehicleRef)]);
     const previous = old.data();
+    const canonical = await tx.get(db().doc('dispatchOperationalState/main'));
+    requireValue(!canonical.data()?.state?.trips?.some((trip: Data) => trip.id === id), 'Use the current Trip Planner to amend this operational route');
     requireValue(
       !previous || previous.status === "Released",
       "Started routes cannot be overwritten",
@@ -357,7 +362,7 @@ async function publishTrip(identity: Identity, p: Data) {
     const removedIds = (previous?.stops ?? []).filter((st: Data) => st.jobId && !stops.some((next: Data) => next.jobId === st.jobId)).map((st: Data) => st.jobId);
     const removedRequests = await Promise.all(removedIds.map((jobId: string) => tx.get(db().doc(`dispatchDeliveryRequests/${identifier(jobId)}`))));
     const previousVehicleLock = previous?.vehicleId && previous.vehicleId !== vehicleId ? await tx.get(db().doc(`dispatchVehicleLocks/${identifier(previous.vehicleId)}`)) : null;
-    const value = {
+    const value: Data = {
       id,
       name: text(p.name, "Route name", 120),
       date: date(p.date),
@@ -389,7 +394,10 @@ async function publishTrip(identity: Identity, p: Data) {
       revision: (previous?.revision ?? 0) + 1,
       updatedAt: now(),
     };
-    tx.set(ref, value);
+    value.routeTemplateId=p.routeTemplateId??null;
+    value.amendmentNote=String(p.amendmentNote??'').slice(0,1500);
+    await prepareLegacyPublishedRoute(identity,value,previous,requests.map(r=>({id:r.id,...r.data()})),tx);
+    tx.set(ref, JSON.parse(JSON.stringify(value)));
     for (const removed of removedRequests) if (removed.data()?.tripId === id) tx.update(removed.ref, { tripId: null, assignedDriverIds: [], updatedAt: now() });
     if (previousVehicleLock?.data()?.tripId === id) tx.delete(previousVehicleLock.ref);
     tx.set(vehicleRef, { tripId: id, updatedAt: now() });
@@ -472,6 +480,7 @@ async function pull(identity: Identity) {
       name: String(customer.name ?? ""),
       phone: String(customer.mobile ?? ""),
       area: String(customer.area ?? ""),
+      location: normalizeLocation(customer.deliveryLocation??null),
       invoices: invoiceBalances(ledger.invoices, ledger.payments).filter((i) => !i.shopId || identity.shopIds.includes(i.shopId) || (identity.role === "DRIVER" && assignedInvoiceIds.has(i.id))).map((i) => ({
         id: i.id,
         number: i.invoiceNumber,
@@ -1021,6 +1030,14 @@ export const dispatchBridge = onRequest(
       switch (action) {
         case "routeCatalog": result=await routeCatalog(identity); break;
         case "saveWeeklyRoute": result=await saveWeeklyRoute(identity,payload); break;
+        case "routeHistory": result=await routeHistory(identity,payload); break;
+        case "seedWeeklyRoutes": result=await seedWeeklyRoutes(identity,payload); break;
+        case "confirmShopLocations": result=await confirmShopLocations(identity); break;
+        case "invoiceDeliveryLocation": result=await invoiceDeliveryLocation(identity,payload); break;
+        case "saveCustomerDeliveryLocation": result=await saveCustomerDeliveryLocation(identity,payload); break;
+        case "routeCostSettings": result=await routeCostSettings(identity); break;
+        case "saveRouteCostSettings": result=await saveRouteCostSettings(identity,payload); break;
+        case "routeProfitability": result=await routeProfitability(identity,payload); break;
         case "administration": result=await administration(identity); break;
         case "saveRole": result=await saveRole(identity,payload); break;
         case "saveAccount": result=await saveAccount(identity,payload); break;
@@ -1185,7 +1202,7 @@ export const refreshDispatchCustomer = onDocumentCreated(
             tier: score.tier,
             paymentTerms:
               customer.customerType === "medical"
-                ? "15 day credit"
+                ? getPaymentTermsLabel(score.tier,settings,"medical")
                 : getPaymentTermsLabel(score.tier, settings),
             updatedAt: now(),
           });

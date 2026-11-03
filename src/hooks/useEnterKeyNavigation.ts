@@ -88,7 +88,7 @@ export const useEnterKeyNavigation = () => {
       }
 
       const currentControl = event.target.closest<HTMLElement>(ENTRY_SELECTOR);
-      if (!currentControl || !isFocusable(currentControl)) {
+      if (!currentControl || currentControl.closest('form[data-enter-navigation="native"]') || !isFocusable(currentControl)) {
         return;
       }
 

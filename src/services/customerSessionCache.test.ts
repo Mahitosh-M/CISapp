@@ -1,0 +1,12 @@
+// @vitest-environment jsdom
+import {beforeEach,describe,it,expect,vi} from 'vitest';
+let cache:typeof import('./customerSessionCache');
+beforeEach(async()=>{vi.resetModules();sessionStorage.clear();cache=await import('./customerSessionCache');});
+describe('customer session resource cache',()=>{
+ it('deduplicates concurrent loads and retains results past a normal read-cache TTL',async()=>{const load=vi.fn(async()=>({value:7}));const [a,b]=await Promise.all([cache.readCustomerSessionResource('uid:c:partnership',load),cache.readCustomerSessionResource('uid:c:partnership',load)]);expect(a).toEqual(b);expect(load).toHaveBeenCalledTimes(1);await cache.readCustomerSessionResource('uid:c:partnership',load);expect(load).toHaveBeenCalledTimes(1);});
+ it('survives a page/module reload without another read',async()=>{const load=vi.fn(async()=>({value:7}));await cache.readCustomerSessionResource('uid:c:partnership',load);vi.resetModules();const reloaded=await import('./customerSessionCache');expect(await reloaded.readCustomerSessionResource('uid:c:partnership',load)).toEqual({value:7});expect(load).toHaveBeenCalledTimes(1);});
+ it('isolates accounts and reads again after logout clears storage',async()=>{const a=vi.fn(async()=>({name:'A'})),b=vi.fn(async()=>({name:'B'}));await cache.readCustomerSessionResource('uid-a:c:partnership',a);expect(await cache.readCustomerSessionResource('uid-b:c:partnership',b)).toEqual({name:'B'});cache.clearCustomerSessionCache();expect(sessionStorage.length).toBe(0);await cache.readCustomerSessionResource('uid-a:c:partnership',a);expect(a).toHaveBeenCalledTimes(2);});
+ it('allows retry after an unsuccessful read',async()=>{const load=vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValueOnce(7);await expect(cache.readCustomerSessionResource('uid:c',load)).rejects.toThrow('Offline');expect(await cache.readCustomerSessionResource('uid:c',load)).toBe(7);});
+ it('does not start a queued read after logout',async()=>{const load=vi.fn(async()=>7);const request=cache.readCustomerSessionResource('uid:c',load);cache.clearCustomerSessionCache();await expect(request).rejects.toThrow('session ended');expect(load).not.toHaveBeenCalled();});
+ it('does not repopulate persisted data when an old request completes after logout',async()=>{let resolve!:(value:number)=>void;const request=cache.readCustomerSessionResource('uid:c',()=>new Promise<number>(r=>{resolve=r;}));await Promise.resolve();cache.clearCustomerSessionCache();resolve(7);await request;expect(sessionStorage.length).toBe(0);});
+});

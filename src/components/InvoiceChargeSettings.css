@@ -1,0 +1,49 @@
+.invoice-charge-settings {
+  margin-top: 20px;
+  padding: clamp(16px, 3vw, 24px);
+  border: 1px solid rgba(212, 175, 55, .35);
+  border-radius: 16px;
+  background: var(--role-card-background);
+  color: #fff;
+  color-scheme: dark;
+}
+.invoice-charge-settings h3 { color: #d4af37; }
+.invoice-charge-settings p { color: #d7deea; line-height: 1.6; }
+.invoice-charge-settings label { display: grid; gap: 8px; font-weight: 600; }
+.invoice-charge-settings input[type="date"],
+.invoice-charge-settings select {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #64708b;
+  border-radius: 8px;
+  background: #101b34;
+  color: #fff;
+  font: inherit;
+}
+.invoice-charge-settings option { background: #101b34; color: #fff; }
+.invoice-charge-settings .invoice-charge-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.invoice-charge-settings input[type="checkbox"] { width: 20px; height: 20px; accent-color: #d4af37; flex-shrink: 0; }
+.invoice-charge-settings button {
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 1px solid #d4af37;
+  border-radius: 10px;
+  background: #d4af37;
+  color: #11185a;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.invoice-charge-settings :is(input, select, button):focus-visible { outline: 3px solid #d4af37; outline-offset: 3px; }
+.invoice-charge-settings :disabled { opacity: .6; cursor: wait; }
+.invoice-charge-settings [role="status"] { color: #86efac; }
+.invoice-charge-settings [role="alert"] { color: #fda4af; }

@@ -18,6 +18,7 @@ export const mapCustomerDoc = (
   return {
     id,
     name: String(data.name || ""),
+    deliveryLocation: data.deliveryLocation as Customer['deliveryLocation'],
     mobile: String(data.mobile || ""),
     area: String(data.area || ""),
     customerType: data.customerType === "medical" ? "medical" : "customer",
@@ -102,6 +103,7 @@ export const mapInvoiceDoc = (
       data.pcPolicyVersionAtInvoice === undefined
         ? undefined
         : Math.max(0, Math.round(numberOrZero(data.pcPolicyVersionAtInvoice))),
+    medicalReward: data.medicalReward as Invoice["medicalReward"],
     tierAtInvoice: data.tierAtInvoice as CustomerTier | undefined,
     pcPercentageAtInvoice:
       data.pcPercentageAtInvoice === undefined

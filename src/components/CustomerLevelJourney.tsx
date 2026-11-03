@@ -56,10 +56,11 @@ export function PartnerLevelSteps({ level, journey }: { level: PartnerLevelTile;
   );
 }
 
-export default function CustomerLevelJourney({ journey, loading, onRefresh, hideCreditDays = false }: {
+export default function CustomerLevelJourney({ journey, loading, onRefresh, hideCreditDays = false, section = 'all' }: {
   journey?: PartnerLevelJourney;
   loading: boolean;
-  onRefresh: () => void;
+  onRefresh?: () => void;
+  section?: 'all' | 'growth' | 'benefits';
   hideCreditDays?: boolean;
 }) {
   const [selectedTier, setSelectedTier] = useState<string>();
@@ -80,12 +81,13 @@ export default function CustomerLevelJourney({ journey, loading, onRefresh, hide
   );
   return (
     <section className="partner-journey" aria-label="Your partner levels" aria-busy={loading}>
+      {section!=='benefits' && <>
       <header className="partner-journey-heading">
         <div><span className="partner-eyebrow"><Sparkles size={14} aria-hidden="true" /> YOUR NEXT MILESTONE</span>
           <h2>Grow your partnership</h2></div>
-        <button className="partner-refresh" type="button" aria-label="Refresh purchases and payments" title="Refresh purchases and payments" onClick={onRefresh} disabled={loading}>
+        {onRefresh && <button className="partner-refresh" type="button" aria-label="Refresh purchases and payments" title="Refresh purchases and payments" onClick={onRefresh} disabled={loading}>
           <RefreshCw size={18} aria-hidden="true" className={loading ? 'partner-refreshing' : ''} />
-        </button>
+        </button>}
       </header>
       {(journey.dueNow > 0 || journey.undatedBalance > 0) && <div className={`partner-payment-note ${journey.dueNow > 0 ? 'has-due' : journey.undatedBalance > 0 ? 'needs-check' : 'is-clear'}`}>
         <Wallet size={24} aria-hidden="true" />
@@ -143,7 +145,8 @@ export default function CustomerLevelJourney({ journey, loading, onRefresh, hide
           );
         })}
       </div>
-      <section className="partner-benefits-poster" aria-labelledby="partner-benefits-title">
+      </>}
+      {section!=='growth' && <section className="partner-benefits-poster" aria-labelledby="partner-benefits-title">
         <div className="partner-poster-heading"><Gift size={28} aria-hidden="true" /><div><span className="partner-eyebrow">MORE TO LOOK FORWARD TO</span><h2 id="partner-benefits-title">Benefits at every level</h2></div></div>
         <div className="partner-benefits-grid">{journey.levels.map((level) => {
           const { icon: Icon, accent, label } = visual[level.tier];
@@ -163,7 +166,7 @@ export default function CustomerLevelJourney({ journey, loading, onRefresh, hide
             </ul>
           </article>;
         })}</div>
-      </section>
+      </section>}
     </section>
   );
 }

@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
@@ -58,6 +58,7 @@ test(
     await db
       .doc("customers/customer-a")
       .set({
+        deliveryLocation:{lat:15.96,lng:76.65,confirmed:true},
         name: "Fictional pharmacy",
         mobile: "0000000000",
         area: "Unverified area",
@@ -177,7 +178,7 @@ test(
       (await api.pull({ ...driver, actorId: "unassigned" })).requests.length,
       0,
     );
-    const routeBase = {id:'trip-a',name:'Revised route',date:'2026-10-19',startShopId:'SHOP_A',endShopId:'SHOP_S',vehicleId:'van-a',primaryDriverId:'driver-a',status:'Released',openingAdvance:10000};
+    const routeBase = {id:'trip-a',amendmentNote:'Reviewed changed customer assignment',name:'Revised route',date:'2026-10-19',startShopId:'SHOP_A',endShopId:'SHOP_S',vehicleId:'van-a',primaryDriverId:'driver-a',status:'Released',openingAdvance:10000};
     await api.publishTrip(manager,{...routeBase,stops:[{id:'visit-a',kind:'Collection',customerId:'customer-a',jobId:null}]});
     assert.equal((await db.doc('dispatchDeliveryRequests/invoice-a').get()).data()?.tripId,null,'removing a released stop must release its assignment');
     await api.publishTrip(manager,{...routeBase,stops:[{id:'stop-a',kind:'Delivery',customerId:'customer-a',jobId:'invoice-a'}]});
@@ -341,7 +342,7 @@ test(
     assert.deepEqual(await api.approveCollection(manager, approval), first);
     assert.equal((await db.collection("payments").get()).size, 2);
     // Reuse the released vehicle and verify source PC and medical-credit helpers.
-    await db.doc('customers/customer-b').set({name:'Fictional medical shop',mobile:'0000000000',area:'Area',tier:'Tier 4',customerType:'medical',previousOutstandingAmount:0,advanceBalance:0,totalOutstandingAmount:1000,invoiceOutstandingAmount:1000,openingBalanceOutstandingAmount:0});
+    await db.doc('customers/customer-b').set({deliveryLocation:{lat:15.96,lng:76.66,confirmed:true},name:'Fictional medical shop',mobile:'0000000000',area:'Area',tier:'Tier 4',customerType:'medical',previousOutstandingAmount:0,advanceBalance:0,totalOutstandingAmount:1000,invoiceOutstandingAmount:1000,openingBalanceOutstandingAmount:0});
     await db.doc('invoices/invoice-b').set({...source,customerId:'customer-b',invoiceNumber:'A-002',salesAmount:1000,totalSales:1000,costAmount:500,totalCost:500,totalProfit:500,pcPolicyVersionAtInvoice:1,pcPercentageAtInvoice:5,creditDaysAtInvoice:15,bufferDaysAtInvoice:2,savedDueDate:'2026-11-03',dueDate:'2026-11-03',finalPcCutoffDate:'2026-11-05'});
     await api.markDelivery(manager,{...details,invoiceId:'invoice-b'});
     await api.publishTrip(manager,{id:'trip-b',name:'Next route',date:'2026-10-19',startShopId:'SHOP_A',endShopId:'SHOP_S',vehicleId:'van-a',primaryDriverId:'driver-a',status:'Released',openingAdvance:0,stops:[{id:'stop-b',kind:'Delivery',customerId:'customer-b',jobId:'invoice-b'}]});
@@ -367,7 +368,7 @@ test(
     await assert.rejects(()=>adm.saveMaster(driver,{kind:'vehicles',id:'van-live',value:{}}),/Admin/);
     await adm.saveMaster(admin,{kind:'vehicles',id:'van-live',value:{registration:'TEST-ONLY',type:'Van',fuelType:'Diesel',baseline:100,expectedMileage:15,homeShopId:'SHOP_A',active:true}});
     await db.doc('invoices/invoice-c').set({...source,invoiceNumber:'A-003'});
-    await db.doc('dispatchRouteTemplates/integration-route').set({id:'integration-route',name:'Route 1',from:'A',to:'B',shopIds:['SHOP_A'],stops:[{id:'integration-stop',name:'Middle road'}],days:[1],active:true,revision:1});
+    await db.doc('dispatchRouteTemplates/integration-route').set({id:'integration-route',name:'Route 1',from:'A',to:'B',shopIds:['SHOP_A'],stops:[{id:'integration-stop',name:'Middle road',lat:15.96,lng:76.65},{id:'integration-end',name:'Destination shop',lat:15.7555003,lng:76.7537181}],days:[1],active:true,revision:1});
     await api.markDelivery(manager,{...details,invoiceId:'invoice-c',routeId:'integration-route',routeStopId:'integration-stop'});
     let seq=0;
     async function command(who:any,c:any,id='live-op-'+(++seq)){return ops.operation(who,{id,actorId:who.actorId,command:c},await api.pull(who));}

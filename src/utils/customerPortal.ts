@@ -123,7 +123,13 @@ const calculateInvoiceApcInfoV1 = (
   const fullPaymentDate = getInvoiceFullPaymentDate(invoice, payments);
   const pcPercentage = invoice.pcPercentageAtInvoice
     ?? (invoiceTier ? getGiftPercentageForTier(invoiceTier, settings) : 0);
-  const fullInvoicePc = Math.max(0, invoice.totalProfit) * (Math.max(0, pcPercentage) / 100);
+  const normalInvoicePc = Math.max(0, invoice.totalProfit) * (Math.max(0, pcPercentage) / 100);
+  // A single reward pool feeds the original payment-retention and settlement formula.
+  // Saved proposals never create a separate ledger credit. Legacy invoices stay unchanged.
+  const fullInvoicePc = invoice.medicalReward
+    ? Math.max(invoice.medicalReward.normalRewardValue,
+        invoice.medicalReward.manualTroikaaCoins)
+    : normalInvoicePc;
   const expectedApc = Math.max(0, Math.round(fullInvoicePc));
   const isFullyPaid = Boolean(fullPaymentDate);
   const isDeadlineValid = Boolean(deadline);
