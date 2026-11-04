@@ -422,8 +422,10 @@ test(
     // A driver authorised at the departure shop still receives each explicitly assigned cross-shop job.
     await db.doc('invoices/cross-shop-assigned').set({...source,invoiceNumber:'S-ASSIGNED',shopId:'SHOP_S'});
     await api.markDelivery(admin,{...details,invoiceId:'cross-shop-assigned'});
+    await db.doc('invoices/cross-shop-second').set({...source,invoiceNumber:'S-SECOND',shopId:'SHOP_S'});
+    await api.markDelivery(admin,{...details,invoiceId:'cross-shop-second'});
     await adm.saveMaster(admin,{kind:'vehicles',id:'van-cross',value:{registration:'TEST-CROSS',type:'Van',fuelType:'Diesel',baseline:100,expectedMileage:15,homeShopId:'SHOP_A',active:true}});
-    const cross={...t,routeTemplateId:undefined,id:'cross-shop-trip',vehicleId:'van-cross',stops:[{id:'cross-delivery',customerId:'cis-customer:customer-a',jobId:'cis-job:cross-shop-assigned',kind:'Delivery',completed:false},{id:'cross-collection',customerId:'cis-customer:customer-a',jobId:null,kind:'Collection',completed:false}]};
+    const cross={...t,routeTemplateId:undefined,id:'cross-shop-trip',vehicleId:'van-cross',stops:[{id:'cross-delivery',customerId:'cis-customer:customer-a',jobId:'cis-job:cross-shop-assigned',kind:'Delivery',completed:false},{id:'cross-second',customerId:'cis-customer:customer-a',jobId:'cis-job:cross-shop-second',kind:'Delivery',completed:false},{id:'cross-collection',customerId:'cis-customer:customer-a',jobId:null,kind:'Collection',completed:false}]};
     await command(admin,{type:'saveTrip',value:cross});
     await command(admin,{type:'routeAction',id:cross.id,action:'Release',note:'Cross-shop assigned route'});
     let driverCloud=await api.pull(driver);
@@ -434,11 +436,23 @@ test(
     assert.equal(driverState.invoices.some(r=>r.id==='cis-invoice:other-shop-private'),false);
     assert.equal(ops.scopedState({...driver,actorId:'unassigned'},await ops.workspace(driver,driverCloud)).jobs.some(j=>j.id==='cis-job:cross-shop-assigned'),false);
     await ops.putEvidence(driver,{id:'cross-proof',tripId:cross.id,dataUrl:pixel,name:'Cross-shop test evidence'});
-    await command(driver,{type:'startTrip',id:cross.id,opening:100,photo:'cross-proof',note:''});
-    await command(driver,{type:'load',id:cross.id},'cross-load-once');
-    await command(driver,{type:'load',id:cross.id},'cross-load-once');
+    await command(driver,{type:'startTrip',id:cross.id,opening:100,photo:'cross-proof',note:'',perDeliveryLoading:true});
+    await assert.rejects(()=>command(driver,{type:'load',id:cross.id}),/separately/);
+    await command(driver,{type:'loadDelivery',tripId:cross.id,stopId:'cross-delivery'},'cross-load-once');
+    await command(driver,{type:'loadDelivery',tripId:cross.id,stopId:'cross-delivery'},'cross-load-once');
     driverCloud=await api.pull(driver);driverState=ops.scopedState(driver,await ops.workspace(driver,driverCloud));
-    assert.equal(driverState.trips.find(x=>x.id===cross.id)?.loaded,true);
+    assert.equal(driverState.trips.find(x=>x.id===cross.id)?.loaded,false);
+    assert.equal(driverState.jobs.find(j=>j.id==='cis-job:cross-shop-second')?.status,'Assigned');
+    assert.equal(driverState.trips.find(t=>t.id===cross.id)?.stops.find(st=>st.id==='cross-delivery')?.loadedBy,driver.actorId);
+    assert.equal(driverState.audit.filter(a=>a.entityId==='cross-delivery'&&a.action==='Delivery packages loaded').length,1);
+    await assert.rejects(()=>command(driver,{type:'delivery',id:'cis-job:cross-shop-assigned',outcome:'Failed',delivered:0,reason:'Customer closed',note:'',evidenceId:null}),/arrival/);
+    await command(driver,{type:'arrive',tripId:cross.id,stopId:'cross-delivery'});
+    await command(driver,{type:'delivery',id:'cis-job:cross-shop-assigned',outcome:'Failed',delivered:0,reason:'Customer closed',note:'',evidenceId:null});
+    await assert.rejects(()=>command(driver,{type:'arrive',tripId:cross.id,stopId:'cross-second'}),/loading/);
+    await command(driver,{type:'loadDelivery',tripId:cross.id,stopId:'cross-second'});
+    await command(driver,{type:'arrive',tripId:cross.id,stopId:'cross-second'});
+    const after=ops.scopedState(driver,await ops.workspace(driver,await api.pull(driver)));
+    assert.ok(after.trips.find(t=>t.id===cross.id)?.stops.find(st=>st.id==='cross-second')?.arrivedAt);
     assert.equal(driverState.jobs.find(j=>j.id==='cis-job:cross-shop-assigned')?.status,'Out for delivery');
 
 

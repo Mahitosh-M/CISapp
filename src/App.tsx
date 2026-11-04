@@ -7,6 +7,7 @@ import SplashScreen from './components/SplashScreen';
 import { useAuth } from './contexts/AuthContext';
 import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
+import { useManualNumberInputs } from './hooks/useManualNumberInputs';
 
 const Customers = lazy(() => import('./pages/Customers'));
 const Collections = lazy(() => import('./pages/Collections'));
@@ -51,6 +52,7 @@ const RootRouteShell = () => {
 const App = () => {
   useEnterKeyNavigation();
   useNumberInputZeroSelection();
+  useManualNumberInputs();
   const { loading } = useAuth();
   const [minimumSplashComplete, setMinimumSplashComplete] = useState(false);
 

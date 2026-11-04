@@ -1,3 +1,4 @@
+import { getPortalCustomerType, isPromotionVisibleToCustomer, validatePromotionAudience, type PortalCustomerType } from '../utils/promotionAudience';
 import {buildMedicalReward} from '../utils/medicalReward';
 import {postMedicalReward} from './medicalRewardService';
 import {invoiceReceivableAmount} from '../utils/invoiceCharges';
@@ -834,6 +835,7 @@ const buildPaymentQueryConstraints = (options?: CustomerScopedQueryOptions) => {
 
 const mapOfferDoc = (id: string, data: Record<string, unknown>): Offer => ({
   id,
+  customerAudience: data.customerAudience as Offer['customerAudience'],
   title: String(data.title || ''),
   description: data.description ? String(data.description) : '',
   imageUrl: String(data.imageUrl || ''),
@@ -906,6 +908,7 @@ const mapBusinessMonthlySnapshotDoc = (id: string, data: Record<string, unknown>
 
 const mapRewardItemDoc = (id: string, data: Record<string, unknown>): RewardItem => ({
   id,
+  customerAudience: data.customerAudience as RewardItem['customerAudience'],
   name: String(data.name || ''),
   requiredPoints: numberOrZero(data.requiredPoints),
   levelRequired: (data.levelRequired as RewardItem['levelRequired']) || 'Active Partner',
@@ -1094,6 +1097,7 @@ const getCappedBonusAmount = (configuredAmount: number, basePcEarned: number, al
 };
 
 const sanitizeRewardPayload = (reward: RewardFormData): RewardFormData => ({
+  customerAudience: validatePromotionAudience(reward.customerAudience),
   name: reward.name.trim(),
   requiredPoints: Math.max(0, Math.round(numberOrZero(reward.requiredPoints))),
   levelRequired: reward.levelRequired,
@@ -1104,6 +1108,7 @@ const sanitizeRewardPayload = (reward: RewardFormData): RewardFormData => ({
 });
 
 const sanitizeOfferPayload = (offer: OfferFormData): OfferFormData => ({
+  customerAudience: validatePromotionAudience(offer.customerAudience),
   title: offer.title.trim(),
   description: offer.description.trim(),
   imageUrl: offer.imageUrl.trim(),
@@ -2782,7 +2787,7 @@ export const getOffers = async () => {
   });
 };
 
-export const getActiveOffers = async () => {
+export const getActiveOffers = async (customerType: PortalCustomerType = 'customer') => {
   const offers = await getCached(cacheKey(OFFERS, { isActive: true }), async () => {
     // Free-tier safety: customers only read active offer docs. Sorting stays local so this
     // customer portal query does not require a composite Firestore index.
@@ -2792,7 +2797,7 @@ export const getActiveOffers = async () => {
   });
 
   // Inactive offer filtering: customers only receive active offers inside any valid date window.
-  return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer, getTodayDateString()))).slice(0, ACTIVE_OFFER_LIMIT);
+  return sortOffersByLatest(offers.filter((offer) => isOfferCurrentlyActive(offer, getTodayDateString()) && isPromotionVisibleToCustomer(offer.customerAudience, customerType))).slice(0, ACTIVE_OFFER_LIMIT);
 };
 
 export const createOffer = async (offer: OfferFormData, auditUser?: AuditUser) => {
@@ -3446,7 +3451,7 @@ export const getRewardItems = async () => {
   });
 };
 
-export const getActiveRewardItems = async () => {
+export const getActiveRewardItems = async (customerType: PortalCustomerType = 'customer') => {
   const rewards = await getCached(cacheKey(REWARD_ITEMS, { isActive: true }), async () => {
     const rewardsQuery = query(collection(db, REWARD_ITEMS), where('isActive', '==', true));
     const snapshot = await getDocs(rewardsQuery);
@@ -3454,23 +3459,25 @@ export const getActiveRewardItems = async () => {
   });
 
   return rewards
+    .filter(reward => isPromotionVisibleToCustomer(reward.customerAudience, customerType))
     .sort((left, right) => left.requiredPoints - right.requiredPoints)
     .slice(0, ACTIVE_REWARD_LIMIT);
 };
 
 export const getAvailableRewardsForCustomer = async (customerId: string, month = getCurrentMonthKey()) => {
-  const [stats, rewards] = await Promise.all([
+  const [stats, rewards, customer] = await Promise.all([
     getMonthlyCustomerStats(customerId, month),
-    getDocs(query(collection(db, REWARD_ITEMS), where('isActive', '==', true)))
+    getDocs(query(collection(db, REWARD_ITEMS), where('isActive', '==', true))),
+    getCustomerById(customerId)
   ]);
   const activeRewards = rewards.docs.map((rewardDoc) => mapRewardItemDoc(rewardDoc.id, rewardDoc.data()));
 
-  if (!stats) return { stats, rewards: [] };
+  if (!stats || !customer) return { stats, rewards: [] };
 
   return {
     stats,
     rewards: activeRewards
-      .filter((reward) => reward.requiredPoints <= stats.pointsEarned && canViewRewardAtLevel(stats.currentLevel, reward.levelRequired))
+      .filter((reward) => isPromotionVisibleToCustomer(reward.customerAudience, getPortalCustomerType(customer)) && reward.requiredPoints <= stats.pointsEarned && canViewRewardAtLevel(stats.currentLevel, reward.levelRequired))
       .sort((left, right) => left.requiredPoints - right.requiredPoints)
       .slice(0, ACTIVE_REWARD_LIMIT)
   };
@@ -3528,6 +3535,7 @@ export const getRedemptionRequestsForCustomer = async (customerId: string, limit
 };
 
 export const createRedemptionRequest = async (customer: Customer, reward: RewardItem) => {
+  if (!isPromotionVisibleToCustomer(reward.customerAudience, getPortalCustomerType(customer))) throw new Error('This reward is not available for this customer type.');
   const requestId = `${customer.id}_${reward.id}`;
   const requestRef = doc(db, REDEMPTION_REQUESTS, requestId);
   const timestamp = nowIso();

@@ -5,6 +5,8 @@ import SectionHeader from '../components/SectionHeader';
 import SectionTileNav from '../components/SectionTileNav';
 import ExternalImage from '../components/ExternalImage';
 import TierBadge from '../components/TierBadge';
+import PromotionAudienceSelect from '../components/PromotionAudienceSelect';
+import { PROMOTION_AUDIENCE_LABELS } from '../utils/promotionAudience';
 import { useAuth } from '../contexts/AuthContext';
 import {
   createOffer,
@@ -32,6 +34,7 @@ import { getOfferDateRangeLabel, isOfferCurrentlyActive, sortOffersByLatest } fr
 import { DEFAULT_SETTINGS, mergeWithDefaultSettings, validateAppSettings } from '../utils/settings';
 
 const emptyRewardForm: RewardFormData = {
+  customerAudience: 'both',
   name: '',
   requiredPoints: 0,
   levelRequired: 'Active Partner',
@@ -42,6 +45,7 @@ const emptyRewardForm: RewardFormData = {
 };
 
 const emptyOfferForm: OfferFormData = {
+  customerAudience: 'both',
   title: '',
   description: '',
   imageUrl: '',
@@ -185,6 +189,7 @@ const Loyalty = () => {
   const editReward = (reward: RewardItem) => {
     setEditingRewardId(reward.id);
     setRewardForm({
+      customerAudience: reward.customerAudience ?? 'both',
       name: reward.name,
       requiredPoints: reward.requiredPoints,
       levelRequired: reward.levelRequired,
@@ -271,6 +276,7 @@ const Loyalty = () => {
   const editOffer = (offer: Offer) => {
     setEditingOfferId(offer.id);
     setOfferForm({
+      customerAudience: offer.customerAudience ?? 'both',
       title: offer.title,
       description: offer.description || '',
       imageUrl: offer.imageUrl || '',
@@ -293,6 +299,7 @@ const Loyalty = () => {
       await updateOfferRecord(
         offer.id,
         {
+          customerAudience: offer.customerAudience ?? 'both',
           title: offer.title,
           description: offer.description || '',
           imageUrl: offer.imageUrl || '',
@@ -486,6 +493,7 @@ const Loyalty = () => {
         {isAdmin ? (
           <form onSubmit={saveOffer}>
             <div style={gridStyle}>
+              <PromotionAudienceSelect style={inputStyle} value={offerForm.customerAudience} onChange={customerAudience => setOfferForm(current => ({ ...current, customerAudience }))} />
               <label style={{ fontWeight: 800 }}>
                 Title
                 <input style={inputStyle} value={offerForm.title} onChange={(event) => handleOfferFieldChange('title', event.target.value)} />
@@ -577,10 +585,10 @@ const Loyalty = () => {
         <div style={{ color: '#D4AF37', fontWeight: 900, margin: '18px 0 12px' }}>Offers</div>
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={{ ...tableStyle, minWidth: 940 }}>
-            <thead><tr>{['Title', 'Description', 'Level', 'Validity', 'Status', 'Customer Visible', 'Image', 'Actions'].map((header) => <th key={header} style={thStyle}>{header}</th>)}</tr></thead>
+            <thead><tr>{['Title', 'Description', 'Level', 'Visible to', 'Validity', 'Status', 'Portal Visible', 'Image', 'Actions'].map((header) => <th key={header} style={thStyle}>{header}</th>)}</tr></thead>
             <tbody>
               {sortedOffers.length === 0 ? (
-                <tr><td style={tdStyle} colSpan={8}>No offers created yet.</td></tr>
+                <tr><td style={tdStyle} colSpan={9}>No offers created yet.</td></tr>
               ) : sortedOffers.map((offer) => {
                 const visibleToCustomers = isOfferCurrentlyActive(offer);
 
@@ -589,6 +597,7 @@ const Loyalty = () => {
                     <td style={tdStyle}><strong>{offer.title}</strong></td>
                     <td style={tdStyle}>{offer.description || '-'}</td>
                     <td style={tdStyle}>{offer.levelRequired || 'Active Partner'}</td>
+                    <td style={tdStyle}>{PROMOTION_AUDIENCE_LABELS[offer.customerAudience ?? 'both']}</td>
                     <td style={tdStyle}>{getOfferDateRangeLabel(offer)}</td>
                     <td style={{ ...tdStyle, color: offer.isActive ? '#1B7F3A' : '#B42318', fontWeight: 900 }}>{offer.isActive ? 'Active' : 'Inactive'}</td>
                     <td style={{ ...tdStyle, color: visibleToCustomers ? '#1B7F3A' : '#D7DEEA', fontWeight: 900 }}>
@@ -623,6 +632,7 @@ const Loyalty = () => {
         {isAdmin ? (
           <>
             <div style={gridStyle}>
+              <PromotionAudienceSelect style={inputStyle} value={rewardForm.customerAudience} onChange={customerAudience => setRewardForm(current => ({ ...current, customerAudience }))} />
               <label style={{ fontWeight: 800 }}>Reward Name<input style={inputStyle} value={rewardForm.name} onChange={(event) => setRewardForm((current) => ({ ...current, name: event.target.value }))} /></label>
               <label style={{ fontWeight: 800 }}>Required Points<input style={inputStyle} type="number" min="0" value={rewardForm.requiredPoints} onChange={(event) => setRewardForm((current) => ({ ...current, requiredPoints: Number(event.target.value) || 0 }))} /></label>
               <label style={{ fontWeight: 800 }}>
@@ -678,10 +688,10 @@ const Loyalty = () => {
         ) : null}
         <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
           <table style={tableStyle}>
-            <thead><tr>{['Actions', 'Image', 'Reward', 'Points', 'Level', 'Status', 'Description'].map((header) => <th key={header} style={thStyle}>{header}</th>)}</tr></thead>
+            <thead><tr>{['Actions', 'Image', 'Reward', 'Points', 'Level', 'Visible to', 'Status', 'Description'].map((header) => <th key={header} style={thStyle}>{header}</th>)}</tr></thead>
             <tbody>
               {sortedRewards.length === 0 ? (
-                <tr><td style={tdStyle} colSpan={7}>No rewards created yet.</td></tr>
+                <tr><td style={tdStyle} colSpan={8}>No rewards created yet.</td></tr>
               ) : sortedRewards.map((reward) => (
                 <tr key={reward.id}>
                   <td style={tdStyle}>
@@ -700,6 +710,7 @@ const Loyalty = () => {
                   <td style={tdStyle}>{reward.name}</td>
                   <td style={tdStyle}>{reward.requiredPoints}</td>
                   <td style={tdStyle}>{reward.levelRequired}</td>
+                  <td style={tdStyle}>{PROMOTION_AUDIENCE_LABELS[reward.customerAudience ?? 'both']}</td>
                   <td style={tdStyle}>{reward.isActive ? 'Active' : 'Inactive'}</td>
                   <td style={tdStyle}>{reward.description || '-'}</td>
                 </tr>
