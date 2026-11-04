@@ -6,6 +6,7 @@ import {buildMedicalLedger,getMedicalLedgerMonths} from '../../utils/medicalLedg
 import {getLedgerPaymentParts} from '../../utils/customerLedger';
 import {formatDate,formatNumber} from '../../utils/formatters';
 import {isOpeningBalanceInvoice} from '../../utils/openingBalance';
+import {getShopCode} from '../../utils/shops';
 import './CustomerLedger.css';
 const formatLedgerMoney=(amount:number)=>'₹'+formatNumber(amount);
 export default function CustomerLedger(){
@@ -28,7 +29,9 @@ export default function CustomerLedger(){
    {displayedRows.length?displayedRows.map(row=>{
     const parts=getLedgerPaymentParts(row),discount=parts.reduce((total,part)=>total+(part.cashDiscount||0),0),advance=parts.reduce((total,part)=>total+(part.advanceCreatedAmount||0),0);
     const isAdvance=row.payment?.paymentKind==='advance_application';
-    return <tr key={row.id}><td>{formatDate(row.date)}</td><td>{row.kind==='invoice'?row.charge?'Overdue charge':row.invoice&&isOpeningBalanceInvoice(row.invoice)?'Opening balance':'Invoice':isAdvance?'Advance applied':'Payment'}{row.payment?.mode&&<small>{row.payment.mode}</small>}{discount>0&&<small>Cash discount {formatLedgerMoney(discount)}</small>}{advance>0&&<small>Advance credit {formatLedgerMoney(advance)}</small>}</td><td className={row.kind==='invoice'?'medical-ledger-invoice':'medical-ledger-payment'}>{formatLedgerMoney(row.kind==='invoice'?row.invoiceAmount:isAdvance?row.paymentAmount:row.paymentReceived)}</td><td className="medical-ledger-running">{formatLedgerMoney(row.runningBalance)}</td></tr>;
+    const shopCode=getShopCode(row.invoice?.shopId);
+    const invoiceLabel=customer.customerType!=='medical'&&shopCode?'Invoice-'+shopCode:'Invoice';
+    return <tr key={row.id}><td>{formatDate(row.date)}</td><td>{row.kind==='invoice'?row.charge?'Overdue charge':row.invoice&&isOpeningBalanceInvoice(row.invoice)?'Opening balance':invoiceLabel:isAdvance?'Advance applied':'Payment'}{row.payment?.mode&&<small>{row.payment.mode}</small>}{discount>0&&<small>Cash discount {formatLedgerMoney(discount)}</small>}{advance>0&&<small>Advance credit {formatLedgerMoney(advance)}</small>}</td><td className={row.kind==='invoice'?'medical-ledger-invoice':'medical-ledger-payment'}>{formatLedgerMoney(row.kind==='invoice'?row.invoiceAmount:isAdvance?row.paymentAmount:row.paymentReceived)}</td><td className="medical-ledger-running">{formatLedgerMoney(row.runningBalance)}</td></tr>;
    }):<tr><td colSpan={4}>No records this month.</td></tr>}
   </tbody></table></div>
   <section className="ledger-closing" aria-label="Closing balance"><h2>Closing</h2><strong>{formatLedgerMoney(ledger.closingBalance)}</strong></section>
