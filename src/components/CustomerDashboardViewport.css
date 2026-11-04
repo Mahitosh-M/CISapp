@@ -42,7 +42,7 @@
   overflow: visible;
 }
 .customer-dashboard .customer-welcome-banner__heading { grid-template-columns: minmax(0, 1fr) clamp(32px, 16cqh, 100px) minmax(0, 1fr); }
-.customer-dashboard .customer-welcome-banner__name { font-size: clamp(10px, 2.8cqh, 13px); }
+.customer-dashboard .customer-welcome-banner__name { font-size: clamp(14px, 3.6cqh, 18px); }
 .customer-dashboard > .customer-dashboard__coins {
   flex: 1.15 1 0;
   min-height: 0;
