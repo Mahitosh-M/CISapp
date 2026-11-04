@@ -23,7 +23,7 @@ export default function CustomerLedger(){
   <div className="medical-ledger-months" role="group" aria-label="Ledger month">{months.map(month=><button key={month.id} type="button" aria-pressed={selectedMonth===month.id} onClick={()=>setSelectedMonth(month.id)}>{month.label}</button>)}</div>
   <h2 className="medical-ledger-month">{monthLabel}</h2>
   <p className="medical-ledger-counts">{ledger.invoiceCount} {ledger.invoiceCount===1?'invoice':'invoices'} · {ledger.paymentCount} {ledger.paymentCount===1?'payment':'payments'}</p>
-  <div className="medical-ledger-table"><table><caption>{monthLabel} records</caption><thead><tr><th>Date</th><th>Record</th><th>Amount</th><th>Current amount</th></tr></thead><tbody>
+  <div className="medical-ledger-table"><table><colgroup><col className="ledger-date-column"/><col className="ledger-record-column"/><col className="ledger-money-column"/><col className="ledger-money-column"/></colgroup><caption>{monthLabel} records</caption><thead><tr><th>Date</th><th>Record</th><th>Amount</th><th>Balance</th></tr></thead><tbody>
    <tr className="medical-ledger-balance"><th colSpan={3} scope="row">Opening</th><td className="medical-ledger-running ledger-opening-value">{formatLedgerMoney(ledger.openingBalance)}</td></tr>
    {displayedRows.length?displayedRows.map(row=>{
     const parts=getLedgerPaymentParts(row),discount=parts.reduce((total,part)=>total+(part.cashDiscount||0),0),advance=parts.reduce((total,part)=>total+(part.advanceCreatedAmount||0),0);

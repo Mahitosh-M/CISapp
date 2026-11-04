@@ -9,8 +9,8 @@ export default function MedicalInvoiceBalanceWheel({invoiceAmount,pendingAmount,
  const pendingPercentage=total>0?Math.min(100,pending/total*100):0;
  return <div className="medical-invoice-circle medical-invoice-balance-wheel" role="img" aria-label={'Pending '+formatWheelMoney(pending)+'. Paid '+formatWheelMoney(paid)+'. Invoice amount '+formatWheelMoney(total)} style={{background:total>0?'conic-gradient(#FF003D 0% '+pendingPercentage+'%, #00E676 '+pendingPercentage+'% 100%)':'#64748B'}}>
   <div className="medical-invoice-circle-center medical-invoice-balance-center">
-   <strong className="medical-invoice-pending-value">{formatWheelMoney(pending)}</strong>
    <span className="medical-invoice-paid-value">{formatWheelMoney(paid)}</span>
+   <strong className="medical-invoice-pending-value">{formatWheelMoney(pending)}</strong>
    <small className="medical-invoice-total-value">{formatWheelMoney(total)}</small>
   </div>
  </div>;

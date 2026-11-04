@@ -10,9 +10,10 @@ import { formatApc } from '../../utils/loyalty';
 import { getBusinessInvoices, getInvoiceDisplayNumber, isOpeningBalanceInvoice } from '../../utils/openingBalance';
 import { getInvoicePaymentEffect } from '../../utils/paymentUtils';
 import { getShopName } from '../../utils/shops';
-import type { Invoice, Payment } from '../../types';
+import type { Invoice, Payment, LoyaltyLedgerEntry } from '../../types';
+import {getCustomerPcRedemptionEntries} from '../../services/firestoreService';
 
-type PcHistoryFilter = 'all' | 'purchase' | 'bonus' | 'overdue';
+type PcHistoryFilter = 'all' | 'purchase' | 'bonus' | 'overdue' | 'redemption';
 
 interface PcHistoryItem {
   id: string;
@@ -24,12 +25,32 @@ interface PcHistoryItem {
 }
 
 const CustomerDashboard = () => {
-  const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests, refreshPcBalance } = useCustomerPortalContext();
+  const { customer, invoices, payments, settings, invoiceViews, apcSummary, bonusPcRequests, overduePcRequests, redemptionRequests, refreshPcBalance } = useCustomerPortalContext();
   const previousPcBalanceRef = useRef<number | null>(null);
   const bonusNoticeKeyRef = useRef('');
   const bonusNoticeVisibleRef = useRef(false);
   const [showPcHistory, setShowPcHistory] = useState(false);
   const [pcHistoryFilter, setPcHistoryFilter] = useState<PcHistoryFilter>('all');
+  const [redemptionHistory, setRedemptionHistory] = useState<{customerId:string;month:string;entries:LoyaltyLedgerEntry[]}>();
+  const [pcHistoryLoading, setPcHistoryLoading] = useState(false);
+  const [pcHistoryError, setPcHistoryError] = useState('');
+  const [pcHistoryRetry, setPcHistoryRetry] = useState(0);
+  const pcHistoryMonth = getTodayDateString().slice(0, 7);
+  useEffect(() => {
+    if (!showPcHistory || !customer?.id) return;
+    let active = true;
+    const customerId = customer.id;
+    setPcHistoryLoading(true);
+    setPcHistoryError('');
+    void getCustomerPcRedemptionEntries(customerId, pcHistoryMonth)
+      .then(entries => { if (active) setRedemptionHistory({customerId,month:pcHistoryMonth,entries}); })
+      .catch(() => { if (active) setPcHistoryError('Unable to load redeemed coins.'); })
+      .finally(() => { if (active) setPcHistoryLoading(false); });
+    return () => { active = false; };
+  }, [showPcHistory, customer?.id, pcHistoryMonth, pcHistoryRetry]);
+  const monthlyRedemptions = redemptionHistory?.customerId === customer?.id && redemptionHistory?.month === pcHistoryMonth
+    ? redemptionHistory.entries.filter(entry => entry.customerId === customer?.id && entry.month === pcHistoryMonth)
+    : [];
   const [pcBalanceChange, setPcBalanceChange] = useState<number | null>(null);
   const [showCurrentMonthBonusCredit, setShowCurrentMonthBonusCredit] = useState(false);
   const totalOutstanding = customer?.totalOutstandingAmount ?? calculateCustomerTotalOutstanding(customer, invoiceViews);
@@ -80,15 +101,30 @@ const CustomerDashboard = () => {
         detail: `Approved on ${formatDate((request.reviewedAt || request.generatedAt).slice(0, 10))}`,
         points: request.approvedCoins,
         date: (request.reviewedAt || request.generatedAt).slice(0, 10)
-      }))
-  ].filter((item) => item.points > 0).sort((left, right) => right.date.localeCompare(left.date));
-  const currentMonthTotalPc = currentMonthPcHistory.reduce((sum, item) => sum + item.points, 0);
+      })),
+    ...monthlyRedemptions.map((entry): PcHistoryItem => {
+      const returned = entry.type === 'redemption_reversal';
+      const request = redemptionRequests?.find(request => request.id === entry.referenceId);
+      const rewardName = request?.rewardName;
+      return {
+        id: 'redemption-' + entry.id,
+        type: 'redemption',
+        title: rewardName ? (returned ? 'Redemption returned: ' : 'Redeemed: ') + rewardName : returned ? 'Redemption returned' : 'Redeemed coins',
+        detail: (returned ? 'Returned on ' : 'Redeemed on ') + formatDate(entry.createdAt.slice(0, 10)),
+        points: (returned ? 1 : -1) * Math.abs(entry.points),
+        date: entry.createdAt
+      };
+    })
+  ].filter((item) => item.points !== 0 && Number.isFinite(item.points)).sort((left, right) => right.date.localeCompare(left.date));
+  const currentMonthTotalPc = currentMonthPcHistory.reduce((sum, item) => sum + Math.max(0, item.points), 0);
+  const currentMonthRedeemedPc = currentMonthPcHistory.reduce((sum, item) => sum + Math.max(0, -item.points), 0);
   const visiblePcHistory = pcHistoryFilter === 'all' ? currentMonthPcHistory : currentMonthPcHistory.filter((item) => item.type === pcHistoryFilter);
   const pcHistoryFilters: { key: PcHistoryFilter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'purchase', label: 'Purchase' },
     { key: 'bonus', label: 'Bonus' },
-    { key: 'overdue', label: 'Overdue' }
+    { key: 'overdue', label: 'Overdue' },
+    { key: 'redemption', label: 'Redeemed' }
   ];
 
   useEffect(() => {
@@ -242,15 +278,17 @@ const CustomerDashboard = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
             <div>
               <div style={{ color: '#D4AF37', fontWeight: 900 }}>This Month PC History</div>
-              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 3 }}>All Partner Coins credited this month</div>
+              <div style={{ color: '#67738E', fontSize: 12, fontWeight: 800, marginTop: 3 }}>Partner Coins credited and redeemed this month</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: '#166534', fontSize: 22, fontWeight: 900 }}>+{formatApc(currentMonthTotalPc)}</div>
-              <div style={{ color: '#67738E', fontSize: 11, fontWeight: 900 }}>PC earned</div>
+              <div style={{ color: '#67738E', fontSize: 11, fontWeight: 900 }}>PC credited</div>
+              <div style={{ color: '#B42318', fontSize: 18, fontWeight: 900, marginTop: 6 }}>−{formatApc(currentMonthRedeemedPc)}</div>
+              <div style={{ color: '#67738E', fontSize: 11, fontWeight: 900 }}>PC redeemed</div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 12 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingBottom: 4, marginBottom: 12 }}>
             {pcHistoryFilters.map((filter) => (
               <button
                 key={filter.key}
@@ -273,16 +311,18 @@ const CustomerDashboard = () => {
             ))}
           </div>
 
-          {visiblePcHistory.length === 0 ? (
+          {pcHistoryLoading ? <p role="status" style={{color:'#67738E',fontSize:12}}>Loading redemptions…</p> : null}
+          {pcHistoryError ? <p role="alert" style={{color:'#B42318',fontSize:12}}>{pcHistoryError} <button type="button" onClick={()=>setPcHistoryRetry(value=>value+1)}>Retry</button></p> : null}
+          {visiblePcHistory.length === 0 && !pcHistoryLoading && !pcHistoryError ? (
             <div data-portal-box="detail" style={{ background: '#F8F9FB', border: '1px solid #E8EDF4', borderRadius: 14, padding: 12, color: '#67738E', fontSize: 13, fontWeight: 800 }}>
-              No PC credits in this category for the current month.
+              No PC transactions in this category for the current month.
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 9, maxHeight: 250, overflowY: 'auto', paddingRight: 3 }}>
               {visiblePcHistory.map((item) => {
-                const Icon = item.type === 'purchase' ? ReceiptText : item.type === 'bonus' ? Trophy : AlertTriangle;
-                const iconBackground = item.type === 'purchase' ? '#EAF7EE' : item.type === 'bonus' ? '#FFF7D6' : '#FDECEC';
-                const iconColor = item.type === 'purchase' ? '#166534' : item.type === 'bonus' ? '#11185A' : '#B42318';
+                const Icon = item.type === 'redemption' ? Coins : item.type === 'purchase' ? ReceiptText : item.type === 'bonus' ? Trophy : AlertTriangle;
+                const iconBackground = item.points < 0 ? '#FDECEC' : item.type === 'purchase' || item.type === 'redemption' ? '#EAF7EE' : item.type === 'bonus' ? '#FFF7D6' : '#FDECEC';
+                const iconColor = item.points < 0 ? '#B42318' : item.type === 'purchase' || item.type === 'redemption' ? '#166534' : item.type === 'bonus' ? '#11185A' : '#B42318';
 
                 return (
                   <div data-portal-box="card"
@@ -293,7 +333,7 @@ const CustomerDashboard = () => {
                       background: '#FFFFFF',
                       padding: 11,
                       display: 'grid',
-                      gridTemplateColumns: '42px 1fr auto',
+                      gridTemplateColumns: '42px minmax(0, 1fr) auto',
                       alignItems: 'center',
                       gap: 10
                     }}
@@ -301,11 +341,11 @@ const CustomerDashboard = () => {
                     <div style={{ width: 42, height: 42, borderRadius: 14, background: iconBackground, color: iconColor, display: 'grid', placeItems: 'center' }}>
                       <Icon size={20} />
                     </div>
-                    <div>
+                    <div style={{minWidth:0,overflowWrap:'anywhere'}}>
                       <div style={{ color: '#11185A', fontSize: 13, fontWeight: 900 }}>{item.title}</div>
                       <div style={{ color: '#67738E', fontSize: 11, fontWeight: 800, marginTop: 3 }}>{item.detail}</div>
                     </div>
-                    <div style={{ color: '#166534', fontSize: 16, fontWeight: 900 }}>+{formatApc(item.points)}</div>
+                    <div style={{ color: item.points < 0 ? '#B42318' : '#166534', fontSize: 16, fontWeight: 900 }}>{item.points < 0 ? '−' : '+'}{formatApc(Math.abs(item.points))}</div>
                   </div>
                 );
               })}

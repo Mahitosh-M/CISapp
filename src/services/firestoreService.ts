@@ -2900,6 +2900,22 @@ export const getCustomerPcBalanceRecord = async (customerId: string) => {
   return snapshot.exists() ? mapPcBalanceRecord(snapshot.id, snapshot.data()) : undefined;
 };
 
+// Load only this customer's monthly transactions when PC history is opened.
+export const getCustomerPcRedemptionEntries = async (customerId: string, month: string) => {
+  if (!customerId || !/^\d{4}-\d{2}$/.test(month)) return [];
+  return getCached(cacheKey(LOYALTY_LEDGER, { customerId, month, scope: 'redemption-history' }), async () => {
+    const snapshot = await getDocs(query(
+      collection(db, LOYALTY_LEDGER),
+      where('customerId', '==', customerId),
+      where('month', '==', month)
+    ));
+    return snapshot.docs
+      .map((entryDoc) => mapLoyaltyLedgerEntry(entryDoc.id, entryDoc.data()))
+      .filter((entry) => entry.type === 'redemption' || entry.type === 'redemption_reversal')
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  });
+};
+
 export const getCustomerPcLedgerEntries = async (customerId: string, limitCount = 500) => {
   if (!customerId) return [];
   const snapshot = await getDocs(query(
