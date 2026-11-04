@@ -1,3 +1,4 @@
+import { isDeliveryLoaded, allDeliveriesLoaded, canTravelWithLoad } from './delivery-progress';
 import {completedDeliveryStops,plannedArrival} from './smart-routing';
 import type {
   AppState,
@@ -76,10 +77,12 @@ export type Command =
       type: "startTrip";
       id: string;
       opening: number;
+      perDeliveryLoading?: boolean;
       photo: string | null;
       note: string;
     }
   | { type: "load"; id: string }
+  | { type: "loadDelivery"; tripId: string; stopId: string }
   | { type: "arrive"; tripId: string; stopId: string }
   | { type: "visitDone"; tripId: string; stopId: string }
   | {
@@ -519,7 +522,7 @@ export function applyCommand(
       const t=find(s.trips,c.id);driver(actor,t);assert(t.routeSnapshot?.revision===c.revision,'Route changed again; review the current itinerary');t.pendingRouteAcknowledgements=t.pendingRouteAcknowledgements?.filter(id=>id!==actor.id);audit(s,actor,'trip',t.id,'Driver acknowledged itinerary',null,{revision:c.revision});break;
     }
     case 'visitWaypoint': {
-      const t=find(s.trips,c.tripId);driver(actor,t);assert(t.status==='Active'&&t.loaded,'Start the loaded trip first');assert(t.routeSnapshot?.revision===c.revision&&!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the current itinerary first');const point=nextItineraryPoint(t);assert(point?.id===c.pointId&&!point.customerId,'Confirm the next waypoint; customer deliveries use delivery proof');t.visitedWaypoints??=[];if(!t.visitedWaypoints.includes(point.id))t.visitedWaypoints.push(point.id);audit(s,actor,'trip',t.id,'Waypoint visit confirmed',null,{pointId:point.id,name:point.name});break;
+      const t=find(s.trips,c.tripId);driver(actor,t);assert(t.status==='Active'&&canTravelWithLoad(t),'Start the loaded trip first');assert(t.routeSnapshot?.revision===c.revision&&!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the current itinerary first');const point=nextItineraryPoint(t);assert(point?.id===c.pointId&&!point.customerId,'Confirm the next waypoint; customer deliveries use delivery proof');t.visitedWaypoints??=[];if(!t.visitedWaypoints.includes(point.id))t.visitedWaypoints.push(point.id);audit(s,actor,'trip',t.id,'Waypoint visit confirmed',null,{pointId:point.id,name:point.name});break;
     }
     case 'arrivalReminder': {
       const t=find(s.trips,c.tripId);driver(actor,t);assert(t.status==='Active'&&t.routeSnapshot?.revision===c.revision,'Use the current active itinerary');assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Acknowledge the changed itinerary first');s.arrivalReminders??=[];
@@ -644,6 +647,11 @@ export function applyCommand(
       t.openingNote = c.note;
       t.status = "Active";
       t.startedAt = now();
+      if (c.perDeliveryLoading) {
+        t.loadingMode = 'perDelivery';
+        t.loaded = allDeliveriesLoaded(t);
+        if (t.loaded && t.routeSnapshot?.points[0]) t.visitedWaypoints = [t.routeSnapshot.points[0].id];
+      }
       audit(s, actor, "trip", t.id, "Trip started", null, {
         opening: c.opening,
         note: c.note,
@@ -655,6 +663,7 @@ export function applyCommand(
       driver(actor, t);
       assert(t.status === "Active", "Start shift before loading");
       assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review and acknowledge the updated itinerary first');
+      assert(t.loadingMode !== 'perDelivery', 'Confirm loading for each delivery separately');
       assert(!t.loaded, "Packages already confirmed");
       const jobs = t.stops.filter(stop=>!!stop.jobId).map(stop=>s.jobs.find(job=>job.id===stop.jobId));
       assert(jobs.every(Boolean), "Assigned delivery details are missing. Open Connection & pending work and synchronise before confirming packages loaded.");
@@ -664,12 +673,34 @@ export function applyCommand(
       audit(s, actor, "trip", t.id, "Packages loaded", false, true);
       break;
     }
+    case "loadDelivery": {
+      const t = find(s.trips, c.tripId);
+      driver(actor, t);
+      assert(t.status === 'Active', 'Start shift before loading');
+      assert(!t.pendingRouteAcknowledgements?.includes(actor.id), 'Review and acknowledge the updated itinerary first');
+      const stop = find(t.stops, c.stopId);
+      assert(stop.kind === 'Delivery' && stop.jobId, 'Select an assigned delivery');
+      const job = s.jobs.find(job => job.id === stop.jobId);
+      assert(job && job.tripId === t.id && job.customerId === stop.customerId, 'Assigned delivery details are missing. Synchronise before confirming loading.');
+      assert(!job.sourceBlocked && job.status !== 'Cancelled', job.sourceBlocked || 'Delivery is cancelled');
+      assert(!stop.completed && !isDeliveryLoaded(t, stop), 'Delivery loading already confirmed');
+      t.loadingMode = 'perDelivery';
+      stop.loadedAt = now();
+      stop.loadedBy = actor.id;
+      job.status = 'Out for delivery';
+      job.revision++;
+      t.loaded = allDeliveriesLoaded(t);
+      if (t.routeSnapshot?.points[0]) t.visitedWaypoints = [...new Set([...(t.visitedWaypoints ?? []), t.routeSnapshot.points[0].id])];
+      audit(s, actor, 'stop', stop.id, 'Delivery packages loaded', null, { ...stop, packages: job.remaining });
+      break;
+    }
     case "arrive":
     case "visitDone": {
       const t = find(s.trips, c.tripId);
       driver(actor, t);
-      assert(t.status === "Active" && t.loaded, "Active loaded trip required");
+      assert(t.status === "Active", "Active trip required");
       const stop = find(t.stops, c.stopId);
+      assert(isDeliveryLoaded(t, stop), 'Confirm loading for this delivery first');
       if(t.routeSnapshot){assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the updated itinerary first');assert(nextItineraryPoint(t)?.stopIds.includes(stop.id),'Visit the next authorised destination first');}
       assert(!stop.completed, "Stop already completed");
       if (c.type === "arrive") {
@@ -696,11 +727,13 @@ export function applyCommand(
       const t = find(s.trips, j.tripId);
       driver(actor, t);
       assert(
-        t.status === "Active" && t.loaded,
+        t.status === "Active",
         "Start shift and confirm loading first",
       );
       const stop = t.stops.find((x) => x.jobId === j.id);
       assert(stop && !stop.completed, "Delivery attempt already completed");
+      assert(isDeliveryLoaded(t, stop), 'Confirm loading for this delivery first');
+      assert(t.loadingMode !== 'perDelivery' || !!stop.arrivedAt, 'Record arrival for this delivery first');
       if(t.routeSnapshot){assert(!t.pendingRouteAcknowledgements?.includes(actor.id),'Review the updated itinerary first');assert(nextItineraryPoint(t)?.stopIds.includes(stop.id),'Visit the next authorised destination first');}
       integer(c.delivered, "Delivered packages");
       assert(
@@ -1079,7 +1112,7 @@ export function applyCommand(
           t.exceptions.some((x) => x.startsWith("Closing photo:")),
         "Closing photo required, or manager Closing photo exception",
       );
-      assert(t.loaded, "Confirm packages loaded");
+      assert(t.loaded || t.loadingMode === 'perDelivery' && t.exceptions.some(x => x.startsWith('Unfinished stops:')), 'Confirm each delivery is loaded or request a manager Unfinished stops exception');
       assert(
         t.stops.every((st) => st.completed) ||
           t.exceptions.some((x) => x.startsWith("Unfinished stops:")),

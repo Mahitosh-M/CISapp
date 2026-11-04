@@ -1,3 +1,4 @@
+import { getPortalCustomerType, isPromotionVisibleToCustomer } from '../utils/promotionAudience';
 import {useLocation} from 'react-router-dom';
 import {readCustomerSessionResource} from '../services/customerSessionCache';
 import { withCurrentCustomerNames } from '../utils/customerLabels';
@@ -106,14 +107,15 @@ export const useCustomerPortalData = () => {
       // Customer portal free-tier/privacy rule: these helpers query only the linked customer
       // (customerId first, customerName only as a legacy fallback), never full company collections.
       const customerId = linkedCustomer?.id ?? userProfile.customerId;
+      const customerType = getPortalCustomerType(linkedCustomer, userProfile.role);
       const [transactionData, appSettings, activeOffers, activeRewards, redemptions, approvedOverduePcRequests, approvedBonusPcRequests, customerCreditSummary, protectedPcBalance] = await Promise.all([
         needsTransactions ? (async()=>{
           const [invoices,payments]=await Promise.all([getInvoicesForCustomerViewer(customerId,linkedCustomer?.name??userProfile.customerName),getPaymentsForCustomerViewer(customerId,linkedCustomer?.name??userProfile.customerName)]);
           return {invoices,payments};
         })() : Promise.resolve({invoices:[] as Invoice[],payments:[] as Payment[]}),
         getAppSettings(),
-        getActiveOffers(),
-        optionalCustomerRead(() => getActiveRewardItems(), []),
+        getActiveOffers(customerType),
+        optionalCustomerRead(() => getActiveRewardItems(customerType), []),
         customerId ? optionalCustomerRead(() => getRedemptionRequestsForCustomer(customerId), []) : Promise.resolve([]),
         customerId ? optionalCustomerRead(() => getApprovedOverduePcRequestsForCustomer(customerId), []) : Promise.resolve([]),
         customerId ? optionalCustomerRead(() => getApprovedBonusPcRequestsForCustomer(customerId), []) : Promise.resolve([]),
@@ -151,9 +153,9 @@ export const useCustomerPortalData = () => {
         : 0;
       const currentLevel = getPartnerLevelForTier(customerWithIntelligenceTier?.tier);
       const nextLevel = getNextPartnerLevel(currentLevel);
-      const levelEligibleRewards = activeRewards.filter((reward) => canViewRewardAtLevel(currentLevel, reward.levelRequired));
-      const eligibleOffers = activeOffers.filter((offer) => canViewRewardAtLevel(currentLevel, offer.levelRequired || 'Active Partner'));
-      const nextReward = activeRewards.find((reward) => reward.requiredPoints > apcBalance && canViewRewardAtLevel(currentLevel, reward.levelRequired));
+      const levelEligibleRewards = activeRewards.filter((reward) => isPromotionVisibleToCustomer(reward.customerAudience, customerType) && canViewRewardAtLevel(currentLevel, reward.levelRequired));
+      const eligibleOffers = activeOffers.filter((offer) => isPromotionVisibleToCustomer(offer.customerAudience, customerType) && canViewRewardAtLevel(currentLevel, offer.levelRequired || 'Active Partner'));
+      const nextReward = levelEligibleRewards.find((reward) => reward.requiredPoints > apcBalance);
       const rewardAvailable = levelEligibleRewards.some((reward) => reward.requiredPoints <= apcBalance);
       const pcProgress = getPcThresholdProgress(apcBalance, currentLevel, appSettings);
       const apcData: CustomerApcSummary = {

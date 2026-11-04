@@ -113,6 +113,8 @@ export interface Stop {
   jobId: ID | null;
   completed: boolean;
   arrivedAt?: string;
+  loadedAt?: string;
+  loadedBy?: ID;
 }
 export interface Trip {
   routeSnapshot?: import('./smart-routing').TripRouteSnapshot;
@@ -162,6 +164,7 @@ export interface Trip {
   startedAt: string | null;
   endedAt: string | null;
   loaded: boolean;
+  loadingMode?: 'perDelivery';
   returnConfirmed: boolean;
   approvedOdometer: boolean;
   cashReceived: number;

@@ -1525,12 +1525,28 @@ service cloud.firestore {
         );
     }
 
+    function validPromotionAudience(data) {
+      return !('customerAudience' in data)
+        || (data.customerAudience is string && data.customerAudience in ['customer', 'medical', 'both']);
+    }
+
+    function rewardAudienceAllowsRequest(data) {
+      let rewardPath = /databases/$(database)/documents/rewardItems/$(data.rewardId);
+      let customerPath = /databases/$(database)/documents/customers/$(data.customerId);
+      let audience = get(rewardPath).data.get('customerAudience', 'both');
+      let customerType = get(customerPath).data.get('customerType', 'customer');
+      return exists(rewardPath) && exists(customerPath)
+        && get(rewardPath).data.isActive == true
+        && (audience == 'both' || audience == customerType);
+    }
+
     function validRewardItem(data) {
       return data.keys().hasOnly([
           'name',
           'requiredPoints',
           'levelRequired',
           'isActive',
+          'customerAudience',
           'description',
           'imageUrl',
           'imagePath',
@@ -1543,6 +1559,7 @@ service cloud.firestore {
         && data.requiredPoints is number
         && data.requiredPoints >= 0
         && isPartnerLevel(data.levelRequired)
+        && validPromotionAudience(data)
         && data.isActive is bool
         && validOptionalString(data, 'description', 500)
         && validOptionalString(data, 'imageUrl', 1200)
@@ -1561,6 +1578,7 @@ service cloud.firestore {
           'startDate',
           'endDate',
           'isActive',
+          'customerAudience',
           'createdAt',
           'createdBy',
           'updatedAt'
@@ -1574,6 +1592,7 @@ service cloud.firestore {
         && (!('levelRequired' in data) || isPartnerLevel(data.levelRequired))
         && data.startDate is string
         && data.endDate is string
+        && validPromotionAudience(data)
         && data.isActive is bool
         && validOptionalString(data, 'createdAt', 40)
         && validOptionalString(data, 'createdBy', 160)
@@ -2448,13 +2467,15 @@ service cloud.firestore {
       allow create: if isCustomer()
         && validRedemptionRequest(request.resource.data)
         && ownsCustomerRecord(request.resource.data)
-        && request.resource.data.status == 'Pending';
+        && request.resource.data.status == 'Pending'
+        && rewardAudienceAllowsRequest(request.resource.data);
       allow update: if isCustomer()
         && ownsCustomerRecord(resource.data)
         && ownsCustomerRecord(request.resource.data)
         && validRedemptionRequest(request.resource.data)
         && resource.data.status == 'Rejected'
         && request.resource.data.status == 'Pending'
+        && rewardAudienceAllowsRequest(request.resource.data)
         && request.resource.data.customerId == resource.data.customerId
         && request.resource.data.customerName == resource.data.customerName
         && request.resource.data.rewardId == resource.data.rewardId

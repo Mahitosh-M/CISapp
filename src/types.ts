@@ -339,7 +339,10 @@ export interface MedicalInvoiceReward {
   settingsId: string;
 }
 
+export type PromotionAudience = 'customer' | 'medical' | 'both';
+
 export interface Offer {
+  customerAudience?: PromotionAudience;
   id: string;
   title: string;
   description?: string;
@@ -355,6 +358,7 @@ export interface Offer {
 }
 
 export interface OfferFormData {
+  customerAudience?: PromotionAudience;
   title: string;
   description: string;
   imageUrl: string;
@@ -737,6 +741,7 @@ export interface BonusPcRequest {
 }
 
 export interface RewardItem {
+  customerAudience?: PromotionAudience;
   id: string;
   name: string;
   requiredPoints: number;
@@ -750,6 +755,7 @@ export interface RewardItem {
 }
 
 export interface RewardFormData {
+  customerAudience?: PromotionAudience;
   name: string;
   requiredPoints: number;
   levelRequired: PartnerLevel;
