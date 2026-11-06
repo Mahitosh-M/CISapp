@@ -1,3 +1,4 @@
+import { openOrderAdmin } from '../services/orderAdminLaunch';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { KeyRound, Mail, ShieldCheck, Stethoscope, UserMinus, UserPlus, Users } from 'lucide-react';
@@ -16,6 +17,13 @@ import { latestEntriesNotice, latestFiveScrollStyle, sortNewestFirst } from '../
 import { getShopName, SHOP_OPTIONS } from '../utils/shops';
 
 type AdminPanel = 'staff' | 'customers' | 'medicals' | null;
+const normalizeLookup = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+const matchesLookup = (values: Array<string | undefined>, search: string) => {
+  const text = normalizeLookup(values.filter(Boolean).join(' '));
+  return normalizeLookup(search).split(' ').filter(Boolean).every((word) => text.includes(word));
+};
+const matchesArea = (customer: Customer | undefined, area: string) => !area
+  || (area === 'none' ? !customer?.area?.trim() : 'area:' + normalizeLookup(customer?.area ?? '') === area);
 
 const Admin = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -29,6 +37,10 @@ const Admin = () => {
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [staffRole, setStaffRole] = useState<Extract<UserRole, 'Admin' | 'Staff'>>('Staff');
   const [staffShopId, setStaffShopId] = useState<ShopId | ''>('');
+  const [existingCustomerSearch, setExistingCustomerSearch] = useState('');
+  const [existingCustomerArea, setExistingCustomerArea] = useState('');
+  const [existingMedicalSearch, setExistingMedicalSearch] = useState('');
+  const [existingMedicalArea, setExistingMedicalArea] = useState('');
   const [customerLoginId, setCustomerLoginId] = useState('');
   const [customerLoginEmail, setCustomerLoginEmail] = useState('');
   const [customerLoginPassword, setCustomerLoginPassword] = useState('');
@@ -70,8 +82,27 @@ const Admin = () => {
 
   const sortedUsers = useMemo(() => sortNewestFirst(users, ['updatedAt', 'createdAt']), [users]);
   const sortedStaffUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'Admin' || user.role === 'Staff'), [sortedUsers]);
-  const sortedCustomerUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'customer'), [sortedUsers]);
-  const sortedMedicalUsers = useMemo(() => sortedUsers.filter((user) => user.role === 'Medical'), [sortedUsers]);
+  const sortedCustomerUsers = useMemo(() => sortNewestFirst(users.filter((user) => user.role === 'customer'), ['createdAt', 'updatedAt']), [users]);
+  const sortedMedicalUsers = useMemo(() => sortNewestFirst(users.filter((user) => user.role === 'Medical'), ['createdAt', 'updatedAt']), [users]);
+  const customersById = useMemo(() => new Map(customers.map((customer) => [customer.id, customer])), [customers]);
+  const areaOptions = useMemo(() => {
+    const areas = new Map<string, string>();
+    customers.forEach((customer) => {
+      const label = customer.area?.trim();
+      if (label) areas.set('area:' + normalizeLookup(label), label);
+    });
+    return [...areas].map(([value, label]) => ({ value, label })).sort((left, right) => left.label.localeCompare(right.label));
+  }, [customers]);
+  const filterLogins = (rows: UserProfile[], search: string, area: string) => {
+    const matches = rows.filter((user) => {
+      const customer = user.customerId ? customersById.get(user.customerId) : undefined;
+      return matchesArea(customer, area) && matchesLookup([user.name, user.email, user.customerName, customer?.name, customer?.mobile, customer?.area, customer?.branchId], search);
+    });
+    return search.trim() || area ? matches : matches.slice(0, 1);
+  };
+  const visibleLoginUsers = activePanel === 'staff' ? sortedStaffUsers : activePanel === 'customers'
+    ? filterLogins(sortedCustomerUsers, existingCustomerSearch, existingCustomerArea)
+    : filterLogins(sortedMedicalUsers, existingMedicalSearch, existingMedicalArea);
   const isAdmin = userProfile?.role === 'Admin';
   const adminUserCount = useMemo(() => users.filter((user) => user.role === 'Admin').length, [users]);
 
@@ -302,9 +333,36 @@ const Admin = () => {
     verticalAlign: 'top'
   };
 
+  const renderExistingFilters = (medical: boolean) => {
+    const prefix = medical ? 'medical' : 'customer';
+    const search = medical ? existingMedicalSearch : existingCustomerSearch;
+    const area = medical ? existingMedicalArea : existingCustomerArea;
+    return <div role="group" aria-label={medical ? 'Existing Medical filters' : 'Existing Customer filters'} style={{ ...gridStyle, marginBottom: 16 }}>
+      <label htmlFor={prefix + '-existing-search'} style={{ fontWeight: 800 }}>
+        {medical ? 'Search medicals' : 'Search customers'}
+        <input id={prefix + '-existing-search'} type="search" style={inputStyle} value={search} placeholder="Name, mobile or email"
+          onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}
+          onChange={(event) => {
+            if (medical) setExistingMedicalSearch(event.target.value);
+            else setExistingCustomerSearch(event.target.value);
+          }} />
+      </label>
+      <label htmlFor={prefix + '-existing-area'} style={{ fontWeight: 800 }}>Area
+        <select id={prefix + '-existing-area'} style={inputStyle} value={area} onChange={(event) => {
+          if (medical) setExistingMedicalArea(event.target.value);
+          else setExistingCustomerArea(event.target.value);
+        }}>
+          <option value="">All areas</option>
+          {areaOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          <option value="none">No area</option>
+        </select>
+      </label>
+    </div>;
+  };
+
   const renderTable = (headers: string[], body: JSX.Element) => (
     <>
-      <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{latestEntriesNotice}</div>
+      <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>{activePanel === 'staff' ? latestEntriesNotice : (activePanel === 'customers' ? existingCustomerSearch.trim() || existingCustomerArea : existingMedicalSearch.trim() || existingMedicalArea) ? 'Matching logins, latest first.' : 'Latest login. Search or select an area to find others.'}</div>
       <div style={{ ...latestFiveScrollStyle, overflowX: 'auto' }}>
       <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
         <thead>
@@ -336,6 +394,7 @@ const Admin = () => {
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+<button type="button" className="admin-button admin-button-primary" onClick={() => openOrderAdmin(setAdminError)} style={{ ...buttonStyle, minHeight: 44 }}>Order</button>
         <button
           className="admin-button admin-button-primary"
           type="button"
@@ -457,10 +516,12 @@ const Admin = () => {
       {activePanel ? <div className="admin-card" style={cardStyle}>
         <div className="admin-card-title"><Users size={18} />{activePanel === 'staff' ? 'Existing Staff & Admins' : activePanel === 'customers' ? 'Existing Customers' : 'Existing Medicals'}</div>
         <div style={{ color: '#D7DEEA', marginBottom: 12 }}>For forgotten passwords, send a Firebase reset email. Passwords are not stored in readable form and cannot be shown after creation.</div>
+        {activePanel !== 'staff' ? renderExistingFilters(activePanel === 'medicals') : null}
         {renderTable(
           ['Name', 'Email', 'Role', 'Shop', 'Linked Customer', 'Active', 'Actions'],
           <>
-            {(activePanel === 'staff' ? sortedStaffUsers : activePanel === 'customers' ? sortedCustomerUsers : sortedMedicalUsers).map((user) => (
+            {visibleLoginUsers.length === 0 && <tr><td colSpan={7} style={cellStyle}>No matching logins.</td></tr>}
+            {visibleLoginUsers.map((user) => (
               <tr className="admin-table-row" key={user.id}>
                 <td style={cellStyle}>{user.name}</td>
                 <td style={cellStyle}>{user.email}</td>

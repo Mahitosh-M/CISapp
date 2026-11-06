@@ -17,6 +17,8 @@ jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     env:
+      VITE_ORDERAPP_FIREBASE_CONFIG: ${{ vars.VITE_ORDERAPP_FIREBASE_CONFIG }}
+
       VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
       VITE_SALESAPP_FIREBASE_CONFIG: ${{ secrets.VITE_SALESAPP_FIREBASE_CONFIG }}
     steps:

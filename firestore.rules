@@ -2504,6 +2504,43 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+
+    // Public catalogue artwork: category (1..160), bounded JPEG and server timestamp.
+    function validOrderCategoryImage(data) {
+      return data.keys().hasAll(['category', 'imageUrl', 'width', 'height', 'updatedAt'])
+        && data.keys().hasOnly(['category', 'imageUrl', 'width', 'height', 'updatedAt'])
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 160
+        && data.imageUrl is string && data.imageUrl.size() <= 240000
+        && data.imageUrl.matches('^data:image/jpeg;base64,[A-Za-z0-9+/=]+$')
+        && data.width is int && data.width == 512 && data.height is int && data.height == 512
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    match /orderCategoryImages/{imageId} {
+      // Artwork is displayed in Orderapp's customer catalogue. No account data.
+      allow read: if true;
+      allow create, update: if isAdmin() && validOrderCategoryImage(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+
+    // orderProductImages: productId/name, 512-square transparent WebP, server timestamp.
+    function validOrderProductImage(data) {
+      return data.keys().hasAll(['productId', 'name', 'imageUrl', 'width', 'height', 'updatedAt'])
+        && data.keys().hasOnly(['productId', 'name', 'imageUrl', 'width', 'height', 'updatedAt'])
+        && data.productId is string && data.productId.size() > 0 && data.productId.size() <= 160
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.imageUrl is string && data.imageUrl.size() <= 240000
+        && data.imageUrl.matches('^data:image/webp;base64,[A-Za-z0-9+/=]+$')
+        && data.width is int && data.width == 512 && data.height is int && data.height == 512
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    match /orderProductImages/{imageId} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && validOrderProductImage(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

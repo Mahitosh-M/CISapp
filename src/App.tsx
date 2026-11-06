@@ -9,6 +9,7 @@ import { useEnterKeyNavigation } from './hooks/useEnterKeyNavigation';
 import { useNumberInputZeroSelection } from './hooks/useNumberInputZeroSelection';
 import { useManualNumberInputs } from './hooks/useManualNumberInputs';
 
+const StaffOrders = lazy(() => import('./pages/StaffOrders'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Collections = lazy(() => import('./pages/Collections'));
 const Invoices = lazy(() => import('./pages/Invoices'));
@@ -84,6 +85,7 @@ const App = () => {
           <Route index element={<AdminStaffLanding />} />
           <Route path="dashboard" element={<Navigate to="/invoices" replace />} />
           <Route path="customers" element={<Customers />} />
+          <Route path="orders" element={<ProtectedRoute allowedRoles={['Staff']}><StaffOrders /></ProtectedRoute>} />
           <Route path="collections" element={<ProtectedRoute allowedRoles={['Staff']}><Collections /></ProtectedRoute>} />
           <Route path="invoices" element={<Invoices />} />
           <Route path="payments" element={<Payments />} />
