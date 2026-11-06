@@ -758,7 +758,7 @@ const Invoices = () => {
       <SectionHeader title="Invoices" />
       <Link to="/dispatch" className="invoice-delivery-link"><Truck size={20} aria-hidden="true" />Delivery requests<ArrowRight size={18} aria-hidden="true" /></Link>
 
-      {deliveryTarget && <DeliveryDialog allowMasterEdit={isAdmin} invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Invoice marked for delivery. Ready for Dispatch synchronisation."); void loadData(); }} />}
+      {deliveryTarget && <DeliveryDialog allowMasterEdit={isAdmin} invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Delivery request saved. Refresh Deliveries to review its route."); void loadData(); }} />}
       <form style={cardStyle} onSubmit={handleSubmit}>
         {!editingOpeningBalance && <label className={`invoice-delivery-option${deliveryRequested ? ' selected' : ''}`}>
           <Truck size={25} aria-hidden="true" />

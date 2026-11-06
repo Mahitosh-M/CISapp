@@ -484,6 +484,8 @@ export function applyCommand(
       if (c.action === "Release") {
         assert(t.status === "Draft", "Already released");
         assert(t.stops.length, "Route has no stops");
+        assert(s.vehicles.some(v => v.id === t.vehicleId && v.active), 'Select an active vehicle before releasing');
+        assert(s.users.some(u => u.id === t.primaryDriverId && u.active && u.role === 'DRIVER' && u.shopIds.includes(t.startShopId)), 'Select an active primary driver before releasing');
         t.routeSnapshot=buildTripRoute(s,t,t.routeSnapshot?.template??null,now());
         t.reportingInvoiceIds=reportReferences(s,t);t.routeReferenceKm=t.routeSnapshot.template?.referenceKm;t.routeReferenceMinutes=t.routeSnapshot.template?.referenceMinutes;
         t.routeTargetArrival=t.routeSnapshot.template?.targetArrival??'17:00';t.routePlannedArrival=plannedArrival(t.routeSnapshot);t.routeDeparture=t.routeSnapshot.template?.departure;

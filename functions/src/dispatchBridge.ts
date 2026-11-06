@@ -1,3 +1,8 @@
+import { planDailyDelivery, isAutomaticDraft, dailyRoutePlans, saveDailyRouteOrder } from './dispatchDailyRoutes';
+import { emptyState } from './dispatchDomain/emptyState';
+import type { AppState } from './dispatchDomain/domain';
+import type { CloudSnapshot, CloudRequest } from './dispatchDomain/syncMerge';
+import { nextRouteDate, type WeeklyRoute } from '../../src/utils/dispatchRoutes';
 import {serverCashBalanceFields} from './cashRounding';
 import {prepareLegacyPublishedRoute} from './dispatchSmartRoutes';
 import {routeCatalog,saveWeeklyRoute,routeHistory,seedWeeklyRoutes,confirmShopLocations,invoiceDeliveryLocation,saveCustomerDeliveryLocation} from './dispatchRouteCatalog';
@@ -195,7 +200,9 @@ async function markDelivery(identity: Identity, p: Data) {
     ref = db().doc(`invoices/${invoiceId}`),
     target = db().doc(`dispatchDeliveryRequests/${invoiceId}`);
   return db().runTransaction(async (tx) => {
-    const [invoice, old] = await Promise.all([tx.get(ref), tx.get(target)]);
+    const stateRef = db().doc('dispatchOperationalState/main');
+    const [invoice, old, stateDoc] = await Promise.all([tx.get(ref), tx.get(target), tx.get(stateRef)]);
+    const state: AppState = stateDoc.data()?.state || emptyState();
     requireValue(invoice.exists, "Save the invoice first");
     const i = invoice.data()!;
     manager(identity, i.shopId);
@@ -206,23 +213,28 @@ async function markDelivery(identity: Identity, p: Data) {
     requireValue(customer.exists, "Customer no longer exists");
     const previous = old.data();
     requireValue(
-      !previous?.tripId || p.required !== false,
+      !previous?.tripId || p.required !== false || isAutomaticDraft(state, previous.tripId),
       "Assigned delivery must be cancelled through Dispatch",
     );
-    const details =
+    const details: Data =
       p.required === false
         ? { ...(previous ?? {}), required: false, active: false }
         : deliveryFields({...p,...(p.location===undefined&&customer.data()?.deliveryLocation?{location:customer.data()!.deliveryLocation}:{})});
+    let selectedRoute: WeeklyRoute | null = null;
     // Resolve route metadata from the trusted catalogue, never trust client snapshots.
     if (p.required !== false && p.routeId) {
       const route=(await tx.get(db().doc(`dispatchRouteTemplates/${identifier(p.routeId)}`))).data();
       requireValue(route?.active===true && route.shopIds.includes(i.shopId),'Route is inactive or unavailable for this shop');
       const stop=p.routeStopId?route.stops.find((x:Data)=>x.id===p.routeStopId):null;
       requireValue(!p.routeStopId||stop,'Route stop no longer exists. Select the stop again.');
-      requireValue(!previous?.tripId||previous.routeId===route.id,'Assigned route cannot change; review the trip in Dispatch first');
+      requireValue(!previous?.tripId||previous.routeId===route.id||isAutomaticDraft(state,previous.tripId),'Assigned route cannot change; review the trip in Dispatch first');
+      selectedRoute = route as WeeklyRoute;
+      const scheduled = nextRouteDate(route.days, details.scheduledDate);
+      requireValue(scheduled, 'The selected route needs a scheduled weekday');
+      details.scheduledDate = scheduled;
       Object.assign(details,{routeId:route.id,routeName:route.name,routeFrom:route.from,routeTo:route.to,routeDays:route.days,routeRevision:route.revision,routeStopId:stop?.id??null,routeStopName:stop?.name??null});
     } else if(p.required!==false) {
-      requireValue(!previous?.tripId||!previous.routeId,'Assigned route cannot be removed; review the trip in Dispatch first');
+      requireValue(!previous?.tripId||!previous.routeId||isAutomaticDraft(state,previous.tripId),'Assigned route cannot be removed; review the trip in Dispatch first');
     }
     const revision = (previous?.sourceRevision ?? 0) + 1;
     const projection = projectRequest(
@@ -233,7 +245,22 @@ async function markDelivery(identity: Identity, p: Data) {
       revision,
     );
     if (p.required === false) projection.active = false;
-    tx.set(target, { ...projection, tripId: previous?.tripId ?? null, assignedDriverIds: previous?.assignedDriverIds ?? [] });
+    let dailyRoute: { tripId: string | null; created: boolean; name?: string } | null = null;
+    if (selectedRoute || isAutomaticDraft(state, previous?.tripId)) {
+      const payments = await tx.get(db().collection('payments').where('invoiceId', '==', invoiceId));
+      requireValue(payments.size <= 5000, 'Invoice payment history requires review');
+      const [balance] = invoiceBalances([mappedInvoice(invoiceId, i)], payments.docs.map(row => mappedPayment(row.id, row.data())));
+      const cloud = { identity, customers: [{ id: i.customerId, name: String(customer.data()!.name || i.customerName || ''),
+        phone: String(customer.data()!.mobile || ''), area: String(customer.data()!.area || ''),
+        location: normalizeLocation(customer.data()!.deliveryLocation || null),
+        invoices: [{ id: invoiceId, number: i.invoiceNumber, date: i.date, due: i.dueDate || i.date,
+          amount: money(i.totalSales), outstanding: balance.pendingPaise, shopId: i.shopId, opening: false }] }],
+        requests: [], trips: [], claims: [], drivers: [], serverAt: now() } as CloudSnapshot;
+      dailyRoute = planDailyDelivery(state, { ...projection, scheduledDate: String(details.scheduledDate), address: String(details.address), contact: String(details.contact), packages: Number(details.packages), instructions: String(details.instructions || ""), tripId: previous?.tripId || null } as CloudRequest, selectedRoute, cloud, now());
+      requireValue(Buffer.byteLength(JSON.stringify(state)) < 800000, 'Archive operational history before planning more deliveries');
+      tx.set(stateRef, { state: clean(state), updatedAt: now() });
+    }
+    tx.set(target, { ...projection, tripId: dailyRoute ? dailyRoute.tripId : previous?.tripId ?? null, assignedDriverIds: previous?.assignedDriverIds ?? [] });
     tx.update(ref, {
       deliveryRequired: p.required !== false,
       deliveryDetails: p.required === false ? null : details,
@@ -248,7 +275,7 @@ async function markDelivery(identity: Identity, p: Data) {
       invoiceId,
       { revision },
     );
-    return { invoiceId, revision, saved: true };
+    return { invoiceId, revision, saved: true, scheduledDate: details.scheduledDate, dailyRoute };
   });
 }
 async function publishTrip(identity: Identity, p: Data) {
@@ -430,7 +457,7 @@ async function pull(identity: Identity) {
           .where("companionId", "==", identity.actorId)
           .get()
       : null;
-  const trips = [
+  let trips = [
     ...new Map(
       [...tripsSnap.docs, ...(companion?.docs ?? [])].map((x) => [
         x.id,
@@ -438,6 +465,7 @@ async function pull(identity: Identity) {
       ]),
     ).values(),
   ];
+  if (identity.role === 'MANAGER') trips = trips.filter(trip => !trip.autoCreated || (trip.planningShopIds || []).every((shop: string) => identity.shopIds.includes(shop)));
   requireValue(trips.length <= 200, "Archive old trips before synchronising");
   const requestSnap =
     identity.role === "DRIVER"
@@ -1028,6 +1056,8 @@ export const dispatchBridge = onRequest(
       if(caps[action]) allowed(identity,caps[action]);
       let result: unknown;
       switch (action) {
+        case "dailyRoutePlans": result = await dailyRoutePlans(identity); break;
+        case "saveDailyRouteOrder": result = await saveDailyRouteOrder(identity, payload); break;
         case "routeCatalog": result=await routeCatalog(identity); break;
         case "saveWeeklyRoute": result=await saveWeeklyRoute(identity,payload); break;
         case "routeHistory": result=await routeHistory(identity,payload); break;
