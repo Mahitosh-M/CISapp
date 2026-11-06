@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { openOrderAdmin } from '../services/orderAdminLaunch';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -394,6 +395,7 @@ const Admin = () => {
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+<Link to="/how-it-works" className="admin-button admin-button-primary" style={{ ...buttonStyle, minHeight: 44, textDecoration: 'none' }}>How it works</Link>
 <button type="button" className="admin-button admin-button-primary" onClick={() => openOrderAdmin(setAdminError)} style={{ ...buttonStyle, minHeight: 44 }}>Order</button>
         <button
           className="admin-button admin-button-primary"

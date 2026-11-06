@@ -1,3 +1,4 @@
+import AdminExplanation from '../components/AdminExplanation';
 import DailyRoutePlans, { type DailyRoutePlan } from '../components/DailyRoutePlans';
 import {routeDays,type WeeklyRoute} from '../utils/dispatchRoutes';
 import {Truck, Package, Wallet, RefreshCw, CheckCircle2} from "lucide-react";
@@ -150,11 +151,11 @@ export default function Dispatch() {
   return (
     <main className="cis-delivery-page">
       <h1><Truck size={28} aria-hidden="true"/> Deliveries & collections</h1>
-      <p>
+      <AdminExplanation><p>
         Delivery requests and driver collections. CISapp remains the authority
         for invoices and receipts. Physical driver cash and handovers remain
         separate.
-      </p>
+      </p></AdminExplanation>
       <button disabled={busy} onClick={() => void load()}>
         <RefreshCw size={17} aria-hidden="true"/> Refresh
       </button>
@@ -169,7 +170,7 @@ export default function Dispatch() {
           </div>
           <DailyRoutePlans plans={dailyPlans} customerIds={modeCustomerIds} isAdmin={role === "Admin"} onSaved={load} />
           {routePlanError&&<p role="status">Daily route plans are unavailable: {routePlanError}</p>}
-          <section><h2>Weekly loading / dispatch routes</h2>{routes.filter(r=>r.active).map(r=><article className="cis-delivery-request" key={r.id}><Truck size={20}/><div><strong>{r.name}: {r.from} to {r.to}</strong><span>{routeDays(r)}</span><small>{r.stops.map(s=>s.name).join(' / ')}</small></div></article>)}{!routes.some(r=>r.active)&&<p>No routes configured by Dispatch Admin yet.</p>}<small>Saving a delivery request creates a daily draft for its weekly route and service date.</small></section>
+          <section><h2>Weekly loading / dispatch routes</h2>{routes.filter(r=>r.active).map(r=><article className="cis-delivery-request" key={r.id}><Truck size={20}/><div><strong>{r.name}: {r.from} to {r.to}</strong><span>{routeDays(r)}</span><small>{r.stops.map(s=>s.name).join(' / ')}</small></div></article>)}{!routes.some(r=>r.active)&&<p>No routes configured by Dispatch Admin yet.</p>}<AdminExplanation><small>Saving a delivery request creates a daily draft for its weekly route and service date.</small></AdminExplanation></section>
           <section>
             <h2>Invoice delivery requests</h2>
             {snapshot.requests.length === 0 && (
@@ -241,11 +242,11 @@ export default function Dispatch() {
           className="cis-collection-review"
         >
           <h2>Review {customer?.name}</h2>
-          <p>
+          <AdminExplanation><p>
             Default allocation: opening balance first, then oldest invoice. The
             server rechecks outstanding balances transactionally. Excess remains
             unallocated; no advance is automatically created.
-          </p>
+          </p></AdminExplanation>
           <label>
             <input
               type="checkbox"
@@ -342,7 +343,7 @@ export default function Dispatch() {
           </div>
         </section>
       )}
-      {role === "Admin" && <section><h2>Dispatch accounts and settings</h2><p>Manage driver logins, roles, vehicles and shops from Administration in the authenticated CIS Dispatch dev application. Existing accounts retain their own passwords.</p></section>}
+      {role === "Admin" && <section><h2>Dispatch accounts and settings</h2><p>Manage driver logins, roles, vehicles and shops from Administration in the CIS Dispatch application. Existing accounts retain their own passwords.</p></section>}
     </main>
   );
 }

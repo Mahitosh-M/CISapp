@@ -1,3 +1,4 @@
+import AdminExplanation from '../components/AdminExplanation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { BookOpen, CircleDollarSign, Download, FileText, MapPin, UserPlus } from 'lucide-react';
@@ -1107,9 +1108,9 @@ const Customers = () => {
             ) : null}
           </div>
 
-          <div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>
+          <AdminExplanation><div style={{ color: '#D7DEEA', fontSize: 12, marginBottom: 8 }}>
             {selectedSearchCustomerId ? 'Selected customer only.' : searchText.trim() ? 'Matching customers.' : 'Search to show matching customers.'}
-          </div>
+          </div></AdminExplanation>
           <div style={{ ...latestFiveScrollStyle, overflowX: 'hidden', borderRadius: 14, border: '1px solid #E8EDF4' }}>
             <table style={compactTableStyle}>
               <thead>

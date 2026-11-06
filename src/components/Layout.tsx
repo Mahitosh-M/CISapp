@@ -1,7 +1,7 @@
 import StaffOrderAlert from './StaffOrderAlert';
 import { StaffOrdersProvider } from '../contexts/StaffOrdersContext';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { ShoppingCart, BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Truck, Users } from 'lucide-react';
+import { ShoppingCart, BookOpen, BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Truck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import {SharedCustomerModeProvider,useSharedCustomerMode} from '../contexts/SharedCustomerModeContext';
@@ -32,6 +32,7 @@ const navItems: NavItem[] = [
   { to: '/overdue-pc-requests', label: 'PC', icon: Coins, mobileColor: '#FCD34D', adminOnly: true },
   { to: '/credit', label: 'Credit', icon: Landmark, mobileColor: '#5EEAD4', adminOnly: true },
   { to: '/admin', label: 'Admin', icon: ShieldCheck, mobileColor: '#FDBA74', adminOnly: true },
+  { to: '/how-it-works', label: 'How it works', icon: BookOpen, mobileColor: '#FDE68A', adminOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings, mobileColor: '#CBD5E1', adminOnly: true }
 ];
 
@@ -67,7 +68,9 @@ const LayoutBody = () => {
     color: '#FFFFFF',
     padding: '20px 10px',
     boxSizing: 'border-box' as const,
-    overflow: 'hidden',
+    overflowX: 'hidden' as const,
+    overflowY: 'auto' as const,
+    height: '100vh',
     boxShadow: isSidebarExpanded ? '18px 0 40px rgba(0,0,0,0.34)' : '8px 0 24px rgba(0,0,0,0.22)',
     transition: 'width 180ms ease, box-shadow 180ms ease'
   };
