@@ -1,3 +1,4 @@
+import AdminExplanation from '../components/AdminExplanation';
 import TroikaaCoins from '../components/TroikaaCoins';
 import {calculateInvoiceApcInfo} from '../utils/customerPortal';
 import {invoiceReceivableAmount} from '../utils/invoiceCharges';
@@ -758,11 +759,11 @@ const Invoices = () => {
       <SectionHeader title="Invoices" />
       <Link to="/dispatch" className="invoice-delivery-link"><Truck size={20} aria-hidden="true" />Delivery requests<ArrowRight size={18} aria-hidden="true" /></Link>
 
-      {deliveryTarget && <DeliveryDialog allowMasterEdit={isAdmin} invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage("Invoice marked for delivery. Ready for Dispatch synchronisation."); void loadData(); }} />}
+      {deliveryTarget && <DeliveryDialog allowMasterEdit={isAdmin} invoice={deliveryTarget} onClose={() => setDeliveryTarget(null)} onSaved={() => { setDeliveryTarget(null); setMessage(isAdmin ? "Delivery request saved. Refresh Deliveries to review its route." : "Delivery request saved."); void loadData(); }} />}
       <form style={cardStyle} onSubmit={handleSubmit}>
         {!editingOpeningBalance && <label className={`invoice-delivery-option${deliveryRequested ? ' selected' : ''}`}>
           <Truck size={25} aria-hidden="true" />
-          <span><strong>Delivery required</strong><small>Choose route and delivery details after saving this invoice.</small></span>
+          <span><strong>Delivery required</strong><AdminExplanation><small>Choose route and delivery details after saving this invoice.</small></AdminExplanation></span>
           <input type="checkbox" aria-label="Delivery required" checked={deliveryRequested} onChange={e => setDeliveryRequested(e.target.checked)} />
         </label>}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -813,7 +814,8 @@ const Invoices = () => {
               ))}
             </select>
           </label>
-          <p role="status" style={{ color: '#D7DEEA', fontSize: 13, margin: '8px 0' }}>{selectedInvoiceCustomer ? selectedInvoiceCustomer.customerType === 'medical' ? 'Customer type: MEDICAL' : 'Customer type: Customer. TROIKAA Coins require Medical customer type.' : 'Select a Medical customer to show TROIKAA Coins.'}</p>
+          <AdminExplanation><p role="status" style={{ color: '#D7DEEA', fontSize: 13, margin: '8px 0' }}>{selectedInvoiceCustomer ? selectedInvoiceCustomer.customerType === 'medical' ? 'Customer type: MEDICAL' : 'Customer type: Customer. TROIKAA Coins require Medical customer type.' : 'Select a Medical customer to show TROIKAA Coins.'}</p></AdminExplanation>
+          {!isAdmin && selectedInvoiceCustomer && <p role="status" style={{ color: '#D7DEEA', fontSize: 13 }}>Customer type: {selectedInvoiceCustomer.customerType === 'medical' ? 'MEDICAL' : 'Customer'}</p>}
           </div>
 
           {!editingOpeningBalance && isAdmin && (!editingInvoiceId || formIsBranchAware || adminNeedsSameDayPaymentShop) ? <label style={labelStyle}>

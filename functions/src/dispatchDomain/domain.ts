@@ -117,6 +117,8 @@ export interface Stop {
   loadedBy?: ID;
 }
 export interface Trip {
+  autoCreated?: boolean;
+  planningShopIds?: string[];
   routeSnapshot?: import('./smart-routing').TripRouteSnapshot;
   amendmentNote?: string;
   pendingRouteAcknowledgements?: string[];

@@ -1,3 +1,5 @@
+import AdminExplanation from '../components/AdminExplanation';
+import DailyRoutePlans, { type DailyRoutePlan } from '../components/DailyRoutePlans';
 import {routeDays,type WeeklyRoute} from '../utils/dispatchRoutes';
 import {Truck, Package, Wallet, RefreshCw, CheckCircle2} from "lucide-react";
 import "../delivery.css";
@@ -70,16 +72,21 @@ export default function Dispatch() {
     [allocations, setAllocations] = useState<Record<string, string>>({}),
     [postingDate, setPostingDate] = useState(getTodayDateString());
   const [routes,setRoutes]=useState<WeeklyRoute[]>([]);
+  const [dailyPlans,setDailyPlans]=useState<DailyRoutePlan[]>([]),[routePlanError,setRoutePlanError]=useState('');
+  const [modeCustomerIds,setModeCustomerIds]=useState<Set<string>|undefined>();
   const [discount, setDiscount] = useState("0");
   async function load() {
     setBusy(true);
     setError("");
     try {
-      const [next,catalog]=await Promise.all([dispatchRequest<Snapshot>("pull"),dispatchRequest<{routes:WeeklyRoute[]}>("routeCatalog")]);
+      const [next,catalog,daily]=await Promise.all([dispatchRequest<Snapshot>("pull"),dispatchRequest<{routes:WeeklyRoute[]}>("routeCatalog"),
+        dispatchRequest<{plans:DailyRoutePlan[];error?:string}>("dailyRoutePlans").catch(err=>({plans:[] as DailyRoutePlan[],error:(err as Error).message}))]);
+      setDailyPlans(Array.isArray(daily.plans)?daily.plans:[]);setRoutePlanError(daily.error||'');
       if(mode){
         const ids=new Set((await getCustomers()).map(customer=>customer.id));
+        setModeCustomerIds(ids);
         setSnapshot({...next,customers:next.customers.filter(customer=>ids.has(customer.id)),claims:next.claims.filter(claim=>ids.has(claim.customerId)),requests:next.requests.filter(request=>Boolean(request.sourceCustomerId&&ids.has(request.sourceCustomerId)))});
-      }else setSnapshot(next);
+      }else {setModeCustomerIds(undefined);setSnapshot(next);}
       setRoutes(catalog.routes);
     } catch (e) {
       setError((e as Error).message);
@@ -144,11 +151,11 @@ export default function Dispatch() {
   return (
     <main className="cis-delivery-page">
       <h1><Truck size={28} aria-hidden="true"/> Deliveries & collections</h1>
-      <p>
+      <AdminExplanation><p>
         Delivery requests and driver collections. CISapp remains the authority
         for invoices and receipts. Physical driver cash and handovers remain
         separate.
-      </p>
+      </p></AdminExplanation>
       <button disabled={busy} onClick={() => void load()}>
         <RefreshCw size={17} aria-hidden="true"/> Refresh
       </button>
@@ -159,9 +166,11 @@ export default function Dispatch() {
           <div className="cis-delivery-metrics">
             <div><Package size={23} aria-hidden="true"/><strong>{snapshot.requests.filter(r=>r.active).length}</strong><span>Active requests</span></div>
             <div><Wallet size={23} aria-hidden="true"/><strong>{snapshot.claims.filter(c=>c.status==='Pending').length}</strong><span>Collections to review</span></div>
-            <div><CheckCircle2 size={23} aria-hidden="true"/><strong>{snapshot.requests.filter(r=>r.active&&r.tripId).length}</strong><span>Assigned deliveries</span></div>
+            <div><CheckCircle2 size={23} aria-hidden="true"/><strong>{snapshot.requests.filter(r=>r.active&&r.tripId).length}</strong><span>Planned deliveries</span></div>
           </div>
-          <section><h2>Weekly loading / dispatch routes</h2>{routes.filter(r=>r.active).map(r=><article className="cis-delivery-request" key={r.id}><Truck size={20}/><div><strong>{r.name}: {r.from} to {r.to}</strong><span>{routeDays(r)}</span><small>{r.stops.map(s=>s.name).join(' / ')}</small></div></article>)}{!routes.some(r=>r.active)&&<p>No routes configured by Dispatch Admin yet.</p>}<small>Weekly plan; actual loading is confirmed separately.</small></section>
+          <DailyRoutePlans plans={dailyPlans} customerIds={modeCustomerIds} isAdmin={role === "Admin"} onSaved={load} />
+          {routePlanError&&<p role="status">Daily route plans are unavailable: {routePlanError}</p>}
+          <section><h2>Weekly loading / dispatch routes</h2>{routes.filter(r=>r.active).map(r=><article className="cis-delivery-request" key={r.id}><Truck size={20}/><div><strong>{r.name}: {r.from} to {r.to}</strong><span>{routeDays(r)}</span><small>{r.stops.map(s=>s.name).join(' / ')}</small></div></article>)}{!routes.some(r=>r.active)&&<p>No routes configured by Dispatch Admin yet.</p>}<AdminExplanation><small>Saving a delivery request creates a daily draft for its weekly route and service date.</small></AdminExplanation></section>
           <section>
             <h2>Invoice delivery requests</h2>
             {snapshot.requests.length === 0 && (
@@ -170,7 +179,7 @@ export default function Dispatch() {
             {snapshot.requests.map((r) => (
               <article className="cis-delivery-request" key={r.id}>
                 <Package size={20} aria-hidden="true"/>
-                <div><strong>{r.invoiceNumber}</strong><span>{r.customerName}</span>{r.routeName&&<span><strong>{r.routeName}</strong>{r.routeStopName?` / ${r.routeStopName}`:''} - {routes.find(x=>x.id===r.routeId)?routeDays(routes.find(x=>x.id===r.routeId)!):'Route schedule unavailable'}</span>}{r.scheduledDate&&<span>Scheduled: {r.scheduledDate}</span>}<small className={'cis-delivery-status '+(!r.active?'needs-review':'')}>{r.active?(r.tripId?'Assigned':'Ready for Dispatch'):'Needs review'}</small>{r.sourceIssue&&<p role="alert">{r.sourceIssue}</p>}</div>
+                <div><strong>{r.invoiceNumber}</strong><span>{r.customerName}</span>{r.routeName&&<span><strong>{r.routeName}</strong>{r.routeStopName?` / ${r.routeStopName}`:''} - {routes.find(x=>x.id===r.routeId)?routeDays(routes.find(x=>x.id===r.routeId)!):'Route schedule unavailable'}</span>}{r.scheduledDate&&<span>Scheduled: {r.scheduledDate}</span>}<small className={'cis-delivery-status '+(!r.active?'needs-review':'')}>{r.active?(r.tripId?(dailyPlans.some(plan=>plan.id===r.tripId)?'Daily draft':'Assigned'):'Ready for Dispatch'):'Needs review'}</small>{r.sourceIssue&&<p role="alert">{r.sourceIssue}</p>}</div>
               </article>
             ))}
           </section>
@@ -233,11 +242,11 @@ export default function Dispatch() {
           className="cis-collection-review"
         >
           <h2>Review {customer?.name}</h2>
-          <p>
+          <AdminExplanation><p>
             Default allocation: opening balance first, then oldest invoice. The
             server rechecks outstanding balances transactionally. Excess remains
             unallocated; no advance is automatically created.
-          </p>
+          </p></AdminExplanation>
           <label>
             <input
               type="checkbox"
@@ -334,7 +343,7 @@ export default function Dispatch() {
           </div>
         </section>
       )}
-      {role === "Admin" && <section><h2>Dispatch accounts and settings</h2><p>Manage driver logins, roles, vehicles and shops from Administration in the authenticated CIS Dispatch dev application. Existing accounts retain their own passwords.</p></section>}
+      {role === "Admin" && <section><h2>Dispatch accounts and settings</h2><p>Manage driver logins, roles, vehicles and shops from Administration in the CIS Dispatch application. Existing accounts retain their own passwords.</p></section>}
     </main>
   );
 }

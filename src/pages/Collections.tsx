@@ -168,7 +168,7 @@ const Collections = () => {
 
   return (
     <div>
-      <SectionHeader title="Collections" description={selectedShopId ? `${getShopName(selectedShopId)} overdue customer balances` : 'Overdue customer balances'} />
+      <SectionHeader title="Collections" description={selectedShopId ? getShopName(selectedShopId) : undefined} />
 
       <div style={{
         background: 'var(--role-card-background)',
@@ -182,7 +182,7 @@ const Collections = () => {
             <span style={{ width: 38, height: 38, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, background: '#FDECEC', color: '#B91C1C' }}><CircleDollarSign size={20} /></span>
             <div>
               <div style={{ color: '#FFFFFF', fontWeight: 900 }}>OVERDUE COLLECTIONS</div>
-              <div style={{ color: '#D7DEEA', fontSize: 12, marginTop: 3 }}>Customers who need payment follow-up</div>
+
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
