@@ -2,17 +2,17 @@ import {invoiceReceivableAmount} from '../utils/invoiceCharges';
 import SalesCollectionDonut from '../components/SalesCollectionDonut';
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { BarChart3, CircleDollarSign, Lightbulb, PieChart as PieChartIcon, Scale } from 'lucide-react';
+import { BarChart3, CircleDollarSign, Layers, Lightbulb, PieChart as PieChartIcon, Scale, Stethoscope, Users } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import DateRangeShortcuts from '../components/DateRangeShortcuts';
 import SectionHeader from '../components/SectionHeader';
 import SectionTileNav from '../components/SectionTileNav';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { getAppSettings, getBusinessMonthlySnapshots, getCustomerCount, getInvoices, getPayments } from '../services/firestoreService';
+import { getAppSettings, getBusinessMonthlySnapshots, getCustomerCount, getCustomers, getInvoices, getPayments } from '../services/firestoreService';
 import { buildCustomerContributionRows, buildTopFivePieRows } from '../utils/contribution';
 import { getCurrentMonthRange, getTodayDateString, isDateInRange } from '../utils/dateUtils';
 import type { DateRange } from '../utils/dateUtils';
-import type { AppSettings, BusinessMonthlySnapshot, Invoice, Payment } from '../types';
+import type { AppSettings, BusinessMonthlySnapshot, Customer, Invoice, Payment } from '../types';
 import { formatDate, formatMoney } from '../utils/formatters';
 import { latestFiveScrollStyle } from '../utils/listDisplay';
 import { getBusinessInvoices } from '../utils/openingBalance';
@@ -20,6 +20,7 @@ import { getInvoicePaymentEffect, getPendingAmount } from '../utils/paymentUtils
 import { buildCollectionHealth, buildSalesCollectionSummary, type CollectionAgeBucket } from '../utils/collectionHealth';
 import { buildCreditCapitalImpact, CAPITAL_RATE } from '../utils/creditCapitalImpact';
 import { DEFAULT_SETTINGS } from '../utils/settings';
+import { getPortalCustomerType } from '../utils/promotionAudience';
 import {
   buildShopContributionRows,
   filterRecordsForShopScope,
@@ -29,6 +30,7 @@ import {
   type AnalyticsShopScope
 } from '../utils/shops';
 
+type CustomerTypeScope = 'customer' | 'medical' | 'both';
 type ContributionGroup = 'top5' | 'next10' | 'remaining';
 type AnalyticsSection = 'overview' | 'collection' | 'capital' | 'breakeven' | 'contribution' | 'insights' | 'briefing';
 
@@ -39,6 +41,12 @@ interface ShopPieDatum {
   displayValue: number;
   percent: number;
 }
+
+const customerTypeOptions = [
+  { id: 'customer', label: 'Customer', icon: Users },
+  { id: 'medical', label: 'Medical', icon: Stethoscope },
+  { id: 'both', label: 'Both', icon: Layers }
+] satisfies { id: CustomerTypeScope; label: string; icon: typeof Users }[];
 
 const analyticsSections = [
   { id: 'overview', label: 'Performance Overview', icon: BarChart3 },
@@ -162,13 +170,16 @@ const Analytics = () => {
   const [contributionGroup, setContributionGroup] = useState<ContributionGroup>('top5');
   const [activeSection, setActiveSection] = useState<AnalyticsSection | null>(null);
   const [analyticsScope, setAnalyticsScope] = useState<AnalyticsShopScope>('overall');
-  const [customerCount, setCustomerCount] = useState(0);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [customerTypeScope, setCustomerTypeScope] = useState<CustomerTypeScope>('both');
+  const [customers, setCustomers] = useState<Customer[] | null>(null);
+  const [customerTypesError, setCustomerTypesError] = useState('');
+  const [allCustomerCount, setCustomerCount] = useState(0);
+  const [allInvoices, setInvoices] = useState<Invoice[]>([]);
+  const [allPayments, setPayments] = useState<Payment[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [monthlySnapshots, setMonthlySnapshots] = useState<BusinessMonthlySnapshot[]>([]);
-  const [collectionInvoices, setCollectionInvoices] = useState<Invoice[]>([]);
-  const [collectionPayments, setCollectionPayments] = useState<Payment[]>([]);
+  const [allCollectionInvoices, setCollectionInvoices] = useState<Invoice[]>([]);
+  const [allCollectionPayments, setCollectionPayments] = useState<Payment[]>([]);
   const [collectionHistoryKey, setCollectionHistoryKey] = useState('');
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [snapshotRangeLoaded, setSnapshotRangeLoaded] = useState('');
@@ -176,6 +187,36 @@ const Analytics = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const isMobile = useIsMobile();
+  const needsCustomerTypes = customerTypeScope !== 'both';
+  const selectedCustomers = useMemo(() => (customers ?? []).filter(customer =>
+    customerTypeScope === 'both' || getPortalCustomerType(customer) === customerTypeScope
+  ), [customers, customerTypeScope]);
+  const selectedCustomerIds = useMemo(() => needsCustomerTypes
+    ? new Set(selectedCustomers.map(customer => customer.id)) : null,
+  [needsCustomerTypes, selectedCustomers]);
+  const customerCount = needsCustomerTypes ? selectedCustomers.length : allCustomerCount;
+  const invoices = useMemo(() => selectedCustomerIds
+    ? allInvoices.filter(row => selectedCustomerIds.has(row.customerId)) : allInvoices,
+  [allInvoices, selectedCustomerIds]);
+  const payments = useMemo(() => selectedCustomerIds
+    ? allPayments.filter(row => selectedCustomerIds.has(row.customerId)) : allPayments,
+  [allPayments, selectedCustomerIds]);
+  const collectionInvoices = useMemo(() => selectedCustomerIds
+    ? allCollectionInvoices.filter(row => selectedCustomerIds.has(row.customerId)) : allCollectionInvoices,
+  [allCollectionInvoices, selectedCustomerIds]);
+  const collectionPayments = useMemo(() => selectedCustomerIds
+    ? allCollectionPayments.filter(row => selectedCustomerIds.has(row.customerId)) : allCollectionPayments,
+  [allCollectionPayments, selectedCustomerIds]);
+
+  useEffect(() => {
+    if (!needsCustomerTypes || customers !== null) return;
+    let active = true;
+    setCustomerTypesError('');
+    getCustomers()
+      .then(rows => { if (active) setCustomers(rows); })
+      .catch(err => active && setCustomerTypesError(err instanceof Error ? err.message : 'Unable to load customer types.'));
+    return () => { active = false; };
+  }, [needsCustomerTypes, customers]);
 
   const selectedDateKeys = useMemo(() => getDateKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
   const selectedMonthKeys = useMemo(() => getMonthKeysInRange(activeFromDate, activeToDate), [activeFromDate, activeToDate]);
@@ -203,19 +244,20 @@ const Analytics = () => {
         setMonthlySnapshots(snapshots);
         setSettings(appSettings);
         setSnapshotRangeLoaded(activeRangeKey);
+        setLoading(false);
       })
-      .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load monthly analytics.'))
-      .finally(() => active && setLoading(false));
+      .catch((err) => { if (active) { setError(err instanceof Error ? err.message : 'Unable to load monthly analytics.'); setLoading(false); } });
     return () => { active = false; };
   }, [activeFromDate, activeRangeKey, activeToDate]);
 
+  const needsDetailedData = !completeMonthRange
+    || !monthlySnapshotsReady
+    || analyticsScope !== 'overall'
+    || needsCustomerTypes
+    || Boolean(activeSection && ['overview', 'contribution', 'insights', 'briefing'].includes(activeSection));
   useEffect(() => {
     if (snapshotRangeLoaded !== activeRangeKey) return;
-    const needsDetailedData = !completeMonthRange
-      || !monthlySnapshotsReady
-      || analyticsScope !== 'overall'
-      || Boolean(activeSection && ['overview', 'contribution', 'insights', 'briefing'].includes(activeSection));
-    if (!needsDetailedData || detailedDataLoaded) return;
+    if (!needsDetailedData || detailedDataLoaded) { setLoading(false); return; }
     let active = true;
     setLoading(true);
     Promise.all([
@@ -229,14 +271,15 @@ const Analytics = () => {
         setInvoices(invoiceRows);
         setPayments(paymentRows);
         setLoadedDetailRange(activeRangeKey);
+        setLoading(false);
       })
-      .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load detailed analytics.'))
-      .finally(() => active && setLoading(false));
+      .catch((err) => { if (active) { setError(err instanceof Error ? err.message : 'Unable to load detailed analytics.'); setLoading(false); } });
     return () => { active = false; };
-  }, [activeFromDate, activeRangeKey, activeSection, activeToDate, analyticsScope, completeMonthRange, detailedDataLoaded, monthlySnapshotsReady, snapshotRangeLoaded]);
+  }, [activeFromDate, activeRangeKey, activeToDate, detailedDataLoaded, needsDetailedData, snapshotRangeLoaded]);
 
+  const needsCollectionHistory = ['collection', 'capital', 'breakeven'].includes(activeSection ?? '');
   useEffect(() => {
-    if (!['collection', 'capital', 'breakeven'].includes(activeSection ?? '') || collectionHistoryKey === activeToDate) return;
+    if (!needsCollectionHistory || collectionHistoryKey === activeToDate) return;
     let active = true;
     setCollectionLoading(true);
     setError('');
@@ -248,11 +291,11 @@ const Analytics = () => {
         setCollectionInvoices(invoiceRows);
         setCollectionPayments(paymentRows);
         setCollectionHistoryKey(activeToDate);
+        setCollectionLoading(false);
       })
-      .catch((err) => active && setError(err instanceof Error ? err.message : 'Unable to load collection history.'))
-      .finally(() => active && setCollectionLoading(false));
+      .catch((err) => { if (active) { setError(err instanceof Error ? err.message : 'Unable to load collection history.'); setCollectionLoading(false); } });
     return () => { active = false; };
-  }, [activeSection, activeToDate, collectionHistoryKey]);
+  }, [needsCollectionHistory, activeToDate, collectionHistoryKey]);
   const allocatedFixedCost = useMemo(
     () => selectedDateKeys.reduce((sum, date) => sum + getDailyFixedCost(settings.fixedMonthlyCosts, date), 0),
     [selectedDateKeys, settings.fixedMonthlyCosts]
@@ -360,7 +403,7 @@ const Analytics = () => {
   const invoiceIds = useMemo(() => new Set(filteredInvoices.map((invoice) => invoice.id)), [filteredInvoices]);
 
   const analysis = useMemo(() => {
-    if (analyticsScope === 'overall' && !detailedDataLoaded && completeMonthRange) {
+    if (analyticsScope === 'overall' && !needsCustomerTypes && !detailedDataLoaded && completeMonthRange) {
       const sales = monthlySnapshots.reduce((sum, row) => sum + row.totalSales, 0);
       const profit = monthlySnapshots.reduce((sum, row) => sum + row.totalProfit, 0);
       const collected = monthlySnapshots.reduce((sum, row) => sum + row.paymentsReceived, 0);
@@ -441,7 +484,7 @@ const Analytics = () => {
       negativeProfitCount: negativeProfitInvoices.length,
       negativeProfitAmount: negativeProfitInvoices.reduce((sum, invoice) => sum + Math.abs(invoice.totalProfit), 0)
     };
-  }, [allocatedFixedCost, analyticsScope, capitalImpact.capitalCost, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots]);
+  }, [allocatedFixedCost, analyticsScope, capitalImpact.capitalCost, completeMonthRange, customerCount, detailedDataLoaded, filteredInvoices, filteredPayments, invoiceIds, monthlySnapshots, needsCustomerTypes]);
 
   const customerAnalysis = useMemo(() => {
     const rows = new Map<string, { customer: string; sales: number; profit: number; invoices: number }>();
@@ -512,10 +555,10 @@ const Analytics = () => {
     return selectedMonthKeys.map((month) => {
       const monthSnapshot = monthlySnapshots.find((snapshot) => snapshot.month === month);
       const monthInvoices = filteredInvoices.filter((invoice) => invoice.date.startsWith(`${month}-`));
-      const sales = detailedDataLoaded
+      const sales = detailedDataLoaded || needsCustomerTypes
         ? monthInvoices.reduce((sum, invoice) => sum + invoice.totalSales, 0)
         : monthSnapshot?.totalSales ?? 0;
-      const grossProfit = detailedDataLoaded
+      const grossProfit = detailedDataLoaded || needsCustomerTypes
         ? monthInvoices.reduce((sum, invoice) => sum + invoice.totalProfit, 0)
         : monthSnapshot?.totalProfit ?? 0;
       const fixedCost = Math.max(0, settings.fixedMonthlyCosts);
@@ -552,7 +595,7 @@ const Analytics = () => {
         status: fixedCost <= 0 ? 'Fixed cost not set' : actualProfit >= 0 ? 'Profitable after credit cost' : 'Below breakeven after credit cost'
       };
     });
-  }, [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, detailedDataLoaded, filteredInvoices, monthlySnapshots, selectedMonthKeys, settings]);
+  }, [activeFromDate, activeToDate, analyticsScope, collectionInvoices, collectionPayments, detailedDataLoaded, filteredInvoices, monthlySnapshots, needsCustomerTypes, selectedMonthKeys, settings]);
 
   const insightCards = useMemo(() => {
     const concentration = analysis.sales > 0 && customerAnalysis.length > 0 ? (customerAnalysis[0].sales / analysis.sales) * 100 : 0;
@@ -855,17 +898,30 @@ const Analytics = () => {
     );
   };
 
-  if (loading) {
-    return <SectionHeader title="Analytics" description="Loading Firestore analytics..." />;
+  const customerTypeTiles = <div role="group" aria-label="Customer type" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: isMobile ? 8 : 12, maxWidth: 600, marginBottom: 20 }}>
+    {customerTypeOptions.map(option => {
+      const Icon = option.icon;
+      const selected = customerTypeScope === option.id;
+      return <button key={option.id} type="button" aria-pressed={selected} onClick={() => setCustomerTypeScope(option.id)} style={{ ...buttonStyle, display: 'grid', justifyItems: 'center', alignContent: 'center', gap: 8, minHeight: 76, padding: '12px 8px', color: selected ? '#FDE68A' : '#FFFFFF', background: selected ? 'linear-gradient(135deg, #11185A, #4C1D95)' : 'var(--role-card-background)', border: selected ? '2px solid #D4AF37' : '1px solid var(--role-card-border)', fontSize: isMobile ? 13 : 15 }}>
+        <Icon size={22} aria-hidden="true" /><span>{option.label}</span>
+      </button>;
+    })}
+  </div>;
+
+  if (loading || (needsCustomerTypes && (customers === null || !detailedDataLoaded))) {
+    return <div><SectionHeader title="Business Analytics" />{customerTypeTiles}
+      {customerTypesError || error ? <p role="alert">{customerTypesError || error}</p> : <p role="status">Loading analytics...</p>}
+    </div>;
   }
 
   return (
     <div>
       <SectionHeader
         title="Business Analytics"
-        description={`${analyticsScope === 'overall' ? 'Overall' : getShopName(analyticsScope)} business analysis for ${formatDate(activeFromDate)} to ${formatDate(activeToDate)}.`}
+        description={`${customerTypeOptions.find(option => option.id === customerTypeScope)?.label} | ${analyticsScope === 'overall' ? 'Overall' : getShopName(analyticsScope)} business analysis for ${formatDate(activeFromDate)} to ${formatDate(activeToDate)}.`}
       />
 
+      {customerTypeTiles}
       {error ? <div style={{ color: '#FDECEC', marginBottom: 16 }}>{error}</div> : null}
 
       <div style={{ ...cardStyle, marginBottom: 20 }}>
@@ -1089,7 +1145,7 @@ const Analytics = () => {
                 <div style={{ fontWeight: 900, marginTop: 4 }}>{formatMoney(analysis.profit)}</div>
               </div>
               <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
-                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>Book Profit After Fixed Cost</div>
+                <div style={{ color: '#D7DEEA', fontSize: 12, fontWeight: 800 }}>{needsCustomerTypes ? 'Book Profit After Shared Fixed Cost' : 'Book Profit After Fixed Cost'}</div>
                 <div style={{ fontWeight: 900, marginTop: 4, color: '#2563EB' }}>{formatMoney(analysis.netProfit)}</div>
               </div>
               <div style={{ background: 'var(--role-card-subtle)', border: '1px solid var(--role-card-border)', borderRadius: 10, padding: 12 }}>
