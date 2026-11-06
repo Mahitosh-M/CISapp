@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { BookOpen, CircleDollarSign, Download, FileText, MapPin, ShoppingCart, UserPlus } from 'lucide-react';
+import { BookOpen, CircleDollarSign, Download, FileText, MapPin, UserPlus } from 'lucide-react';
 import SectionHeader from '../components/SectionHeader';
 import { useAuth } from '../contexts/AuthContext';
 import {useSharedCustomerData} from '../hooks/useSharedCustomerData';
@@ -624,19 +624,7 @@ const Customers = () => {
 
       {isStaff || isAdmin ? (
         <div style={staffTileGridStyle}>
-          <button
-            type="button"
-            className="customer-action-tile"
-            style={staffTileStyle}
-            onClick={openStaffOrderApp}
-          >
-            <span style={staffTileIconStyle}><ShoppingCart size={20} /></span>
-            <span>
-              <span style={{ display: 'block', fontWeight: 900 }}>Order</span>
-              <span style={{ display: 'block', color: '#D7DEEA', fontSize: 12, marginTop: 4 }}>Open order entry</span>
-            </span>
-          </button>
-          {mode!=='medical'&&<button
+{mode!=='medical'&&<button
             type="button"
             className="customer-action-tile"
             style={staffTileStyle}

@@ -1,5 +1,7 @@
+import StaffOrderAlert from './StaffOrderAlert';
+import { StaffOrdersProvider } from '../contexts/StaffOrdersContext';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Truck, Users } from 'lucide-react';
+import { ShoppingCart, BarChart3, BrainCircuit, CircleDollarSign, Coins, CreditCard, FileText, Gift, Landmark, Settings, ShieldCheck, Truck, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import {SharedCustomerModeProvider,useSharedCustomerMode} from '../contexts/SharedCustomerModeContext';
@@ -18,6 +20,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { to: '/orders', label: 'Orders', icon: ShoppingCart, mobileColor: '#FDE68A', staffOnly: true },
   { to: '/customers', label: 'Customers', icon: Users, mobileColor: '#67E8F9' },
   { to: '/collections', label: 'Collections', icon: CircleDollarSign, mobileColor: '#FCA5A5', staffOnly: true },
   { to: '/invoices', label: 'Invoices', icon: FileText, mobileColor: '#86EFAC' },
@@ -45,7 +48,7 @@ const LayoutBody = () => {
     if (item.staffOnly) return userProfile?.role === 'Staff';
     return true;
   });
-  const mobilePriorityOrder = ['/invoices', '/payments', '/customers', '/collections', '/'];
+  const mobilePriorityOrder = ['/orders', '/invoices', '/payments', '/customers', '/collections', '/'];
   const mobileNavItems = isMobile
     ? [
         ...mobilePriorityOrder.flatMap((path) => visibleNavItems.filter((item) => item.to === path)),
@@ -261,5 +264,5 @@ const LayoutBody = () => {
   );
 };
 
-const Layout=()=>{const {userProfile}=useAuth();return <SharedCustomerModeProvider key={userProfile?.uid} userId={userProfile?.uid??''}><LayoutBody/></SharedCustomerModeProvider>;};
+const Layout=()=>{const {userProfile}=useAuth();return <SharedCustomerModeProvider key={userProfile?.uid} userId={userProfile?.uid??''}><StaffOrdersProvider><StaffOrderAlert/><LayoutBody/></StaffOrdersProvider></SharedCustomerModeProvider>;};
 export default Layout;
