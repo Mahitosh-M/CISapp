@@ -11,6 +11,7 @@ describe('Medical combined invoice reward',()=>{
   const invoice=inv(manual);expect(invoice.medicalReward?.finalCombinedRewardCoins).toBe(expected);expect(calculateInvoiceApcInfo(invoice,[pay()],'Tier 4',settings()).earnedApc).toBe(expected);
  });
  it('rejects an above-cap proposal with a concrete maximum',()=>expect(()=>inv(200)).toThrow('160 coins'));
+ it.each([[2432,24],[2468,25],[2450,25]])('rounds a fractional normal coin entitlement from profit %i to nearest whole coin %i',(profit,expected)=>{expect(calculateMedicalReward(profit,1,8)).toMatchObject({levelRewardCoins:expected,finalCombinedRewardCoins:expected,valid:true});});
  it.each([5,4,3,2])('uses configured level percentage %s',level=>{const result=calculateMedicalReward(2000,level,8);expect(result.maximumAllowedCoins).toBe(160);expect(result.levelRewardCoins).toBe(20*level);});
  it.each(['customer','header','Medical','',undefined])('rejects promotional data for non-Medical type %s',type=>expect(()=>buildMedicalReward(type,'Tier 4',2000,settings(),1)).toThrow('non-MEDICAL'));
  it('leaves normal customer reward policy unchanged',()=>{expect(buildMedicalReward('customer','Tier 4',2000,settings())).toBeUndefined();const invoice=inv();delete invoice.medicalReward;expect(calculateInvoiceApcInfo(invoice,[pay()],'Tier 4',settings()).earnedApc).toBe(40);});

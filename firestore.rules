@@ -1335,7 +1335,7 @@ service cloud.firestore {
         && data.costAmount>=0 && data.transportAmount>=0 && data.totalSales==data.salesAmount
         && data.totalCost==data.costAmount+data.transportAmount && data.totalProfit==data.totalSales-data.totalCost
         && r.maximumAllowedCoins is int && r.maximumAllowedCoins==int(profit * r.maximumPercentage / 100 + 0.000000001)
-        && r.normalRewardValue is number && r.normalRewardValue == profit * r.levelPercentage / 100
+        && r.normalRewardValue is number && r.normalRewardValue == profit * r.levelPercentage / 100.0
         && r.levelRewardCoins is int && r.levelRewardCoins==int(r.normalRewardValue + 0.5)
         && r.manualTroikaaCoins<=r.maximumAllowedCoins && r.levelRewardCoins<=r.maximumAllowedCoins
         && r.finalCombinedRewardCoins is int && r.finalCombinedRewardCoins==(r.levelRewardCoins > r.manualTroikaaCoins ? r.levelRewardCoins : r.manualTroikaaCoins)
