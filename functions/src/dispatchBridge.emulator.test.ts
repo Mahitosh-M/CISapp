@@ -373,6 +373,9 @@ test(
     let seq=0;
     async function command(who:any,c:any,id='live-op-'+(++seq)){return ops.operation(who,{id,actorId:who.actorId,command:c},await api.pull(who));}
     const t={routeTemplateId:'integration-route',id:'trip-live',name:'Connected route',date:'2026-10-19',startShopId:'SHOP_A',endShopId:'SHOP_S',vehicleId:'van-live',primaryDriverId:'driver-a',companionId:null,openingAdvance:0,revision:0,stops:[{id:'live-stop',customerId:'cis-customer:customer-a',jobId:'cis-job:invoice-c',kind:'Delivery',completed:true}],status:'Closed',closing:9999,cashReceived:999999,approvedOdometer:true};
+ const plannedId=(await db.doc('dispatchDeliveryRequests/invoice-c').get()).data()!.tripId;
+ const planned=(await db.doc('dispatchOperationalState/main').get()).data()!.state.trips.find((row:any)=>row.id===plannedId);
+ t.id=plannedId;t.revision=planned.revision;
     await assert.rejects(()=>command(manager,{type:'saveTrip',value:{...t,routeTemplateId:'missing-template'}}),/Weekly route/);
     await command(manager,{type:'saveTrip',value:t});
     let stored=(await db.doc('dispatchOperationalState/main').get()).data()!.state;

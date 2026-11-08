@@ -21,6 +21,9 @@ test('Smart routes: immutable versions, location scope, trusted release and prof
  await assert.rejects(catalog.saveCustomerDeliveryLocation(manager,{customerId:'smart-customer',location:override}),/Admin/);await assert.rejects(catalog.invoiceDeliveryLocation({...manager,shopIds:['SHOP_S']},{invoiceId:'smart-invoice'}),/outside/);await assert.rejects(reports.routeProfitability(driver,{from:'2026-11-02',to:'2026-11-02'}),/drivers/);
  await saveMaster(admin,{kind:'vehicles',id:'smart-van',value:{registration:'TEST-ONLY',type:'Van',fuelType:'Diesel',baseline:0,expectedMileage:15,active:true,homeShopId:'SHOP_A'}});
  const trip={id:'smart-trip',name:'Smart trip',date:'2026-11-02',startShopId:'SHOP_A',endShopId:'SHOP_S',vehicleId:'smart-van',primaryDriverId:driver.actorId,companionId:null,openingAdvance:0,revision:0,routeTemplateId:route.id,stops:[{id:'smart-stop',kind:'Delivery',customerId:'cis-customer:smart-customer',jobId:'cis-job:smart-invoice',completed:false}]};
+ const plannedId=(await db.doc('dispatchDeliveryRequests/smart-invoice').get()).data()!.tripId;
+ const planned=(await db.doc('dispatchOperationalState/main').get()).data()!.state.trips.find((row:any)=>row.id===plannedId);
+ trip.id=plannedId;trip.revision=planned.revision;
  let seq=0;const command=async(who:any,command:any,cloud?:any)=>ops.operation(who,{id:'smart-op-'+(++seq),actorId:who.actorId,command},cloud??await api.pull(who));
  await command(manager,{type:'saveTrip',value:trip});const cached=await api.pull(manager);
  await db.doc('dispatchDeliveryRequests/smart-invoice').update({location:{...override,lat:15.963}});

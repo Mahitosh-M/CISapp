@@ -79,3 +79,4 @@ export {cleanupClosedDispatch} from './dispatchRetention';
 export {configureInvoiceLateCharges,registerNewInvoiceLateCharges,enrollEditedInvoiceLateCharges,assessDueInvoiceLateCharges,reopenInvoiceLateCharges} from './invoiceLateCharges';
 
 export { createOrderAdminSession } from './orderAdminSession';
+export { manageCashTransfer, createCashExpense } from './cashTransfers';
